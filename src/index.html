@@ -13,7 +13,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="lucide-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.0.1</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v__APP_VERSION__</span>
 		</div>
 
 		<!-- Profile Dropdown Trigger (Replaces old sidebar) -->
@@ -123,68 +123,68 @@
 					<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-3 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
 				</div>
 			</div>
-		</div>
-		<!-- Workspace Content Container -->
-		<div class="flex-1 overflow-hidden relative">
+			<!-- Workspace Content Container -->
+			<div class="flex-1 overflow-hidden relative">
 
-			<!-- Scan state prompt overlay -->
-			<div id="prompt-to-scan-view" class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-gray-900 z-10">
-				<i class="lucide-refresh-cw text-gray-600 text-4xl mb-3 animate-pulse"></i>
-				<h4 class="text-xs font-bold text-gray-300">ライブラリの比較がまだ行われていません</h4>
-				<p class="text-xxs text-gray-500 mt-1 max-w-xs">最下部の「比較開始」ボタンをクリックして、iTunesとスマホ内の曲の差分を比較してください。</p>
-			</div>
+				<!-- Scan state prompt overlay -->
+				<div id="prompt-to-scan-view" class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-gray-900 z-10">
+					<i class="lucide-refresh-cw text-gray-600 text-4xl mb-3 animate-pulse"></i>
+					<h4 class="text-xs font-bold text-gray-300">ライブラリの比較がまだ行われていません</h4>
+					<p class="text-xxs text-gray-500 mt-1 max-w-xs">最下部の「比較開始」ボタンをクリックして、iTunesとスマホ内の曲の差分を比較してください。</p>
+				</div>
 
-			<!-- Group Accordion Trees (Artist, Album, Genre sharing same viewport) -->
-			<div id="tree-container" class="h-full overflow-y-auto p-4 space-y-2 hidden">
-				<!-- Dynamic Accordion elements are injected here -->
-			</div>
+				<!-- Group Accordion Trees (Artist, Album, Genre sharing same viewport) -->
+				<div id="tree-container" class="h-full overflow-y-auto p-4 space-y-2 hidden">
+					<!-- Dynamic Accordion elements are injected here -->
+				</div>
 
-			<!-- Track Flat Table (Virtual Scroll Viewport) -->
-			<div id="track-container" class="h-full hidden">
-				<!-- Resizable Colgroup Table Header -->
-				<div class="h-8 bg-gray-800 border-b border-gray-700 flex items-center text-xxs font-semibold uppercase tracking-wider text-gray-400 sticky top-0 z-20">
-					<div class="flex-1 flex items-center w-full" id="table-header-row">
-						<!-- Checking column -->
-						<div class="flex-shrink-0 text-center flex items-center justify-center" style="width: 50px;">
-							<input id="chk-master" type="checkbox" class="rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+				<!-- Track Flat Table (Virtual Scroll Viewport) -->
+				<div id="track-container" class="h-full hidden">
+					<!-- Resizable Colgroup Table Header -->
+					<div class="h-8 bg-gray-800 border-b border-gray-700 flex items-center text-xxs font-semibold uppercase tracking-wider text-gray-400 sticky top-0 z-20">
+						<div class="flex-1 flex items-center w-full" id="table-header-row">
+							<!-- Checking column -->
+							<div class="flex-shrink-0 text-center flex items-center justify-center" style="width: 50px;">
+								<input id="chk-master" type="checkbox" class="rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+							</div>
+							<!-- Columns with resizing headers -->
+							<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 250px;" id="th-title">
+								<span>曲名</span>
+								<div class="resizer" id="resizer-title"></div>
+							</div>
+							<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-artist">
+								<span>アーティスト</span>
+								<div class="resizer" id="resizer-artist"></div>
+							</div>
+							<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-album">
+								<span>アルバム</span>
+								<div class="resizer" id="resizer-album"></div>
+							</div>
+							<div class="flex-shrink-0 px-2 relative truncate-cell text-center" style="width: 60px;" id="th-track">
+								<span>トラック</span>
+								<div class="resizer" id="resizer-track"></div>
+							</div>
+							<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 130px;" id="th-genre">
+								<span>ジャンル</span>
+								<div class="resizer" id="resizer-genre"></div>
+							</div>
+							<!-- Filler column for background status -->
+							<div class="flex-1 px-2">ステータス表示</div>
 						</div>
-						<!-- Columns with resizing headers -->
-						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 250px;" id="th-title">
-							<span>曲名</span>
-							<div class="resizer" id="resizer-title"></div>
+					</div>
+
+					<!-- Virtual Scroll viewport -->
+					<div id="virtual-scroll-viewport">
+						<!-- Height spacing spacer -->
+						<div id="virtual-scroll-canvas"></div>
+						<!-- Rendered rows container -->
+						<div id="virtual-scroll-content">
+							<!-- Rows injected dynamically via virtual scroll engine -->
 						</div>
-						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-artist">
-							<span>アーティスト</span>
-							<div class="resizer" id="resizer-artist"></div>
-						</div>
-						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-album">
-							<span>アルバム</span>
-							<div class="resizer" id="resizer-album"></div>
-						</div>
-						<div class="flex-shrink-0 px-2 relative truncate-cell text-center" style="width: 60px;" id="th-track">
-							<span>トラック</span>
-							<div class="resizer" id="resizer-track"></div>
-						</div>
-						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 130px;" id="th-genre">
-							<span>ジャンル</span>
-							<div class="resizer" id="resizer-genre"></div>
-						</div>
-						<!-- Filler column for background status -->
-						<div class="flex-1 px-2">ステータス表示</div>
 					</div>
 				</div>
 
-				<!-- Virtual Scroll viewport -->
-				<div id="virtual-scroll-viewport">
-					<!-- Height spacing spacer -->
-					<div id="virtual-scroll-canvas"></div>
-					<!-- Rendered rows container -->
-					<div id="virtual-scroll-content">
-						<!-- Rows injected dynamically via virtual scroll engine -->
-					</div>
-				</div>
 			</div>
-
 		</div>
 	</div>
 

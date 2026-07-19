@@ -1,10 +1,16 @@
 import tailwindcss from "@tailwindcss/vite";
+import { readFileSync } from "node:fs";
 import { defineConfig } from "vite";
+
+const pkg = JSON.parse(readFileSync("./package.json", "utf-8"));
 
 export default defineConfig({
 	root: "src",
 	base: "./",
 
+	define: {
+		__APP_VERSION__: JSON.stringify(pkg.version),
+	},
 	build: {
 		outDir: "../dist",
 		emptyOutDir: true,
@@ -31,5 +37,13 @@ export default defineConfig({
 			},
 		},
 	},
-	plugins: [tailwindcss()],
+	plugins: [
+		{
+			name: "html-version",
+			transformIndexHtml(html) {
+				return html.replace("__APP_VERSION__", pkg.version);
+			},
+		},
+		tailwindcss(),
+	],
 });

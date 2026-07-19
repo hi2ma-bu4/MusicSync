@@ -1,6 +1,6 @@
 {
   "name": "musicsync",
-  "version": "0.0.1",
+  "version": "0.1.1",
   "description": "iTunesのmusicフォルダをイイ感じに同期する",
   "author": "hi2ma-bu4",
   "keywords": [],
@@ -20,8 +20,7 @@
     "electron-store": "^11.0.2",
     "lucide-static": "^1.25.0",
     "music-metadata": "^11.14.0",
-    "tailwindcss": "^4.3.3",
-    "virtua": "^0.49.3"
+    "tailwindcss": "^4.3.3"
   },
   "devDependencies": {
     "@chialab/esbuild-plugin-commonjs": "^0.19.1",

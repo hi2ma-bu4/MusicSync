@@ -1,13 +1,9 @@
 // src/main.ts
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
-import Store from "electron-store";
-import { parseFile } from "music-metadata";
-import fs from "node:fs";
+import { app as app2 } from "electron";
+
+// src/main/index.ts
+import { BrowserWindow } from "electron";
 import path from "node:path";
-import { fileURLToPath } from "node:url";
-var __dirname = path.dirname(fileURLToPath(import.meta.url));
-var store = new Store();
-var lastScanResults = {};
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -19,73 +15,20 @@ function createWindow() {
   });
   win.loadFile(path.join(process.cwd(), "dist", "index.html"));
 }
-app.whenReady().then(createWindow);
-ipcMain.handle("get-profiles", () => {
-  return store.get("profiles", []);
-});
-ipcMain.handle("save-profile", (_event, profile) => {
-  const profiles = store.get("profiles", []);
-  const index = profiles.findIndex((p) => p.id === profile.id);
-  if (index > -1) {
-    profiles[index] = profile;
-  } else {
-    profiles.push(profile);
-  }
-  store.set("profiles", profiles);
-  return profiles;
-});
-ipcMain.handle("delete-profile", (_event, id) => {
-  let profiles = store.get("profiles", []);
-  profiles = profiles.filter((p) => p.id !== id);
-  store.set("profiles", profiles);
-  return profiles;
-});
-ipcMain.handle("get-settings", () => {
-  return store.get("settings", {
-    colorMissing: "#22c55e",
-    colorUpdated: "#f59e0b",
-    colorSynced: "#94a3b8",
-    colorPhoneOnly: "#ef4444"
-  });
-});
-ipcMain.handle("save-settings", (_event, settings) => {
-  store.set("settings", settings);
-});
-ipcMain.handle("select-folder", async () => {
-  const result = await dialog.showOpenDialog({
-    properties: ["openDirectory"]
-  });
-  if (result.canceled) {
-    return null;
-  }
-  return result.filePaths[0];
-});
-var cachesDir = path.join(app.getPath("userData"), "caches");
-if (!fs.existsSync(cachesDir)) {
-  fs.mkdirSync(cachesDir, { recursive: true });
-}
-function getCachePath(profileId, suffix) {
-  return path.join(cachesDir, `${profileId}_${suffix}.json`);
-}
-function loadCache(profileId, suffix) {
-  const cachePath = getCachePath(profileId, suffix);
-  if (fs.existsSync(cachePath)) {
-    try {
-      return JSON.parse(fs.readFileSync(cachePath, "utf-8"));
-    } catch (e) {
-      console.error("Failed to parse cache", e);
-    }
-  }
-  return {};
-}
-function saveCache(profileId, suffix, cache) {
-  const cachePath = getCachePath(profileId, suffix);
-  try {
-    fs.writeFileSync(cachePath, JSON.stringify(cache), "utf-8");
-  } catch (e) {
-    console.error("Failed to save cache", e);
-  }
-}
+
+// src/main/ipc.ts
+import { dialog, ipcMain } from "electron";
+import Store from "electron-store";
+
+// src/main/scanner.ts
+import { app } from "electron";
+import fs2 from "node:fs";
+import path3 from "node:path";
+
+// src/main/utils.ts
+import { parseFile } from "music-metadata";
+import fs from "node:fs";
+import path2 from "node:path";
 function normText(val) {
   if (!val) return "";
   return String(val).trim().toLowerCase().normalize("NFKC").replace(/[\s\-_]+/g, " ");
@@ -110,14 +53,14 @@ async function findMusicFiles(dir, baseDir = dir) {
   }
   const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
   for (const item of list) {
-    const resPath = path.join(dir, item.name);
+    const resPath = path2.join(dir, item.name);
     if (item.isDirectory()) {
       const subFiles = await findMusicFiles(resPath, baseDir);
       results.push(...subFiles);
     } else {
-      const ext = path.extname(item.name).toLowerCase();
+      const ext = path2.extname(item.name).toLowerCase();
       if (validExtensions.has(ext)) {
-        const relativePath = path.relative(baseDir, resPath).replace(/\\/g, "/");
+        const relativePath = path2.relative(baseDir, resPath).replace(/\\/g, "/");
         results.push({ filePath: resPath, relativePath });
       }
     }
@@ -128,7 +71,7 @@ async function getTrackMetadata(filePath, relativePath) {
   try {
     const stats = await fs.promises.stat(filePath);
     const metadata = await parseFile(filePath, { skipCovers: false });
-    const title = metadata.common.title || path.basename(filePath, path.extname(filePath));
+    const title = metadata.common.title || path2.basename(filePath, path2.extname(filePath));
     const artist = metadata.common.artist || "Unknown Artist";
     const album = metadata.common.album || "Unknown Album";
     let trackStr = "";
@@ -159,7 +102,7 @@ async function getTrackMetadata(filePath, relativePath) {
       id: "",
       filePath,
       relativePath,
-      title: path.basename(filePath, path.extname(filePath)),
+      title: path2.basename(filePath, path2.extname(filePath)),
       artist: "Unknown Artist",
       album: "Unknown Album",
       track: "",
@@ -171,12 +114,37 @@ async function getTrackMetadata(filePath, relativePath) {
     };
   }
 }
-ipcMain.handle("start-scan", async (event, profileId) => {
-  const profiles = store.get("profiles", []);
-  const profile = profiles.find((p) => p.id === profileId);
-  if (!profile) {
-    throw new Error("Profile not found");
+
+// src/main/scanner.ts
+var lastScanResults = {};
+var cachesDir = path3.join(app.getPath("userData"), "caches");
+if (!fs2.existsSync(cachesDir)) {
+  fs2.mkdirSync(cachesDir, { recursive: true });
+}
+function getCachePath(profileId, suffix) {
+  return path3.join(cachesDir, `${profileId}_${suffix}.json`);
+}
+function loadCache(profileId, suffix) {
+  const cachePath = getCachePath(profileId, suffix);
+  if (fs2.existsSync(cachePath)) {
+    try {
+      return JSON.parse(fs2.readFileSync(cachePath, "utf-8"));
+    } catch (e) {
+      console.error("Failed to parse cache", e);
+    }
   }
+  return {};
+}
+function saveCache(profileId, suffix, cache) {
+  const cachePath = getCachePath(profileId, suffix);
+  try {
+    fs2.writeFileSync(cachePath, JSON.stringify(cache), "utf-8");
+  } catch (e) {
+    console.error("Failed to save cache", e);
+  }
+}
+async function runScan(profile, event) {
+  const profileId = profile.id;
   const sendProgress = (step, message, progress, details) => {
     event.sender.send("scan-progress", { step, message, progress, ...details });
   };
@@ -199,7 +167,7 @@ ipcMain.handle("start-scan", async (event, profileId) => {
       sendProgress("itunes_parse", `iTunes\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
     }
     try {
-      const stats = await fs.promises.stat(file.filePath);
+      const stats = await fs2.promises.stat(file.filePath);
       let meta = itunesCache[file.relativePath];
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
         newItunesCache[file.relativePath] = meta;
@@ -223,7 +191,7 @@ ipcMain.handle("start-scan", async (event, profileId) => {
       sendProgress("phone_parse", `\u30B9\u30DE\u30DB\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
     }
     try {
-      const stats = await fs.promises.stat(file.filePath);
+      const stats = await fs2.promises.stat(file.filePath);
       let meta = phoneCache[file.relativePath];
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
         newPhoneCache[file.relativePath] = meta;
@@ -394,34 +362,31 @@ ipcMain.handle("start-scan", async (event, profileId) => {
   }
   lastScanResults[profileId] = results;
   sendProgress("done", "\u6BD4\u8F03\u5B8C\u4E86", 100);
-});
-ipcMain.handle("get-scan-result", (_event, profileId) => {
-  return lastScanResults[profileId] || [];
-});
+}
+
+// src/main/sync.ts
+import fs3 from "node:fs";
+import path4 from "node:path";
 async function cleanEmptyDirsRecursive(dir, rootDir) {
   try {
-    const list = await fs.promises.readdir(dir, { withFileTypes: true });
+    const list = await fs3.promises.readdir(dir, { withFileTypes: true });
     for (const item of list) {
       if (item.isDirectory()) {
-        const sub = path.join(dir, item.name);
+        const sub = path4.join(dir, item.name);
         await cleanEmptyDirsRecursive(sub, rootDir);
       }
     }
     if (dir !== rootDir) {
-      const files = await fs.promises.readdir(dir);
+      const files = await fs3.promises.readdir(dir);
       if (files.length === 0) {
-        await fs.promises.rmdir(dir);
+        await fs3.promises.rmdir(dir);
       }
     }
   } catch (e) {
   }
 }
-ipcMain.handle("execute-sync", async (event, profileId, options) => {
-  const profiles = store.get("profiles", []);
-  const profile = profiles.find((p) => p.id === profileId);
-  if (!profile) {
-    throw new Error("Profile not found");
-  }
+async function runSync(profile, options, event) {
+  const profileId = profile.id;
   const { copyTrackIds, moveTrackIds, deleteTrackIds } = options;
   const scanItems = lastScanResults[profileId] || [];
   const sendProgress = (status, message, progress, logs2) => {
@@ -445,8 +410,8 @@ ipcMain.handle("execute-sync", async (event, profileId, options) => {
         const item = scanItems.find((x) => x.id === id);
         if (item && item.phoneTrack) {
           try {
-            if (fs.existsSync(item.phoneTrack.filePath)) {
-              await fs.promises.unlink(item.phoneTrack.filePath);
+            if (fs3.existsSync(item.phoneTrack.filePath)) {
+              await fs3.promises.unlink(item.phoneTrack.filePath);
             }
             logAndSend(`\u524A\u9664\u6210\u529F: ${item.phoneTrack.relativePath}`, getPct());
           } catch (e) {
@@ -463,16 +428,16 @@ ipcMain.handle("execute-sync", async (event, profileId, options) => {
         if (item && item.itunesTrack && item.phoneTrack) {
           const oldPath = item.phoneTrack.filePath;
           const newRelative = item.itunesTrack.relativePath;
-          const newPath = path.join(profile.phonePath, newRelative);
+          const newPath = path4.join(profile.phonePath, newRelative);
           try {
-            if (fs.existsSync(oldPath)) {
-              const targetDir = path.dirname(newPath);
-              await fs.promises.mkdir(targetDir, { recursive: true });
+            if (fs3.existsSync(oldPath)) {
+              const targetDir = path4.dirname(newPath);
+              await fs3.promises.mkdir(targetDir, { recursive: true });
               try {
-                await fs.promises.rename(oldPath, newPath);
+                await fs3.promises.rename(oldPath, newPath);
               } catch (e) {
-                await fs.promises.copyFile(oldPath, newPath);
-                await fs.promises.unlink(oldPath);
+                await fs3.promises.copyFile(oldPath, newPath);
+                await fs3.promises.unlink(oldPath);
               }
               logAndSend(`\u79FB\u52D5\u6210\u529F: ${item.phoneTrack.relativePath} -> ${newRelative}`, getPct());
               item.phoneTrack.filePath = newPath;
@@ -495,12 +460,12 @@ ipcMain.handle("execute-sync", async (event, profileId, options) => {
         if (item && item.itunesTrack) {
           const sourcePath = item.itunesTrack.filePath;
           const relative = item.itunesTrack.relativePath;
-          const targetPath = path.join(profile.phonePath, relative);
+          const targetPath = path4.join(profile.phonePath, relative);
           try {
-            if (fs.existsSync(sourcePath)) {
-              const targetDir = path.dirname(targetPath);
-              await fs.promises.mkdir(targetDir, { recursive: true });
-              await fs.promises.copyFile(sourcePath, targetPath);
+            if (fs3.existsSync(sourcePath)) {
+              const targetDir = path4.dirname(targetPath);
+              await fs3.promises.mkdir(targetDir, { recursive: true });
+              await fs3.promises.copyFile(sourcePath, targetPath);
               logAndSend(`\u30B3\u30D4\u30FC\u6210\u529F: ${relative}`, getPct());
             } else {
               logAndSend(`\u30A8\u30E9\u30FC: \u30B3\u30D4\u30FC\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
@@ -520,5 +485,75 @@ ipcMain.handle("execute-sync", async (event, profileId, options) => {
     logs.push(`\u81F4\u547D\u7684\u306A\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F: ${e.message}`);
     sendProgress("error", "\u30A8\u30E9\u30FC\u7D42\u4E86", getPct(), logs);
   }
+}
+
+// src/main/ipc.ts
+var store = new Store();
+function registerIpcHandlers() {
+  ipcMain.handle("get-profiles", () => {
+    return store.get("profiles", []);
+  });
+  ipcMain.handle("save-profile", (_event, profile) => {
+    const profiles = store.get("profiles", []);
+    const index = profiles.findIndex((p) => p.id === profile.id);
+    if (index > -1) {
+      profiles[index] = profile;
+    } else {
+      profiles.push(profile);
+    }
+    store.set("profiles", profiles);
+    return profiles;
+  });
+  ipcMain.handle("delete-profile", (_event, id) => {
+    let profiles = store.get("profiles", []);
+    profiles = profiles.filter((p) => p.id !== id);
+    store.set("profiles", profiles);
+    return profiles;
+  });
+  ipcMain.handle("get-settings", () => {
+    return store.get("settings", {
+      colorMissing: "#22c55e",
+      colorUpdated: "#f59e0b",
+      colorSynced: "#94a3b8",
+      colorPhoneOnly: "#ef4444"
+    });
+  });
+  ipcMain.handle("save-settings", (_event, settings) => {
+    store.set("settings", settings);
+  });
+  ipcMain.handle("select-folder", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"]
+    });
+    if (result.canceled) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+  ipcMain.handle("start-scan", async (event, profileId) => {
+    const profiles = store.get("profiles", []);
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+    await runScan(profile, event);
+  });
+  ipcMain.handle("get-scan-result", (_event, profileId) => {
+    return lastScanResults[profileId] || [];
+  });
+  ipcMain.handle("execute-sync", async (event, profileId, options) => {
+    const profiles = store.get("profiles", []);
+    const profile = profiles.find((p) => p.id === profileId);
+    if (!profile) {
+      throw new Error("Profile not found");
+    }
+    await runSync(profile, options, event);
+  });
+}
+
+// src/main.ts
+app2.whenReady().then(() => {
+  registerIpcHandlers();
+  createWindow();
 });
 //# sourceMappingURL=main.js.map
