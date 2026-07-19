@@ -618,6 +618,7 @@ function setupEventListeners() {
 
 			applyFilterAndRender();
 		} catch (e: any) {
+			console.error("Error during scan:", e);
 			cancelProgress();
 			alert("スキャン中にエラーが発生しました: " + e.message);
 			elModalProgress.classList.add("hidden");
@@ -819,6 +820,7 @@ function startSyncExecution() {
 			}
 		})
 		.catch((e: any) => {
+			console.error("Error during sync execution:", e);
 			cancelProgress();
 			alert("同期処理中に重大なエラーが発生しました: " + e.message);
 			elModalProgress.classList.add("hidden");

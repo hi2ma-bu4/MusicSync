@@ -1,28 +1,30 @@
+"use strict";
+
 // src/preload.ts
-import { contextBridge, ipcRenderer } from "electron";
-contextBridge.exposeInMainWorld("api", {
-  selectFolder: () => ipcRenderer.invoke("select-folder"),
-  getProfiles: () => ipcRenderer.invoke("get-profiles"),
-  saveProfile: (profile) => ipcRenderer.invoke("save-profile", profile),
-  deleteProfile: (id) => ipcRenderer.invoke("delete-profile", id),
-  getSettings: () => ipcRenderer.invoke("get-settings"),
-  saveSettings: (settings) => ipcRenderer.invoke("save-settings", settings),
-  startScan: (profileId) => ipcRenderer.invoke("start-scan", profileId),
-  getScanResult: (profileId) => ipcRenderer.invoke("get-scan-result", profileId),
-  executeSync: (profileId, options) => ipcRenderer.invoke("execute-sync", profileId, options),
-  getThumbnail: (profileId, albumName) => ipcRenderer.invoke("get-thumbnail", profileId, albumName),
+var import_electron = require("electron");
+import_electron.contextBridge.exposeInMainWorld("api", {
+  selectFolder: () => import_electron.ipcRenderer.invoke("select-folder"),
+  getProfiles: () => import_electron.ipcRenderer.invoke("get-profiles"),
+  saveProfile: (profile) => import_electron.ipcRenderer.invoke("save-profile", profile),
+  deleteProfile: (id) => import_electron.ipcRenderer.invoke("delete-profile", id),
+  getSettings: () => import_electron.ipcRenderer.invoke("get-settings"),
+  saveSettings: (settings) => import_electron.ipcRenderer.invoke("save-settings", settings),
+  startScan: (profileId) => import_electron.ipcRenderer.invoke("start-scan", profileId),
+  getScanResult: (profileId) => import_electron.ipcRenderer.invoke("get-scan-result", profileId),
+  executeSync: (profileId, options) => import_electron.ipcRenderer.invoke("execute-sync", profileId, options),
+  getThumbnail: (profileId, albumName) => import_electron.ipcRenderer.invoke("get-thumbnail", profileId, albumName),
   onScanProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
-    ipcRenderer.on("scan-progress", listener);
+    import_electron.ipcRenderer.on("scan-progress", listener);
     return () => {
-      ipcRenderer.removeListener("scan-progress", listener);
+      import_electron.ipcRenderer.removeListener("scan-progress", listener);
     };
   },
   onSyncProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
-    ipcRenderer.on("sync-progress", listener);
+    import_electron.ipcRenderer.on("sync-progress", listener);
     return () => {
-      ipcRenderer.removeListener("sync-progress", listener);
+      import_electron.ipcRenderer.removeListener("sync-progress", listener);
     };
   }
 });

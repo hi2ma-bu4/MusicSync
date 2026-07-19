@@ -11,7 +11,7 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 				const bgOverlay = document.createElement("div");
 				bgOverlay.className = "absolute inset-0 pointer-events-none bg-cover bg-center z-0";
 				bgOverlay.style.backgroundImage = `url("${dataUri}")`;
-				bgOverlay.style.opacity = "0.9"; // 80% transparency
+				bgOverlay.style.opacity = "0.8"; // 80% transparency
 				el.prepend(bgOverlay);
 
 				Array.from(el.children).forEach((child) => {
