@@ -1,12 +1,12 @@
-import { pushHistoryState, state } from "../state";
+import { PHONE_DISPLAY_LABEL, pushHistoryState, state } from "../state";
 
 // Returns color styles representing track status
 export function getStatusDot(track: any): string {
 	const label = {
-		missing: "スマホに未存在 (新規)",
+		missing: `${PHONE_DISPLAY_LABEL}に未存在 (新規)`,
 		updated: "メタデータ変更あり",
 		synced: "同期済",
-		phone_only: "スマホ側のみに存在",
+		phone_only: `${PHONE_DISPLAY_LABEL}側のみに存在`,
 	}[track.status as "missing" | "updated" | "synced" | "phone_only"];
 
 	let pathWarnIcon = "";

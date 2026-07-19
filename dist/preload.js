@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("api", {
   startScan: (profileId) => ipcRenderer.invoke("start-scan", profileId),
   getScanResult: (profileId) => ipcRenderer.invoke("get-scan-result", profileId),
   executeSync: (profileId, options) => ipcRenderer.invoke("execute-sync", profileId, options),
+  getThumbnail: (profileId, albumName) => ipcRenderer.invoke("get-thumbnail", profileId, albumName),
   onScanProgress: (callback) => {
     const listener = (_event, progress) => callback(progress);
     ipcRenderer.on("scan-progress", listener);

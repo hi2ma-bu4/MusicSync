@@ -2,7 +2,11 @@ import { WindowAPI } from "./types";
 
 export type { WindowAPI };
 
-// Mock API for local browser / Playwright testing environments (Graceful Degradation)
+// ============================================================================
+// 【デバッグ用フォールバック処理 / DEV DEBUGGING FALLBACK】
+// ※本番のElectron動作時は window.api が存在するため、以下のモックは実行されません。
+// ※This mock is strictly for local browser / Playwright web development and testing.
+// ============================================================================
 if (!window.api) {
 	console.warn("window.api is not defined. Initializing mock API for web development/testing.");
 	(window as any).api = {
@@ -120,6 +124,10 @@ if (!window.api) {
 		},
 		executeSync: async (_profileId: string, _options: any) => {
 			console.log("Mock executeSync");
+		},
+		getThumbnail: async (_profileId: string, _albumName: string) => {
+			// デバッグ用フォールバック処理 (サムネイル画像モック)
+			return null;
 		},
 		onScanProgress: (callback: any) => {
 			setTimeout(() => callback({ step: "itunes_list", message: "iTunesフォルダを検索中...", progress: 10 }), 100);

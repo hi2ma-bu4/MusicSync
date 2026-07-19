@@ -1,5 +1,176 @@
-import { pushHistoryState, state } from "../state";
+import { api } from "../api";
+import { CONFIG, pushHistoryState, state } from "../state";
 import { getStatusDot, setCheckboxState, toggleCopyTrackSelection, toggleDeleteTrackSelection } from "./utils";
+
+function applyAlbumArtBackground(elementId: string, albumName: string) {
+	if (!state.currentProfileId) return;
+	api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
+		if (dataUri) {
+			const el = document.getElementById(elementId);
+			if (el) {
+				const bgOverlay = document.createElement("div");
+				bgOverlay.className = "absolute inset-0 pointer-events-none bg-cover bg-center z-0";
+				bgOverlay.style.backgroundImage = `url("${dataUri}")`;
+				bgOverlay.style.opacity = "0.9"; // 80% transparency
+				el.prepend(bgOverlay);
+
+				Array.from(el.children).forEach((child) => {
+					if (child !== bgOverlay) {
+						const htmlChild = child as HTMLElement;
+						htmlChild.classList.add("relative", "z-10");
+						if (htmlChild.classList.contains("accordion-content")) {
+							htmlChild.style.backgroundColor = "rgba(17, 24, 39, 0.4)";
+						}
+					}
+				});
+			}
+		}
+	});
+}
+
+export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (tab: "artist" | "album" | "track", targetName: string) => void) {
+	container.innerHTML = "";
+
+	const query = state.searchQuery.trim().toLowerCase();
+	if (!query) return;
+
+	const matchedAlbums: string[] = [];
+	const matchedArtists: string[] = [];
+	const matchedTracks: any[] = [];
+
+	const albumSet = new Set<string>();
+	const artistSet = new Set<string>();
+
+	state.scannedTracks.forEach((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (!meta) return;
+		const title = meta.title || "";
+		const artist = meta.artist || "";
+		const album = meta.album || "";
+
+		if (title.toLowerCase().includes(query)) {
+			matchedTracks.push(t);
+		}
+		if (album.toLowerCase().includes(query) && !albumSet.has(album)) {
+			albumSet.add(album);
+			matchedAlbums.push(album);
+		}
+		if (artist.toLowerCase().includes(query) && !artistSet.has(artist)) {
+			artistSet.add(artist);
+			matchedArtists.push(artist);
+		}
+	});
+
+	matchedAlbums.sort();
+	matchedArtists.sort();
+	matchedTracks.sort((a, b) => {
+		const ma = a.itunesTrack || a.phoneTrack;
+		const mb = b.itunesTrack || b.phoneTrack;
+		return (ma?.title || "").localeCompare(mb?.title || "");
+	});
+
+	const activeCategories: { name: "album" | "artist" | "track"; headerText: string; totalCount: number; items: any[] }[] = [];
+	if (matchedAlbums.length > 0) {
+		activeCategories.push({ name: "album", headerText: `アルバム (${matchedAlbums.length}件)`, totalCount: matchedAlbums.length, items: matchedAlbums });
+	}
+	if (matchedArtists.length > 0) {
+		activeCategories.push({ name: "artist", headerText: `アーティスト (${matchedArtists.length}件)`, totalCount: matchedArtists.length, items: matchedArtists });
+	}
+	if (matchedTracks.length > 0) {
+		activeCategories.push({ name: "track", headerText: `曲 (${matchedTracks.length}件)`, totalCount: matchedTracks.length, items: matchedTracks });
+	}
+
+	if (activeCategories.length === 0) {
+		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当する結果がありません</p>';
+		return;
+	}
+
+	const maxRows = CONFIG.MAX_SEARCH_ROWS;
+	const headerCount = activeCategories.length;
+	const remainingRows = Math.max(0, maxRows - headerCount);
+
+	const allocatedCounts = new Map<string, number>();
+	activeCategories.forEach((cat) => allocatedCounts.set(cat.name, 0));
+
+	let distributed = 0;
+	let changed = true;
+	while (distributed < remainingRows && changed) {
+		changed = false;
+		for (const cat of activeCategories) {
+			if (distributed >= remainingRows) break;
+			const currentAllocated = allocatedCounts.get(cat.name)!;
+			if (currentAllocated < cat.totalCount) {
+				allocatedCounts.set(cat.name, currentAllocated + 1);
+				distributed++;
+				changed = true;
+			}
+		}
+	}
+
+	const divSearch = document.createElement("div");
+	divSearch.className = "bg-gray-800 rounded p-4 border border-gray-750 shadow-sm text-xxs space-y-4 max-w-2xl mx-auto";
+
+	activeCategories.forEach((cat) => {
+		const allocCount = allocatedCounts.get(cat.name) || 0;
+		if (allocCount === 0) return;
+
+		const section = document.createElement("div");
+		section.className = "space-y-1.5";
+
+		const header = document.createElement("div");
+		header.className = "font-bold text-gray-400 border-b border-gray-700 pb-1 flex items-center space-x-1.5";
+		const iconClass = cat.name === "album" ? "icon-disc text-indigo-400" : cat.name === "artist" ? "icon-user text-indigo-400" : "icon-music text-indigo-400";
+		header.innerHTML = `<i class="${iconClass} text-xxs"></i><span>${cat.headerText}</span>`;
+		section.appendChild(header);
+
+		const listContainer = document.createElement("div");
+		listContainer.className = "divide-y divide-gray-750/50 pl-2.5";
+
+		const visibleItems = cat.items.slice(0, allocCount);
+		visibleItems.forEach((item) => {
+			const row = document.createElement("div");
+			row.className = "py-1.5 flex items-center justify-between hover:bg-gray-750/30 rounded px-2 transition cursor-pointer select-none text-gray-300";
+
+			if (cat.name === "album") {
+				row.innerHTML = `
+					<span class="truncate font-semibold text-gray-200">　${item}</span>
+					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
+				`;
+				row.addEventListener("click", () => onNavigate("album", item));
+			} else if (cat.name === "artist") {
+				row.innerHTML = `
+					<span class="truncate font-semibold text-gray-200">　${item}</span>
+					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
+				`;
+				row.addEventListener("click", () => onNavigate("artist", item));
+			} else {
+				const meta = item.itunesTrack || item.phoneTrack;
+				row.innerHTML = `
+					<div class="flex items-center space-x-1 truncate">
+						<span class="text-gray-200 truncate">　${meta?.title}</span>
+						<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+					</div>
+					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
+				`;
+				row.addEventListener("click", () => onNavigate("track", meta?.title || ""));
+			}
+			listContainer.appendChild(row);
+		});
+
+		if (cat.totalCount > allocCount) {
+			const diff = cat.totalCount - allocCount;
+			const moreRow = document.createElement("div");
+			moreRow.className = "py-1 pl-2.5 text-gray-500 italic text-[10px]";
+			moreRow.textContent = `　... 他 ${diff} 件`;
+			listContainer.appendChild(moreRow);
+		}
+
+		section.appendChild(listContainer);
+		divSearch.appendChild(section);
+	});
+
+	container.appendChild(divSearch);
+}
 
 interface RenderCallbacks {
 	updateSummaryBar: () => void;
@@ -47,15 +218,15 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
-						<i class="lucide-user text-indigo-400 text-xxs"></i>
+						<i class="icon-user text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${artistName}</span>
 						<span class="text-xxs text-gray-500">(${artistTracks.length}曲)</span>
 					</div>
 				</div>
-				<i class="lucide-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isArtistOpen ? "transform rotate-90" : ""}"></i>
+				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isArtistOpen ? "transform rotate-90" : ""}"></i>
 			</div>
-			<div class="accordion-content ${isArtistOpen ? "open" : ""} border-t border-gray-750 bg-gray-850 p-2.5 space-y-2.5">
-				<div id="children-${artistKey}"></div>
+			<div class="accordion-content ${isArtistOpen ? "open" : ""}">
+				<div id="children-${artistKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 space-y-2.5"></div>
 			</div>
 		`;
 
@@ -93,26 +264,28 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 				const isAlbumOpen = state.expandedGroups.has(albumKey);
 
 				const divAlbum = document.createElement("div");
-				divAlbum.className = "border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0";
+				divAlbum.id = `album-card-${albumKey}`;
+				divAlbum.className = "relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0";
 				divAlbum.innerHTML = `
 					<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
 						<div class="flex items-center space-x-2 flex-1 min-w-0">
 							<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 							<div class="flex items-center space-x-1.5 truncate">
-								<i class="lucide-disc text-indigo-300 text-xxs"></i>
+								<i class="icon-disc text-indigo-300 text-xxs"></i>
 								<span class="font-semibold text-gray-300">${albumName}</span>
 								<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
 							</div>
 						</div>
-						<i class="lucide-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
+						<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
 					</div>
-					<div class="accordion-content ${isAlbumOpen ? "open" : ""} bg-gray-900 border-t border-gray-700 divide-y divide-gray-800">
-						<div id="children-${albumKey}"></div>
+					<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
+						<div id="children-${albumKey}" class="bg-gray-900 border-t border-gray-700 divide-y divide-gray-800"></div>
 					</div>
 				`;
 
 				elChildren.appendChild(divAlbum);
 				setCheckboxState(`chk-${albumKey}`, albumTracks);
+				applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
 
 				const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
 				chkAlbum.addEventListener("click", (e) => {
@@ -203,27 +376,29 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		const isAlbumOpen = state.expandedGroups.has(albumKey);
 
 		const div = document.createElement("div");
-		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2";
+		div.id = `album-card-${albumKey}`;
+		div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2";
 
 		div.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
-						<i class="lucide-disc text-indigo-400 text-xxs"></i>
+						<i class="icon-disc text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${albumName}</span>
 						<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
 					</div>
 				</div>
-				<i class="lucide-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
+				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
 			</div>
-			<div class="accordion-content ${isAlbumOpen ? "open" : ""} border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-700 space-y-1">
-				<div id="children-${albumKey}" class="divide-y divide-gray-800"></div>
+			<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
+				<div id="children-${albumKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-800"></div>
 			</div>
 		`;
 
 		container.appendChild(div);
 		setCheckboxState(`chk-${albumKey}`, albumTracks);
+		applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
 
 		const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
 		chkAlbum.addEventListener("click", (e) => {
@@ -319,15 +494,15 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
-						<i class="lucide-tags text-indigo-400 text-xxs"></i>
+						<i class="icon-tags text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${genreName}</span>
 						<span class="text-xxs text-gray-500">(${genreTracks.length}曲)</span>
 					</div>
 				</div>
-				<i class="lucide-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isGenreOpen ? "transform rotate-90" : ""}"></i>
+				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isGenreOpen ? "transform rotate-90" : ""}"></i>
 			</div>
-			<div class="accordion-content ${isGenreOpen ? "open" : ""} border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-700 space-y-1">
-				<div id="children-${genreKey}" class="divide-y divide-gray-800"></div>
+			<div class="accordion-content ${isGenreOpen ? "open" : ""}">
+				<div id="children-${genreKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-800"></div>
 			</div>
 		`;
 

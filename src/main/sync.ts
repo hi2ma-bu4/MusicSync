@@ -50,7 +50,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 	try {
 		// 1. DELETE OPERATIONS
 		if (deleteTrackIds.length > 0) {
-			logAndSend(`スマホ側の余分な曲の削除を開始します... (対象: ${deleteTrackIds.length}曲)`, getPct());
+			logAndSend(`比較先側の余分な曲の削除を開始します... (対象: ${deleteTrackIds.length}曲)`, getPct());
 			for (const id of deleteTrackIds) {
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.phoneTrack) {
@@ -69,7 +69,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 
 		// 2. MOVE (REORGANIZE) OPERATIONS
 		if (moveTrackIds.length > 0) {
-			logAndSend(`スマホ側のファイルの配置再整理を開始します... (対象: ${moveTrackIds.length}曲)`, getPct());
+			logAndSend(`比較先側のファイルの配置再整理を開始します... (対象: ${moveTrackIds.length}曲)`, getPct());
 			for (const id of moveTrackIds) {
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.itunesTrack && item.phoneTrack) {
@@ -108,7 +108,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 
 		// 3. COPY OPERATIONS
 		if (copyTrackIds.length > 0) {
-			logAndSend(`iTunesからスマホへの曲のコピーを開始します... (対象: ${copyTrackIds.length}曲)`, getPct());
+			logAndSend(`iTunesから比較先への曲のコピーを開始します... (対象: ${copyTrackIds.length}曲)`, getPct());
 			for (const id of copyTrackIds) {
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.itunesTrack) {
@@ -134,7 +134,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 		}
 
 		// 4. CLEAN UP EMPTY DIRECTORIES
-		logAndSend("スマホフォルダ内の空フォルダをクリーンアップ中...", getPct());
+		logAndSend("比較先フォルダ内の空フォルダをクリーンアップ中...", getPct());
 		await cleanEmptyDirsRecursive(profile.phonePath, profile.phonePath);
 		logAndSend("空フォルダのクリーンアップが完了しました。", 100);
 

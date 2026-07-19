@@ -1,5 +1,11 @@
 import { Profile, ScanResultItem, Settings } from "./types";
 
+export const PHONE_DISPLAY_LABEL = "比較先";
+
+export const CONFIG = {
+	MAX_SEARCH_ROWS: 15,
+};
+
 // App Core State
 export const state = {
 	profiles: [] as Profile[],

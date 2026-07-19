@@ -5,7 +5,7 @@ import { api, isMock } from "./renderer/api";
 import { initModals, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView } from "./renderer/components/treeView";
-import { clearHistory, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
+import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 
 // DOM Elements
 const elBtnProfileDropdown = document.getElementById("btn-profile-dropdown")!;
@@ -27,6 +27,7 @@ const elActiveWorkspace = document.getElementById("active-workspace")!;
 const elPromptToScanView = document.getElementById("prompt-to-scan-view")!;
 
 const elTxtSearch = document.getElementById("txt-search") as HTMLInputElement;
+const elSearchCombobox = document.getElementById("search-combobox")!;
 const elBtnScan = document.getElementById("btn-scan") as HTMLButtonElement;
 const elBtnSyncExec = document.getElementById("btn-sync-exec") as HTMLButtonElement;
 
@@ -119,7 +120,7 @@ function renderProfileDropdown() {
 		btn.className = `w-full text-left px-3 py-2 hover:bg-gray-700 transition flex items-center justify-between ${p.id === state.currentProfileId ? "bg-indigo-900 bg-opacity-40 text-indigo-300 font-bold" : "text-gray-300"}`;
 		btn.innerHTML = `
 			<span class="truncate flex-1">${p.name}</span>
-			${p.id === state.currentProfileId ? '<i class="lucide-check text-xs text-indigo-400"></i>' : ""}
+			${p.id === state.currentProfileId ? '<i class="icon-check text-xs text-indigo-400"></i>' : ""}
 		`;
 
 		btn.addEventListener("click", () => selectProfile(p.id));
@@ -193,6 +194,196 @@ function switchTab(tabId: "artist" | "album" | "genre" | "track") {
 	updateMasterCheckboxState();
 }
 
+function renderSearchCombobox() {
+	const query = state.searchQuery.trim().toLowerCase();
+	if (!query) {
+		elSearchCombobox.classList.add("hidden");
+		elSearchCombobox.innerHTML = "";
+		return;
+	}
+
+	const matchedAlbums: string[] = [];
+	const matchedArtists: string[] = [];
+	const matchedTracks: any[] = [];
+
+	const albumSet = new Set<string>();
+	const artistSet = new Set<string>();
+
+	state.scannedTracks.forEach((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (!meta) return;
+		const title = meta.title || "";
+		const artist = meta.artist || "";
+		const album = meta.album || "";
+
+		if (title.toLowerCase().includes(query)) {
+			matchedTracks.push(t);
+		}
+		if (album.toLowerCase().includes(query) && !albumSet.has(album)) {
+			albumSet.add(album);
+			matchedAlbums.push(album);
+		}
+		if (artist.toLowerCase().includes(query) && !artistSet.has(artist)) {
+			artistSet.add(artist);
+			matchedArtists.push(artist);
+		}
+	});
+
+	matchedAlbums.sort();
+	matchedArtists.sort();
+	matchedTracks.sort((a, b) => {
+		const ma = a.itunesTrack || a.phoneTrack;
+		const mb = b.itunesTrack || b.phoneTrack;
+		return (ma?.title || "").localeCompare(mb?.title || "");
+	});
+
+	const activeCategories: { name: "album" | "artist" | "track"; headerText: string; totalCount: number; items: any[] }[] = [];
+	if (matchedAlbums.length > 0) {
+		activeCategories.push({ name: "album", headerText: `アルバム (${matchedAlbums.length}件)`, totalCount: matchedAlbums.length, items: matchedAlbums });
+	}
+	if (matchedArtists.length > 0) {
+		activeCategories.push({ name: "artist", headerText: `アーティスト (${matchedArtists.length}件)`, totalCount: matchedArtists.length, items: matchedArtists });
+	}
+	if (matchedTracks.length > 0) {
+		activeCategories.push({ name: "track", headerText: `曲 (${matchedTracks.length}件)`, totalCount: matchedTracks.length, items: matchedTracks });
+	}
+
+	if (activeCategories.length === 0) {
+		elSearchCombobox.innerHTML = '<p class="text-xxs text-gray-500 text-center py-2">該当なし</p>';
+		elSearchCombobox.classList.remove("hidden");
+		return;
+	}
+
+	const maxRows = CONFIG.MAX_SEARCH_ROWS;
+	const headerCount = activeCategories.length;
+	const remainingRows = Math.max(0, maxRows - headerCount);
+
+	const allocatedCounts = new Map<string, number>();
+	activeCategories.forEach((cat) => allocatedCounts.set(cat.name, 0));
+
+	let distributed = 0;
+	let changed = true;
+	while (distributed < remainingRows && changed) {
+		changed = false;
+		for (const cat of activeCategories) {
+			if (distributed >= remainingRows) break;
+			const currentAllocated = allocatedCounts.get(cat.name)!;
+			if (currentAllocated < cat.totalCount) {
+				allocatedCounts.set(cat.name, currentAllocated + 1);
+				distributed++;
+				changed = true;
+			}
+		}
+	}
+
+	elSearchCombobox.innerHTML = "";
+	elSearchCombobox.classList.remove("hidden");
+
+	activeCategories.forEach((cat) => {
+		const allocCount = allocatedCounts.get(cat.name) || 0;
+		if (allocCount === 0) return;
+
+		const section = document.createElement("div");
+		section.className = "px-3 py-1";
+
+		// Header
+		const header = document.createElement("div");
+		header.className = "font-bold text-gray-400 border-b border-gray-700 pb-0.5 mb-1 flex items-center space-x-1.5";
+		const iconClass = cat.name === "album" ? "icon-disc text-indigo-400" : cat.name === "artist" ? "icon-user text-indigo-400" : "icon-music text-indigo-400";
+		header.innerHTML = `<i class="${iconClass}"></i><span>${cat.headerText}</span>`;
+		section.appendChild(header);
+
+		// Items list
+		const listContainer = document.createElement("div");
+		listContainer.className = "divide-y divide-gray-750/30";
+
+		const visibleItems = cat.items.slice(0, allocCount);
+		visibleItems.forEach((item) => {
+			const row = document.createElement("div");
+			row.className = "py-1 flex items-center justify-between hover:bg-gray-700/50 rounded px-1.5 transition cursor-pointer select-none text-gray-300 truncate";
+
+			if (cat.name === "album") {
+				row.innerHTML = `<span class="truncate">　${item}</span>`;
+				row.addEventListener("click", (e) => {
+					e.stopPropagation();
+					navigateToSuggestion("album", item);
+				});
+			} else if (cat.name === "artist") {
+				row.innerHTML = `<span class="truncate">　${item}</span>`;
+				row.addEventListener("click", (e) => {
+					e.stopPropagation();
+					navigateToSuggestion("artist", item);
+				});
+			} else {
+				const meta = item.itunesTrack || item.phoneTrack;
+				row.innerHTML = `
+					<div class="flex items-center space-x-1 truncate font-sans">
+						<span class="text-gray-200 truncate">　${meta?.title}</span>
+						<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+					</div>
+				`;
+				row.addEventListener("click", (e) => {
+					e.stopPropagation();
+					navigateToSuggestion("track", meta?.title || "");
+				});
+			}
+			listContainer.appendChild(row);
+		});
+
+		if (cat.totalCount > allocCount) {
+			const diff = cat.totalCount - allocCount;
+			const moreRow = document.createElement("div");
+			moreRow.className = "py-0.5 text-gray-500 italic text-[10px] pl-2.5";
+			moreRow.textContent = `　...他 ${diff} 件`;
+			listContainer.appendChild(moreRow);
+		}
+
+		section.appendChild(listContainer);
+		elSearchCombobox.appendChild(section);
+	});
+}
+
+function navigateToSuggestion(tabId: "artist" | "album" | "track", targetName: string) {
+	// 1. Clear search and hide combobox so we see full content context
+	elTxtSearch.value = "";
+	state.searchQuery = "";
+	elSearchCombobox.classList.add("hidden");
+	elSearchCombobox.innerHTML = "";
+	applyFilterAndRender();
+
+	// 2. Switch tab and auto-expand target group
+	if (tabId === "artist") {
+		state.expandedGroups.add(`artist_${targetName}`);
+		switchTab("artist");
+		// 3. Scroll to target element
+		setTimeout(() => {
+			const el = document.getElementById(`hdr-artist_${targetName}`);
+			if (el) {
+				el.scrollIntoView({ behavior: "smooth", block: "center" });
+			}
+		}, 100);
+	} else if (tabId === "album") {
+		state.expandedGroups.add(`album_${targetName}`);
+		switchTab("album");
+		// 3. Scroll to target element
+		setTimeout(() => {
+			const el = document.getElementById(`hdr-album_${targetName}`);
+			if (el) {
+				el.scrollIntoView({ behavior: "smooth", block: "center" });
+			}
+		}, 100);
+	} else if (tabId === "track") {
+		switchTab("track");
+		// 3. Scroll to target item index in the virtual scroll viewport
+		setTimeout(() => {
+			const idx = state.filteredTracks.findIndex((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
+			if (idx !== -1) {
+				vsViewport.scrollTop = idx * 30; // Row height is 30px
+			}
+		}, 100);
+	}
+}
+
 function renderActiveView() {
 	updateStatsSummary();
 	updateSummaryBar();
@@ -202,6 +393,14 @@ function renderActiveView() {
 		updateMasterCheckboxState,
 		renderActiveView,
 	};
+
+	if (state.activeTab === "track") {
+		elTreeContainer.classList.add("hidden");
+		elTrackContainer.classList.remove("hidden");
+	} else {
+		elTreeContainer.classList.remove("hidden");
+		elTrackContainer.classList.add("hidden");
+	}
 
 	if (state.activeTab === "artist") renderArtistView(elTreeContainer, callbacks);
 	else if (state.activeTab === "album") renderAlbumView(elTreeContainer, callbacks);
@@ -311,6 +510,7 @@ function setupEventListeners() {
 	document.addEventListener("click", () => {
 		elProfileDropdownMenu.classList.add("hidden");
 		elTabsDropdownMenu.classList.add("hidden");
+		elSearchCombobox.classList.add("hidden");
 	});
 
 	elBtnDropdownNewProfile.addEventListener("click", () => {
@@ -386,6 +586,9 @@ function setupEventListeners() {
 		try {
 			await api.startScan(state.currentProfileId);
 
+			// ==========================================
+			// 【デバッグ・開発環境用フォールバック / DEBUG FALLBACK】
+			// ==========================================
 			if (isMock) {
 				await new Promise((resolve) => setTimeout(resolve, 1100));
 			}
@@ -485,6 +688,11 @@ function setupEventListeners() {
 	elTxtSearch.addEventListener("input", () => {
 		state.searchQuery = elTxtSearch.value.trim().toLowerCase();
 		applyFilterAndRender();
+		renderSearchCombobox();
+	});
+
+	elTxtSearch.addEventListener("click", (e) => {
+		e.stopPropagation();
 	});
 
 	elChkMaster.addEventListener("change", () => {
@@ -601,6 +809,9 @@ function startSyncExecution() {
 		deleteTrackIds,
 	})
 		.then(() => {
+			// ==========================================
+			// 【デバッグ・開発環境用フォールバック / DEBUG FALLBACK】
+			// ==========================================
 			if (isMock) {
 				setTimeout(() => {
 					elBtnProgressClose.disabled = false;

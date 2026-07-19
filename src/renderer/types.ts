@@ -59,6 +59,7 @@ export interface WindowAPI {
 	startScan: (profileId: string) => Promise<void>;
 	getScanResult: (profileId: string) => Promise<ScanResultItem[]>;
 	executeSync: (profileId: string, options: SyncOptions) => Promise<void>;
+	getThumbnail: (profileId: string, albumName: string) => Promise<string | null>;
 	onScanProgress: (callback: (progress: ProgressPayload) => void) => () => void;
 	onSyncProgress: (callback: (progress: ProgressPayload) => void) => () => void;
 }

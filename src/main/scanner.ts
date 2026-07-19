@@ -46,12 +46,27 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	sendProgress("itunes_list", "iTunesフォルダ内のファイルを検索中...", 5);
 	const itunesFiles = await findMusicFiles(profile.itunesPath);
 
-	sendProgress("phone_list", "スマホフォルダ内のファイルを検索中...", 15);
+	sendProgress("phone_list", "比較先フォルダ内のファイルを検索中...", 15);
 	const phoneFiles = await findMusicFiles(profile.phonePath);
 
 	// Load caches
 	const itunesCache = loadCache(profileId, "itunes");
 	const phoneCache = loadCache(profileId, "phone");
+
+	// Build secondary indices by size and mtime for path-independent lookup
+	const buildSecondaryIndex = (cache: Record<string, TrackMetadata>) => {
+		const index = new Map<string, TrackMetadata>();
+		for (const key of Object.keys(cache)) {
+			const meta = cache[key];
+			if (meta && meta.size !== undefined && meta.mtimeMs !== undefined) {
+				index.set(`${meta.size}_${meta.mtimeMs}`, meta);
+			}
+		}
+		return index;
+	};
+
+	const itunesSecondaryIndex = buildSecondaryIndex(itunesCache);
+	const phoneSecondaryIndex = buildSecondaryIndex(phoneCache);
 
 	const newItunesCache: Record<string, TrackMetadata> = {};
 	const newPhoneCache: Record<string, TrackMetadata> = {};
@@ -77,9 +92,22 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 				// Cache hit
 				newItunesCache[file.relativePath] = meta;
 			} else {
-				// Parse
-				meta = await getTrackMetadata(file.filePath, file.relativePath);
-				newItunesCache[file.relativePath] = meta;
+				// Try secondary index lookup by size + mtimeMs
+				const key = `${stats.size}_${stats.mtimeMs}`;
+				const cachedMeta = itunesSecondaryIndex.get(key);
+				if (cachedMeta) {
+					// Cache hit via size + mtimeMs (path reorganized)
+					meta = {
+						...cachedMeta,
+						filePath: file.filePath,
+						relativePath: file.relativePath,
+					};
+					newItunesCache[file.relativePath] = meta;
+				} else {
+					// Parse
+					meta = await getTrackMetadata(file.filePath, file.relativePath);
+					newItunesCache[file.relativePath] = meta;
+				}
 			}
 			meta.id = `itunes_${file.relativePath}`;
 			itunesTracks.push(meta);
@@ -96,7 +124,7 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		current++;
 		if (current % 100 === 0 || current === total) {
 			const pct = 50 + Math.round((current / total) * 35);
-			sendProgress("phone_parse", `スマホの曲情報を解析中... (${current}/${total})`, pct, { count: current, total });
+			sendProgress("phone_parse", `比較先フォルダ内の曲情報を解析中... (${current}/${total})`, pct, { count: current, total });
 		}
 
 		try {
@@ -107,9 +135,22 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 				// Cache hit
 				newPhoneCache[file.relativePath] = meta;
 			} else {
-				// Parse
-				meta = await getTrackMetadata(file.filePath, file.relativePath);
-				newPhoneCache[file.relativePath] = meta;
+				// Try secondary index lookup by size + mtimeMs
+				const key = `${stats.size}_${stats.mtimeMs}`;
+				const cachedMeta = phoneSecondaryIndex.get(key);
+				if (cachedMeta) {
+					// Cache hit via size + mtimeMs (path reorganized)
+					meta = {
+						...cachedMeta,
+						filePath: file.filePath,
+						relativePath: file.relativePath,
+					};
+					newPhoneCache[file.relativePath] = meta;
+				} else {
+					// Parse
+					meta = await getTrackMetadata(file.filePath, file.relativePath);
+					newPhoneCache[file.relativePath] = meta;
+				}
 			}
 			meta.id = `phone_${file.relativePath}`;
 			phoneTracks.push(meta);

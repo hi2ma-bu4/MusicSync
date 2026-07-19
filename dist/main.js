@@ -1,5 +1,5 @@
 // src/main.ts
-import { app as app2 } from "electron";
+import { app as app3 } from "electron";
 
 // src/main/index.ts
 import { BrowserWindow } from "electron";
@@ -17,8 +17,10 @@ function createWindow() {
 }
 
 // src/main/ipc.ts
-import { dialog, ipcMain } from "electron";
+import { app as app2, dialog, ipcMain } from "electron";
 import Store from "electron-store";
+import fs4 from "node:fs";
+import path5 from "node:path";
 
 // src/main/scanner.ts
 import { app } from "electron";
@@ -150,10 +152,22 @@ async function runScan(profile, event) {
   };
   sendProgress("itunes_list", "iTunes\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 5);
   const itunesFiles = await findMusicFiles(profile.itunesPath);
-  sendProgress("phone_list", "\u30B9\u30DE\u30DB\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 15);
+  sendProgress("phone_list", "\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 15);
   const phoneFiles = await findMusicFiles(profile.phonePath);
   const itunesCache = loadCache(profileId, "itunes");
   const phoneCache = loadCache(profileId, "phone");
+  const buildSecondaryIndex = (cache) => {
+    const index = /* @__PURE__ */ new Map();
+    for (const key of Object.keys(cache)) {
+      const meta = cache[key];
+      if (meta && meta.size !== void 0 && meta.mtimeMs !== void 0) {
+        index.set(`${meta.size}_${meta.mtimeMs}`, meta);
+      }
+    }
+    return index;
+  };
+  const itunesSecondaryIndex = buildSecondaryIndex(itunesCache);
+  const phoneSecondaryIndex = buildSecondaryIndex(phoneCache);
   const newItunesCache = {};
   const newPhoneCache = {};
   const itunesTracks = [];
@@ -172,8 +186,19 @@ async function runScan(profile, event) {
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
         newItunesCache[file.relativePath] = meta;
       } else {
-        meta = await getTrackMetadata(file.filePath, file.relativePath);
-        newItunesCache[file.relativePath] = meta;
+        const key = `${stats.size}_${stats.mtimeMs}`;
+        const cachedMeta = itunesSecondaryIndex.get(key);
+        if (cachedMeta) {
+          meta = {
+            ...cachedMeta,
+            filePath: file.filePath,
+            relativePath: file.relativePath
+          };
+          newItunesCache[file.relativePath] = meta;
+        } else {
+          meta = await getTrackMetadata(file.filePath, file.relativePath);
+          newItunesCache[file.relativePath] = meta;
+        }
       }
       meta.id = `itunes_${file.relativePath}`;
       itunesTracks.push(meta);
@@ -188,7 +213,7 @@ async function runScan(profile, event) {
     current++;
     if (current % 100 === 0 || current === total) {
       const pct = 50 + Math.round(current / total * 35);
-      sendProgress("phone_parse", `\u30B9\u30DE\u30DB\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
+      sendProgress("phone_parse", `\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
     }
     try {
       const stats = await fs2.promises.stat(file.filePath);
@@ -196,8 +221,19 @@ async function runScan(profile, event) {
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
         newPhoneCache[file.relativePath] = meta;
       } else {
-        meta = await getTrackMetadata(file.filePath, file.relativePath);
-        newPhoneCache[file.relativePath] = meta;
+        const key = `${stats.size}_${stats.mtimeMs}`;
+        const cachedMeta = phoneSecondaryIndex.get(key);
+        if (cachedMeta) {
+          meta = {
+            ...cachedMeta,
+            filePath: file.filePath,
+            relativePath: file.relativePath
+          };
+          newPhoneCache[file.relativePath] = meta;
+        } else {
+          meta = await getTrackMetadata(file.filePath, file.relativePath);
+          newPhoneCache[file.relativePath] = meta;
+        }
       }
       meta.id = `phone_${file.relativePath}`;
       phoneTracks.push(meta);
@@ -405,7 +441,7 @@ async function runSync(profile, options, event) {
   };
   try {
     if (deleteTrackIds.length > 0) {
-      logAndSend(`\u30B9\u30DE\u30DB\u5074\u306E\u4F59\u5206\u306A\u66F2\u306E\u524A\u9664\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${deleteTrackIds.length}\u66F2)`, getPct());
+      logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u4F59\u5206\u306A\u66F2\u306E\u524A\u9664\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${deleteTrackIds.length}\u66F2)`, getPct());
       for (const id of deleteTrackIds) {
         const item = scanItems.find((x) => x.id === id);
         if (item && item.phoneTrack) {
@@ -422,7 +458,7 @@ async function runSync(profile, options, event) {
       }
     }
     if (moveTrackIds.length > 0) {
-      logAndSend(`\u30B9\u30DE\u30DB\u5074\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u914D\u7F6E\u518D\u6574\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${moveTrackIds.length}\u66F2)`, getPct());
+      logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u914D\u7F6E\u518D\u6574\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${moveTrackIds.length}\u66F2)`, getPct());
       for (const id of moveTrackIds) {
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack && item.phoneTrack) {
@@ -454,7 +490,7 @@ async function runSync(profile, options, event) {
       }
     }
     if (copyTrackIds.length > 0) {
-      logAndSend(`iTunes\u304B\u3089\u30B9\u30DE\u30DB\u3078\u306E\u66F2\u306E\u30B3\u30D4\u30FC\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${copyTrackIds.length}\u66F2)`, getPct());
+      logAndSend(`iTunes\u304B\u3089\u6BD4\u8F03\u5148\u3078\u306E\u66F2\u306E\u30B3\u30D4\u30FC\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${copyTrackIds.length}\u66F2)`, getPct());
       for (const id of copyTrackIds) {
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack) {
@@ -477,7 +513,7 @@ async function runSync(profile, options, event) {
         completed++;
       }
     }
-    logAndSend("\u30B9\u30DE\u30DB\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u7A7A\u30D5\u30A9\u30EB\u30C0\u3092\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u4E2D...", getPct());
+    logAndSend("\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u7A7A\u30D5\u30A9\u30EB\u30C0\u3092\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u4E2D...", getPct());
     await cleanEmptyDirsRecursive(profile.phonePath, profile.phonePath);
     logAndSend("\u7A7A\u30D5\u30A9\u30EB\u30C0\u306E\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002", 100);
     sendProgress("done", "\u540C\u671F\u5B8C\u4E86", 100, logs);
@@ -549,10 +585,64 @@ function registerIpcHandlers() {
     }
     await runSync(profile, options, event);
   });
+  ipcMain.handle("get-thumbnail", async (_event, profileId, albumName) => {
+    try {
+      if (!profileId || !albumName) return null;
+      const albumHex = Buffer.from(albumName).toString("hex");
+      const thumbnailsDir = path5.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
+      if (!fs4.existsSync(thumbnailsDir)) {
+        fs4.mkdirSync(thumbnailsDir, { recursive: true });
+      }
+      const pngPath = path5.join(thumbnailsDir, `${albumHex}.png`);
+      const metaPath = path5.join(thumbnailsDir, `${albumHex}.meta.json`);
+      const results = lastScanResults[profileId] || [];
+      const trackItem = results.find((t) => {
+        const meta = t.itunesTrack || t.phoneTrack;
+        return meta && meta.album === albumName && meta.hasCoverArt;
+      });
+      if (!trackItem) {
+        return null;
+      }
+      const track = trackItem.itunesTrack || trackItem.phoneTrack;
+      if (!track) return null;
+      let needRegenerate = true;
+      if (fs4.existsSync(pngPath) && fs4.existsSync(metaPath)) {
+        try {
+          const meta = JSON.parse(fs4.readFileSync(metaPath, "utf-8"));
+          if (meta.size === track.coverArtSize) {
+            needRegenerate = false;
+          }
+        } catch (e) {
+        }
+      }
+      if (needRegenerate) {
+        const { parseFile: parseFile2 } = await import("music-metadata");
+        const { nativeImage } = await import("electron");
+        if (!fs4.existsSync(track.filePath)) {
+          return null;
+        }
+        const metadata = await parseFile2(track.filePath, { skipCovers: false });
+        const picture = metadata.common.picture && metadata.common.picture[0];
+        if (!picture) {
+          return null;
+        }
+        const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+        const resized = img.resize({ width: 150, height: 150, quality: "better" });
+        const pngBuf = resized.toPNG();
+        fs4.writeFileSync(pngPath, Buffer.from(pngBuf));
+        fs4.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
+      }
+      const cachedBuf = fs4.readFileSync(pngPath);
+      return `data:image/png;base64,${cachedBuf.toString("base64")}`;
+    } catch (e) {
+      console.error("Failed to get or generate thumbnail", e);
+      return null;
+    }
+  });
 }
 
 // src/main.ts
-app2.whenReady().then(() => {
+app3.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();
 });
