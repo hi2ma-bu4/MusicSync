@@ -1,0 +1,29 @@
+{
+  "name": "musicsync",
+  "version": "0.0.1",
+  "description": "iTunesのmusicフォルダをイイ感じに同期する",
+  "author": "hi2ma-bu4",
+  "keywords": [],
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node dev/esbuild.mjs",
+    "start": "npm run build && electron ."
+  },
+  "dependencies": {
+    "electron": "^43.1.1",
+    "electron-store": "^11.0.2",
+    "music-metadata": "^11.14.0",
+    "virtua": "^0.49.3"
+  },
+  "devDependencies": {
+    "@types/node": "^26.1.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.1.5"
+  },
+  "volta": {
+    "node": "24.18.0",
+    "npm": "12.0.1"
+  }
+}
