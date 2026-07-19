@@ -20,7 +20,7 @@ async function cleanEmptyDirsRecursive(dir: string, rootDir: string) {
 			}
 		}
 	} catch (e) {
-		// Ignore
+		console.warn(`Failed to clean empty directories recursively in ${dir}:`, e);
 	}
 }
 
@@ -60,6 +60,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 						}
 						logAndSend(`削除成功: ${item.phoneTrack.relativePath}`, getPct());
 					} catch (e: any) {
+						console.error(`Failed to delete file: ${item.phoneTrack.relativePath}`, e);
 						logAndSend(`削除失敗: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
 					}
 				}
@@ -86,6 +87,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 							try {
 								await fs.promises.rename(oldPath, newPath);
 							} catch (e) {
+								console.warn(`Rename failed, falling back to copy/unlink: ${oldPath} -> ${newPath}`, e);
 								await fs.promises.copyFile(oldPath, newPath);
 								await fs.promises.unlink(oldPath);
 							}
@@ -99,6 +101,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 							logAndSend(`警告: 移動元ファイルが存在しません: ${item.phoneTrack.relativePath}`, getPct());
 						}
 					} catch (e: any) {
+						console.error(`Failed to move file: ${item.phoneTrack.relativePath}`, e);
 						logAndSend(`移動失敗: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
 					}
 				}
@@ -126,6 +129,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 							logAndSend(`エラー: コピー元ファイルが存在しません: ${relative}`, getPct());
 						}
 					} catch (e: any) {
+						console.error(`Failed to copy file: ${relative}`, e);
 						logAndSend(`コピー失敗: ${relative} - ${e.message}`, getPct());
 					}
 				}

@@ -1,5 +1,5 @@
-import { state } from "../state";
-import { getStatusDot, toggleCopyTrackSelection, toggleDeleteTrackSelection } from "./utils";
+import { pushHistoryState, state } from "../state";
+import { getStatusDot, isTrackChecked, setTrackCheckedState } from "./utils";
 
 const rowHeight = 30; // 30px per row
 
@@ -49,10 +49,7 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 		const meta = t.itunesTrack || t.phoneTrack;
 		if (!meta) return;
 
-		const isCopiable = t.status === "missing" || t.status === "updated";
-		const isPhoneOnly = t.status === "phone_only";
-
-		const rowChecked = (isCopiable && state.checkedCopyTrackIds.has(t.id)) || (isPhoneOnly && state.checkedDeleteTrackIds.has(t.id));
+		const rowChecked = isTrackChecked(t);
 
 		rowsHtml += `
 			<div class="flex items-center text-xxs border-b border-gray-800 hover:bg-gray-800 hover:bg-opacity-40 transition-colors bg-${t.status} select-none pointer-events-auto" style="height: ${rowHeight}px;">
@@ -79,14 +76,10 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 			const track = state.filteredTracks.find((x) => x.id === id);
 			if (!track) return;
 
-			const isCopiable = track.status === "missing" || track.status === "updated";
-			const isPhoneOnly = track.status === "phone_only";
-
-			if (isCopiable) {
-				toggleCopyTrackSelection(track.id, el.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-			} else if (isPhoneOnly) {
-				toggleDeleteTrackSelection(track.id, el.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-			}
+			pushHistoryState();
+			setTrackCheckedState(track, el.checked);
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
 		});
 	});
 }

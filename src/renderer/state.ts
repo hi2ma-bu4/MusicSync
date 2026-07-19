@@ -21,7 +21,8 @@ export const state = {
 	// Selection sets
 	checkedCopyTrackIds: new Set<string>(), // missing & updated
 	checkedMoveTrackIds: new Set<string>(), // mismatch path
-	checkedDeleteTrackIds: new Set<string>(), // phone_only
+	checkedDeleteTrackIds: new Set<string>(), // phone_only, synced, updated (unchecked from main list)
+	checkedDeleteItunesTrackIds: new Set<string>(), // synced, updated (explicitly checked for deletion in modal)
 
 	// Accordion states
 	expandedGroups: new Set<string>(),
@@ -32,6 +33,7 @@ interface HistoryState {
 	checkedCopy: Set<string>;
 	checkedMove: Set<string>;
 	checkedDelete: Set<string>;
+	checkedDeleteItunes: Set<string>;
 }
 
 const historyUndo: HistoryState[] = [];
@@ -46,6 +48,7 @@ export function pushHistoryState() {
 		checkedCopy: new Set(state.checkedCopyTrackIds),
 		checkedMove: new Set(state.checkedMoveTrackIds),
 		checkedDelete: new Set(state.checkedDeleteTrackIds),
+		checkedDeleteItunes: new Set(state.checkedDeleteItunesTrackIds),
 	});
 	historyRedo.length = 0; // Clear redo stack on new action
 }
@@ -56,6 +59,7 @@ export function handleUndo(renderCallback: () => void) {
 		checkedCopy: new Set(state.checkedCopyTrackIds),
 		checkedMove: new Set(state.checkedMoveTrackIds),
 		checkedDelete: new Set(state.checkedDeleteTrackIds),
+		checkedDeleteItunes: new Set(state.checkedDeleteItunesTrackIds),
 	};
 	historyRedo.push(current);
 
@@ -63,6 +67,7 @@ export function handleUndo(renderCallback: () => void) {
 	state.checkedCopyTrackIds = prev.checkedCopy;
 	state.checkedMoveTrackIds = prev.checkedMove;
 	state.checkedDeleteTrackIds = prev.checkedDelete;
+	state.checkedDeleteItunesTrackIds = prev.checkedDeleteItunes;
 
 	renderCallback();
 }
@@ -73,6 +78,7 @@ export function handleRedo(renderCallback: () => void) {
 		checkedCopy: new Set(state.checkedCopyTrackIds),
 		checkedMove: new Set(state.checkedMoveTrackIds),
 		checkedDelete: new Set(state.checkedDeleteTrackIds),
+		checkedDeleteItunes: new Set(state.checkedDeleteItunesTrackIds),
 	};
 	historyUndo.push(current);
 
@@ -80,6 +86,7 @@ export function handleRedo(renderCallback: () => void) {
 	state.checkedCopyTrackIds = next.checkedCopy;
 	state.checkedMoveTrackIds = next.checkedMove;
 	state.checkedDeleteTrackIds = next.checkedDelete;
+	state.checkedDeleteItunesTrackIds = next.checkedDeleteItunes;
 
 	renderCallback();
 }

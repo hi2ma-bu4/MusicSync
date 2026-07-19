@@ -5,6 +5,7 @@ import { api, isMock } from "./renderer/api";
 import { initModals, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView } from "./renderer/components/treeView";
+import { getSafeId, isTrackChecked, setTrackCheckedState } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 
 // DOM Elements
@@ -51,7 +52,7 @@ const elCntTotal = document.getElementById("cnt-total")!;
 const elCntMissing = document.getElementById("cnt-missing")!;
 const elCntUpdated = document.getElementById("cnt-updated")!;
 const elCntSynced = document.getElementById("cnt-synced")!;
-const elCntPhoneOnly = document.getElementById("cnt-phone-only")!;
+const elCntPhoneOnly = document.getElementById("cnt-phone_only")!;
 const elCntPathWarnings = document.getElementById("cnt-path-warnings")!;
 const elCntCheckedCopy = document.getElementById("cnt-checked-copy")!;
 const elCntCheckedDelete = document.getElementById("cnt-checked-delete")!;
@@ -68,7 +69,7 @@ const elModalSettings = document.getElementById("modal-settings")!;
 const elColorMissing = document.getElementById("color-missing") as HTMLInputElement;
 const elColorUpdated = document.getElementById("color-updated") as HTMLInputElement;
 const elColorSynced = document.getElementById("color-synced") as HTMLInputElement;
-const elColorPhoneOnly = document.getElementById("color-phone-only") as HTMLInputElement;
+const elColorPhoneOnly = document.getElementById("color-phone_only") as HTMLInputElement;
 
 // Reorganization Modal
 const elModalMoveConfirm = document.getElementById("modal-move-confirm")!;
@@ -344,30 +345,28 @@ function renderSearchCombobox() {
 }
 
 function navigateToSuggestion(tabId: "artist" | "album" | "track", targetName: string) {
-	// 1. Clear search and hide combobox so we see full content context
-	elTxtSearch.value = "";
-	state.searchQuery = "";
+	// 1. Preserve search input and query, just hide combobox
 	elSearchCombobox.classList.add("hidden");
-	elSearchCombobox.innerHTML = "";
-	applyFilterAndRender();
 
 	// 2. Switch tab and auto-expand target group
 	if (tabId === "artist") {
-		state.expandedGroups.add(`artist_${targetName}`);
+		const artistKey = getSafeId("artist", targetName);
+		state.expandedGroups.add(artistKey);
 		switchTab("artist");
 		// 3. Scroll to target element
 		setTimeout(() => {
-			const el = document.getElementById(`hdr-artist_${targetName}`);
+			const el = document.getElementById(`hdr-${artistKey}`);
 			if (el) {
 				el.scrollIntoView({ behavior: "smooth", block: "center" });
 			}
 		}, 100);
 	} else if (tabId === "album") {
-		state.expandedGroups.add(`album_${targetName}`);
+		const albumKey = getSafeId("album", targetName);
+		state.expandedGroups.add(albumKey);
 		switchTab("album");
 		// 3. Scroll to target element
 		setTimeout(() => {
-			const el = document.getElementById(`hdr-album_${targetName}`);
+			const el = document.getElementById(`hdr-${albumKey}`);
 			if (el) {
 				el.scrollIntoView({ behavior: "smooth", block: "center" });
 			}
@@ -462,22 +461,16 @@ function updateMasterCheckboxState() {
 	elChkMaster.disabled = false;
 
 	let checkedCount = 0;
-	let totalCopiableOrDeletable = 0;
+	let totalTracks = state.filteredTracks.length;
 
 	for (const track of state.filteredTracks) {
-		if (track.status === "missing" || track.status === "updated") {
-			totalCopiableOrDeletable++;
-			if (state.checkedCopyTrackIds.has(track.id)) checkedCount++;
-		} else if (track.status === "phone_only") {
-			totalCopiableOrDeletable++;
-			if (state.checkedDeleteTrackIds.has(track.id)) checkedCount++;
-		}
+		if (isTrackChecked(track)) checkedCount++;
 	}
 
 	if (checkedCount === 0) {
 		elChkMaster.checked = false;
 		elChkMaster.indeterminate = false;
-	} else if (checkedCount === totalCopiableOrDeletable) {
+	} else if (checkedCount === totalTracks) {
 		elChkMaster.checked = true;
 		elChkMaster.indeterminate = false;
 	} else {
@@ -606,14 +599,17 @@ function setupEventListeners() {
 			state.expandedGroups.clear();
 			clearHistory();
 
-			// Auto check Missing & Updated tracks by default
+			// Default check specs:
+			// Existing tracks (synced, updated, phone_only) checked by default.
+			// Non-existing tracks (missing) unchecked by default.
+			// Relocate / pathMismatch (move) checkboxes unchecked by default.
 			for (const track of state.scannedTracks) {
-				if (track.status === "missing" || track.status === "updated") {
+				if (track.status === "updated") {
 					state.checkedCopyTrackIds.add(track.id);
 				}
-				if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
-					state.checkedMoveTrackIds.add(track.id);
-				}
+				// Note: synced and phone_only do not require checkedCopyTrackIds since they already exist,
+				// they are checked by default because checkedDeleteTrackIds does not contain them.
+				// Relocation (checkedMoveTrackIds) is explicitly left unchecked by default.
 			}
 
 			applyFilterAndRender();
@@ -628,57 +624,38 @@ function setupEventListeners() {
 	elBtnSyncExec.addEventListener("click", () => {
 		if (!state.currentProfileId) return;
 
+		const copyCount = state.checkedCopyTrackIds.size;
+		const moveCount = state.checkedMoveTrackIds.size;
+		const deleteItunesCount = state.scannedTracks.filter((t) => (t.status === "synced" || t.status === "updated") && state.checkedDeleteTrackIds.has(t.id)).length;
+		const deletePhoneOnlyCount = state.scannedTracks.filter((t) => t.status === "phone_only" && state.checkedDeleteTrackIds.has(t.id)).length;
+
+		document.getElementById("lbl-confirm-copy-count")!.textContent = `${copyCount} 件`;
+		document.getElementById("lbl-confirm-move-count")!.textContent = `${moveCount} 件`;
+		document.getElementById("lbl-confirm-delete-itunes-count")!.textContent = `${deleteItunesCount} 件`;
+		document.getElementById("lbl-confirm-delete-count")!.textContent = `${deletePhoneOnlyCount} 件`;
+
 		const pathsMismatchedSelected = state.scannedTracks.filter((t) => (t.status === "missing" || t.status === "updated" || t.status === "synced") && t.pathMismatch && (state.checkedCopyTrackIds.has(t.id) || state.checkedMoveTrackIds.has(t.id)));
 
+		const subsequentModals: string[] = [];
 		if (pathsMismatchedSelected.length > 0) {
-			elLblMoveCount.textContent = String(pathsMismatchedSelected.length);
-			elMoveTargetList.innerHTML = "";
-
-			let allChecked = true;
-			pathsMismatchedSelected.forEach((t) => {
-				if (!state.checkedMoveTrackIds.has(t.id)) allChecked = false;
-			});
-			elChkModalMoveMaster.checked = allChecked;
-
-			pathsMismatchedSelected.forEach((t) => {
-				const it = t.itunesTrack!;
-				const pt = t.phoneTrack || it;
-				const row = document.createElement("div");
-				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-850 gap-3 border-b border-gray-800";
-
-				row.innerHTML = `
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-modal-move-${t.id}" class="chk-modal-move-item rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${state.checkedMoveTrackIds.has(t.id) ? "checked" : ""}>
-						<div class="truncate flex-1">
-							<div class="font-semibold text-gray-200">${it.artist} - ${it.title}</div>
-							<div class="text-gray-500 truncate font-mono text-xxs">現在: ${pt.relativePath} -> iTunes: ${it.relativePath}</div>
-						</div>
-					</div>
-				`;
-				elMoveTargetList.appendChild(row);
-
-				const chkMove = document.getElementById(`chk-modal-move-${t.id}`) as HTMLInputElement;
-				chkMove.addEventListener("change", () => {
-					if (chkMove.checked) {
-						state.checkedMoveTrackIds.add(t.id);
-					} else {
-						state.checkedMoveTrackIds.delete(t.id);
-					}
-					let allCheckState = true;
-					document.querySelectorAll(".chk-modal-move-item").forEach((el: any) => {
-						if (!el.checked) allCheckState = false;
-					});
-					elChkModalMoveMaster.checked = allCheckState;
-					updateSummaryBar();
-				});
-			});
-
-			elModalMoveConfirm.classList.remove("hidden");
-		} else {
-			// Trigger click on verify submit if direct
-			const elSubmit = document.getElementById("btn-move-confirm-submit")!;
-			elSubmit.dispatchEvent(new Event("click"));
+			subsequentModals.push("ファイル配置の自動移動確認");
 		}
+		if (deleteItunesCount > 0) {
+			subsequentModals.push("比較先ファイル削除（iTunesに存在する曲）のチェックリスト確認");
+		}
+		if (deletePhoneOnlyCount > 0) {
+			subsequentModals.push("比較先ファイル削除（比較先側のみ存在）の厳重確認（安全ロック入力付）");
+		}
+
+		let helperText = "";
+		if (subsequentModals.length > 0) {
+			helperText = `※この後、${subsequentModals.join("、および")}ダイアログが順に表示されます。`;
+		} else {
+			helperText = "※この後、直接同期処理を実行します。";
+		}
+		document.getElementById("lbl-confirm-next-info")!.textContent = helperText;
+
+		document.getElementById("modal-sync-confirm-count")!.classList.remove("hidden");
 	});
 
 	elBtnProgressClose.addEventListener("click", () => {
@@ -686,27 +663,61 @@ function setupEventListeners() {
 		elBtnScan.click();
 	});
 
+	let searchDebounceTimeout: any = null;
+
+	const showPredictionsIfQuery = () => {
+		const query = elTxtSearch.value.trim().toLowerCase();
+		if (query.length >= 1) {
+			state.searchQuery = query;
+			renderSearchCombobox();
+		}
+	};
+
 	elTxtSearch.addEventListener("input", () => {
-		state.searchQuery = elTxtSearch.value.trim().toLowerCase();
-		applyFilterAndRender();
-		renderSearchCombobox();
+		const query = elTxtSearch.value.trim().toLowerCase();
+		state.searchQuery = query;
+
+		// Show search/loading indicator immediately in prediction box if at least 1 character is entered
+		if (query.length >= 1) {
+			elSearchCombobox.innerHTML = `
+				<div class="flex items-center justify-center space-x-2 py-4 text-gray-400 font-medium">
+					<i class="icon-refresh-cw animate-spin text-indigo-400"></i>
+					<span>検索中...</span>
+				</div>
+			`;
+			elSearchCombobox.classList.remove("hidden");
+		} else {
+			elSearchCombobox.classList.add("hidden");
+			elSearchCombobox.innerHTML = "";
+		}
+
+		if (searchDebounceTimeout) {
+			clearTimeout(searchDebounceTimeout);
+		}
+
+		searchDebounceTimeout = setTimeout(() => {
+			applyFilterAndRender();
+			if (state.searchQuery.length >= 1) {
+				renderSearchCombobox();
+			}
+		}, 250); // 250ms debouncing delay
 	});
 
 	elTxtSearch.addEventListener("click", (e) => {
 		e.stopPropagation();
+		showPredictionsIfQuery();
+	});
+
+	elTxtSearch.addEventListener("focus", (e) => {
+		e.stopPropagation();
+		showPredictionsIfQuery();
 	});
 
 	elChkMaster.addEventListener("change", () => {
 		pushHistoryState();
 		const isChecked = elChkMaster.checked;
 		for (const track of state.filteredTracks) {
-			if (track.status === "missing" || track.status === "updated") {
-				if (isChecked) state.checkedCopyTrackIds.add(track.id);
-				else state.checkedCopyTrackIds.delete(track.id);
-			} else if (track.status === "phone_only") {
-				if (isChecked) state.checkedDeleteTrackIds.add(track.id);
-				else state.checkedDeleteTrackIds.delete(track.id);
-			}
+			setTrackCheckedState(track, isChecked);
 		}
 		renderActiveView();
 	});
@@ -776,7 +787,7 @@ function startSyncExecution() {
 
 	const copyTrackIds = Array.from(state.checkedCopyTrackIds);
 	const moveTrackIds = Array.from(state.checkedMoveTrackIds);
-	const deleteTrackIds = Array.from(state.checkedDeleteTrackIds);
+	const deleteTrackIds = [...state.scannedTracks.filter((t) => t.status === "phone_only" && state.checkedDeleteTrackIds.has(t.id)).map((t) => t.id), ...Array.from(state.checkedDeleteItunesTrackIds)];
 
 	const cancelProgress = api.onSyncProgress((progress: any) => {
 		elLblProgressStatus.textContent = progress.message;

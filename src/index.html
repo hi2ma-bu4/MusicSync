@@ -210,8 +210,8 @@
 				<span>同期済: <strong id="cnt-synced" class="text-white font-mono">0</strong></span>
 			</span>
 			<span class="flex items-center space-x-1">
-				<span class="w-2 h-2 rounded-full bg-phone-only inline-block"></span>
-				<span>比較先のみ: <strong id="cnt-phone-only" class="text-white font-mono">0</strong></span>
+				<span class="w-2 h-2 rounded-full bg-phone_only inline-block"></span>
+				<span>比較先のみ: <strong id="cnt-phone_only" class="text-white font-mono">0</strong></span>
 			</span>
 			<span id="cnt-path-warnings" class="text-amber-400 font-medium hidden">⚠️ 配置不一致: <strong class="font-mono">0</strong>件</span>
 			<span class="text-xxs border-l border-gray-700 pl-3">選択中: コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono">0</strong> / 削除 <strong id="cnt-checked-delete" class="text-red-400 font-mono">0</strong></span>
@@ -287,7 +287,7 @@
 				</div>
 				<div class="flex items-center justify-between">
 					<span class="text-gray-300">比較先側のみに存在</span>
-					<input type="color" id="color-phone-only" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+					<input type="color" id="color-phone_only" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
 				</div>
 
 				<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
@@ -318,9 +318,9 @@
 
 			<div class="space-y-2 pt-2 border-t border-gray-700">
 				<p class="text-amber-400 font-medium">
-					実行するには、下の入力欄に「<span class="font-bold select-all bg-gray-950 px-1 py-0.5 rounded text-white">削除</span>」と入力してください。
+					実行するには、下の入力欄に「<span class="font-bold select-all bg-gray-950 px-1 py-0.5 rounded text-white">DELETE</span>」と入力してください。
 				</p>
-				<input type="text" id="txt-delete-verify" placeholder="削除 と入力してください" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-red-500 text-white text-center font-bold">
+				<input type="text" id="txt-delete-verify" placeholder="DELETE と入力してください" class="w-full bg-gray-700 border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-red-500 text-white text-center font-bold">
 			</div>
 
 			<div class="flex justify-end space-x-2 pt-3 mt-3 border-t border-gray-700">
@@ -385,6 +385,73 @@
 
 			<div class="flex justify-end pt-3 mt-3 border-t border-gray-700">
 				<button type="button" id="btn-progress-close" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-1.5 rounded transition text-white font-semibold" disabled>閉じる</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 6. Sync Count Confirmation Modal -->
+	<div id="modal-sync-confirm-count" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-sm p-5 mx-4 text-xs">
+			<h3 class="text-sm font-bold text-indigo-300 mb-3 flex items-center space-x-1.5">
+				<i class="icon-alert-circle"></i>
+				<span>同期実行前の変更件数確認</span>
+			</h3>
+			<div class="space-y-3 mb-4 text-gray-300">
+				<p>同期処理を実行します。発生する変更件数は以下の通りです：</p>
+				<div class="bg-gray-900 border border-gray-750 rounded p-3 space-y-2 font-semibold text-xxs">
+					<div class="flex justify-between">
+						<span class="text-indigo-400">● コピー/更新:</span>
+						<span id="lbl-confirm-copy-count" class="text-white font-mono">0 件</span>
+					</div>
+					<div class="flex justify-between">
+						<span class="text-amber-400">● 配置自動移動:</span>
+						<span id="lbl-confirm-move-count" class="text-white font-mono">0 件</span>
+					</div>
+					<div class="flex justify-between">
+						<span class="text-red-300">● 削除 (iTunesにあり):</span>
+						<span id="lbl-confirm-delete-itunes-count" class="text-white font-mono">0 件</span>
+					</div>
+					<div class="flex justify-between">
+						<span class="text-red-500">● 削除 (比較先のみ):</span>
+						<span id="lbl-confirm-delete-count" class="text-white font-mono">0 件</span>
+					</div>
+				</div>
+				<p id="lbl-confirm-next-info" class="text-xxs text-gray-500 italic"></p>
+			</div>
+			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+				<button type="button" id="btn-sync-confirm-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+				<button type="button" id="btn-sync-confirm-submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">はい、確認しました</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 7. iTunes-side Exists Deletion Confirmation Modal -->
+	<div id="modal-delete-itunes-confirm" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-lg p-5 mx-4 flex flex-col max-h-[80%] text-xs">
+			<div class="flex items-center space-x-2 text-red-400 mb-2">
+				<i class="icon-trash-2 text-xl"></i>
+				<h3 class="text-sm font-bold">比較先ファイル削除（iTunes側に存在する曲）の確認</h3>
+			</div>
+
+			<p class="text-gray-400 mb-2">
+				チェックが外された以下の曲（合計 <strong id="lbl-del-itunes-count" class="text-red-400 font-mono">0</strong> 曲）はPCのiTunesライブラリには残っていますが、比較先から削除してもよろしいですか？
+				削除を承認するファイルにチェックを入れてください。
+			</p>
+
+			<!-- Master delete itunes checkbox in modal -->
+			<div class="flex items-center space-x-2 py-1.5 mb-1.5 bg-gray-900 border border-gray-750 px-3 rounded">
+				<input type="checkbox" id="chk-modal-del-itunes-master" class="rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-500 h-3.5 w-3.5">
+				<label for="chk-modal-del-itunes-master" class="font-semibold text-gray-300 select-none cursor-pointer">すべてのファイルの削除を承認する</label>
+			</div>
+
+			<!-- Target List -->
+			<div id="delete-itunes-target-list" class="flex-1 min-h-0 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2.5 mb-3 divide-y divide-gray-800">
+				<!-- Dynamically injected delete list -->
+			</div>
+
+			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+				<button type="button" id="btn-del-itunes-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">戻る</button>
+				<button type="button" id="btn-del-itunes-confirm-submit" class="bg-red-600 hover:bg-red-500 px-3.5 py-1.5 rounded transition text-white font-semibold">選択したファイルを削除して続行</button>
 			</div>
 		</div>
 	</div>

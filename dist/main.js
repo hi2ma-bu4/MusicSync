@@ -51,6 +51,7 @@ async function findMusicFiles(dir, baseDir = dir) {
   try {
     list = await fs.promises.readdir(dir, { withFileTypes: true });
   } catch (e) {
+    console.error(`Failed to read directory: ${dir}`, e);
     return [];
   }
   const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
@@ -419,6 +420,7 @@ async function cleanEmptyDirsRecursive(dir, rootDir) {
       }
     }
   } catch (e) {
+    console.warn(`Failed to clean empty directories recursively in ${dir}:`, e);
   }
 }
 async function runSync(profile, options, event) {
@@ -451,6 +453,7 @@ async function runSync(profile, options, event) {
             }
             logAndSend(`\u524A\u9664\u6210\u529F: ${item.phoneTrack.relativePath}`, getPct());
           } catch (e) {
+            console.error(`Failed to delete file: ${item.phoneTrack.relativePath}`, e);
             logAndSend(`\u524A\u9664\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
           }
         }
@@ -472,6 +475,7 @@ async function runSync(profile, options, event) {
               try {
                 await fs3.promises.rename(oldPath, newPath);
               } catch (e) {
+                console.warn(`Rename failed, falling back to copy/unlink: ${oldPath} -> ${newPath}`, e);
                 await fs3.promises.copyFile(oldPath, newPath);
                 await fs3.promises.unlink(oldPath);
               }
@@ -483,6 +487,7 @@ async function runSync(profile, options, event) {
               logAndSend(`\u8B66\u544A: \u79FB\u52D5\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${item.phoneTrack.relativePath}`, getPct());
             }
           } catch (e) {
+            console.error(`Failed to move file: ${item.phoneTrack.relativePath}`, e);
             logAndSend(`\u79FB\u52D5\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
           }
         }
@@ -507,6 +512,7 @@ async function runSync(profile, options, event) {
               logAndSend(`\u30A8\u30E9\u30FC: \u30B3\u30D4\u30FC\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
             }
           } catch (e) {
+            console.error(`Failed to copy file: ${relative}`, e);
             logAndSend(`\u30B3\u30D4\u30FC\u5931\u6557: ${relative} - ${e.message}`, getPct());
           }
         }

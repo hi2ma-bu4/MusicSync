@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { getStatusDot, setCheckboxState, toggleCopyTrackSelection, toggleDeleteTrackSelection } from "./utils";
+import { getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -197,7 +197,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 
 	sortedArtists.forEach((artistName) => {
 		const artistTracks = artistMap.get(artistName)!;
-		const artistKey = `artist_${artistName}`;
+		const artistKey = getSafeId("artist", artistName);
 		const isArtistOpen = state.expandedGroups.has(artistKey);
 
 		const albumMap = new Map<string, any[]>();
@@ -239,13 +239,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			pushHistoryState();
 			const isChecked = chkArtist.checked;
 			artistTracks.forEach((t) => {
-				if (t.status === "missing" || t.status === "updated") {
-					if (isChecked) state.checkedCopyTrackIds.add(t.id);
-					else state.checkedCopyTrackIds.delete(t.id);
-				} else if (t.status === "phone_only") {
-					if (isChecked) state.checkedDeleteTrackIds.add(t.id);
-					else state.checkedDeleteTrackIds.delete(t.id);
-				}
+				setTrackCheckedState(t, isChecked);
 			});
 			cb.renderActiveView();
 		});
@@ -260,7 +254,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			const elChildren = document.getElementById(`children-${artistKey}`)!;
 			sortedAlbums.forEach((albumName) => {
 				const albumTracks = albumMap.get(albumName)!;
-				const albumKey = `artist_${artistName}_album_${albumName}`;
+				const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
 				const isAlbumOpen = state.expandedGroups.has(albumKey);
 
 				const divAlbum = document.createElement("div");
@@ -293,13 +287,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 					pushHistoryState();
 					const isChecked = chkAlbum.checked;
 					albumTracks.forEach((t) => {
-						if (t.status === "missing" || t.status === "updated") {
-							if (isChecked) state.checkedCopyTrackIds.add(t.id);
-							else state.checkedCopyTrackIds.delete(t.id);
-						} else if (t.status === "phone_only") {
-							if (isChecked) state.checkedDeleteTrackIds.add(t.id);
-							else state.checkedDeleteTrackIds.delete(t.id);
-						}
+						setTrackCheckedState(t, isChecked);
 					});
 					cb.renderActiveView();
 				});
@@ -315,15 +303,13 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 					albumTracks.forEach((t) => {
 						const meta = t.itunesTrack || t.phoneTrack;
 						if (!meta) return;
-						const isCopiable = t.status === "missing" || t.status === "updated";
-						const isPhoneOnly = t.status === "phone_only";
 
 						const row = document.createElement("div");
 						row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-850 gap-2 bg-${t.status}`;
 
 						row.innerHTML = `
 							<div class="flex items-center space-x-2 flex-1 min-w-0">
-								<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isCopiable && state.checkedCopyTrackIds.has(t.id) ? "checked" : ""} ${isPhoneOnly && state.checkedDeleteTrackIds.has(t.id) ? "checked" : ""}>
+								<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 								<div class="flex items-center space-x-1 truncate">
 									<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
 									<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -338,11 +324,10 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 
 						const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
 						chkTrack.addEventListener("change", () => {
-							if (isCopiable) {
-								toggleCopyTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-							} else if (isPhoneOnly) {
-								toggleDeleteTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-							}
+							pushHistoryState();
+							setTrackCheckedState(t, chkTrack.checked);
+							cb.updateSummaryBar();
+							cb.updateMasterCheckboxState();
 							setCheckboxState(`chk-${albumKey}`, albumTracks);
 							setCheckboxState(`chk-${artistKey}`, artistTracks);
 						});
@@ -372,7 +357,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 	sortedAlbums.forEach((albumName) => {
 		const albumTracks = albumMap.get(albumName)!;
-		const albumKey = `album_${albumName}`;
+		const albumKey = getSafeId("album", albumName);
 		const isAlbumOpen = state.expandedGroups.has(albumKey);
 
 		const div = document.createElement("div");
@@ -406,13 +391,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			pushHistoryState();
 			const isChecked = chkAlbum.checked;
 			albumTracks.forEach((t) => {
-				if (t.status === "missing" || t.status === "updated") {
-					if (isChecked) state.checkedCopyTrackIds.add(t.id);
-					else state.checkedCopyTrackIds.delete(t.id);
-				} else if (t.status === "phone_only") {
-					if (isChecked) state.checkedDeleteTrackIds.add(t.id);
-					else state.checkedDeleteTrackIds.delete(t.id);
-				}
+				setTrackCheckedState(t, isChecked);
 			});
 			cb.renderActiveView();
 		});
@@ -428,15 +407,13 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			albumTracks.forEach((t) => {
 				const meta = t.itunesTrack || t.phoneTrack;
 				if (!meta) return;
-				const isCopiable = t.status === "missing" || t.status === "updated";
-				const isPhoneOnly = t.status === "phone_only";
 
 				const row = document.createElement("div");
 				row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900 gap-2 bg-${t.status}`;
 
 				row.innerHTML = `
 					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isCopiable && state.checkedCopyTrackIds.has(t.id) ? "checked" : ""} ${isPhoneOnly && state.checkedDeleteTrackIds.has(t.id) ? "checked" : ""}>
+						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 						<div class="flex items-center space-x-1.5 truncate">
 							<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
 							<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -452,11 +429,10 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
 				chkTrack.addEventListener("change", () => {
-					if (isCopiable) {
-						toggleCopyTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-					} else if (isPhoneOnly) {
-						toggleDeleteTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-					}
+					pushHistoryState();
+					setTrackCheckedState(t, chkTrack.checked);
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
 					setCheckboxState(`chk-${albumKey}`, albumTracks);
 				});
 			});
@@ -483,7 +459,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 
 	sortedGenres.forEach((genreName) => {
 		const genreTracks = genreMap.get(genreName)!;
-		const genreKey = `genre_${genreName}`;
+		const genreKey = getSafeId("genre", genreName);
 		const isGenreOpen = state.expandedGroups.has(genreKey);
 
 		const div = document.createElement("div");
@@ -515,13 +491,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			pushHistoryState();
 			const isChecked = chkGenre.checked;
 			genreTracks.forEach((t) => {
-				if (t.status === "missing" || t.status === "updated") {
-					if (isChecked) state.checkedCopyTrackIds.add(t.id);
-					else state.checkedCopyTrackIds.delete(t.id);
-				} else if (t.status === "phone_only") {
-					if (isChecked) state.checkedDeleteTrackIds.add(t.id);
-					else state.checkedDeleteTrackIds.delete(t.id);
-				}
+				setTrackCheckedState(t, isChecked);
 			});
 			cb.renderActiveView();
 		});
@@ -537,15 +507,13 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			genreTracks.forEach((t) => {
 				const meta = t.itunesTrack || t.phoneTrack;
 				if (!meta) return;
-				const isCopiable = t.status === "missing" || t.status === "updated";
-				const isPhoneOnly = t.status === "phone_only";
 
 				const row = document.createElement("div");
 				row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900 gap-2 bg-${t.status}`;
 
 				row.innerHTML = `
 					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isCopiable && state.checkedCopyTrackIds.has(t.id) ? "checked" : ""} ${isPhoneOnly && state.checkedDeleteTrackIds.has(t.id) ? "checked" : ""}>
+						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 						<div class="flex items-center space-x-1.5 truncate">
 							<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
 							<span class="text-gray-500 truncate">by ${meta.artist}</span>
@@ -561,11 +529,10 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 
 				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
 				chkTrack.addEventListener("change", () => {
-					if (isCopiable) {
-						toggleCopyTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-					} else if (isPhoneOnly) {
-						toggleDeleteTrackSelection(t.id, chkTrack.checked, cb.updateSummaryBar, cb.updateMasterCheckboxState);
-					}
+					pushHistoryState();
+					setTrackCheckedState(t, chkTrack.checked);
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
 					setCheckboxState(`chk-${genreKey}`, genreTracks);
 				});
 			});

@@ -1,4 +1,13 @@
-import { PHONE_DISPLAY_LABEL, pushHistoryState, state } from "../state";
+import { PHONE_DISPLAY_LABEL, state } from "../state";
+
+// Generates a safe HTML ID by hex-encoding the identifier part
+export function getSafeId(prefix: string, name: string): string {
+	let hex = "";
+	for (let i = 0; i < name.length; i++) {
+		hex += name.charCodeAt(i).toString(16);
+	}
+	return `${prefix}_${hex}`;
+}
 
 // Returns color styles representing track status
 export function getStatusDot(track: any): string {
@@ -23,6 +32,36 @@ export function getStatusDot(track: any): string {
 	</span>`;
 }
 
+// Check if a track is checked (should exist on the target comparing destination)
+export function isTrackChecked(track: any): boolean {
+	if (track.status === "missing" || track.status === "updated") {
+		return state.checkedCopyTrackIds.has(track.id);
+	}
+	if (track.status === "synced" || track.status === "phone_only") {
+		return !state.checkedDeleteTrackIds.has(track.id);
+	}
+	return false;
+}
+
+// Set track checked/unchecked state based on target presence requirements
+export function setTrackCheckedState(track: any, checked: boolean) {
+	if (checked) {
+		if (track.status === "missing" || track.status === "updated") {
+			state.checkedCopyTrackIds.add(track.id);
+		}
+		if (track.status === "updated" || track.status === "synced" || track.status === "phone_only") {
+			state.checkedDeleteTrackIds.delete(track.id);
+		}
+	} else {
+		if (track.status === "missing" || track.status === "updated") {
+			state.checkedCopyTrackIds.delete(track.id);
+		}
+		if (track.status === "updated" || track.status === "synced" || track.status === "phone_only") {
+			state.checkedDeleteTrackIds.add(track.id);
+		}
+	}
+}
+
 // Helper to set indeterminate state for a dynamically rendered checkbox element
 export function setCheckboxState(chkId: string, tracks: any[]) {
 	setTimeout(() => {
@@ -30,22 +69,16 @@ export function setCheckboxState(chkId: string, tracks: any[]) {
 		if (!el) return;
 
 		let checkedCount = 0;
-		let totalCopiableOrDeletable = 0;
+		const total = tracks.length;
 
 		tracks.forEach((t) => {
-			if (t.status === "missing" || t.status === "updated") {
-				totalCopiableOrDeletable++;
-				if (state.checkedCopyTrackIds.has(t.id)) checkedCount++;
-			} else if (t.status === "phone_only") {
-				totalCopiableOrDeletable++;
-				if (state.checkedDeleteTrackIds.has(t.id)) checkedCount++;
-			}
+			if (isTrackChecked(t)) checkedCount++;
 		});
 
 		if (checkedCount === 0) {
 			el.checked = false;
 			el.indeterminate = false;
-		} else if (checkedCount === totalCopiableOrDeletable) {
+		} else if (checkedCount === total) {
 			el.checked = true;
 			el.indeterminate = false;
 		} else {
@@ -53,21 +86,4 @@ export function setCheckboxState(chkId: string, tracks: any[]) {
 			el.indeterminate = true;
 		}
 	}, 0);
-}
-
-// Track selection handlers
-export function toggleCopyTrackSelection(trackId: string, isChecked: boolean, updateSummaryBar: () => void, updateMasterCheckboxState: () => void) {
-	pushHistoryState();
-	if (isChecked) state.checkedCopyTrackIds.add(trackId);
-	else state.checkedCopyTrackIds.delete(trackId);
-	updateSummaryBar();
-	updateMasterCheckboxState();
-}
-
-export function toggleDeleteTrackSelection(trackId: string, isChecked: boolean, updateSummaryBar: () => void, updateMasterCheckboxState: () => void) {
-	pushHistoryState();
-	if (isChecked) state.checkedDeleteTrackIds.add(trackId);
-	else state.checkedDeleteTrackIds.delete(trackId);
-	updateSummaryBar();
-	updateMasterCheckboxState();
 }

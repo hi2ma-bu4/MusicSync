@@ -29,6 +29,7 @@ export async function findMusicFiles(dir: string, baseDir: string = dir): Promis
 	try {
 		list = await fs.promises.readdir(dir, { withFileTypes: true });
 	} catch (e) {
+		console.error(`Failed to read directory: ${dir}`, e);
 		return [];
 	}
 
