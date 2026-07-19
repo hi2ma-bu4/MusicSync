@@ -1,0 +1,91 @@
+@import "tailwindcss";
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+	height: 6px;
+	width: 6px;
+}
+
+::-webkit-scrollbar-track {
+	background: #1f2937;
+}
+
+::-webkit-scrollbar-thumb {
+	background: #4b5563;
+	border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+	background: #6b7280;
+}
+
+/* Expand/Collapse transitions */
+.accordion-content {
+	max-height: 0;
+	overflow: hidden;
+	transition: max-height .2s ease-out;
+}
+
+.accordion-content.open {
+	max-height: 2000px;
+	transition: max-height .3s ease-in;
+}
+
+/* Resizable table headers */
+.resizer {
+	cursor: col-resize;
+	height: 100%;
+	position: absolute;
+	right: 0;
+	top: 0;
+	user-select: none;
+	width: 4px;
+	z-index: 10;
+}
+
+.resizer:hover {
+	background-color: #6366f1;
+}
+
+/* Text truncation with ellipsis - OFF wrap */
+.truncate-cell {
+	overflow: hidden !important;
+	text-overflow: ellipsis !important;
+	white-space: nowrap !important;
+}
+
+/* Virtual Scroll viewport styles */
+#virtual-scroll-viewport {
+	height: 100%;
+	overflow-y: auto;
+	position: relative;
+}
+
+#virtual-scroll-canvas {
+	left: 0;
+	pointer-events: none;
+	position: absolute;
+	right: 0;
+	top: 0;
+}
+
+#virtual-scroll-content {
+	display: flex;
+	flex-direction: column;
+	left: 0;
+	position: absolute;
+	right: 0;
+	top: 0;
+}
+
+/* Indeterminate state styling */
+input[type="checkbox"]:indeterminate {
+	background-color: #4f46e5;
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M5 8h6'/%3E%3C/svg%3E");
+	border-color: #4f46e5;
+}
+
+/* Mini text size */
+.text-xxs {
+	font-size: .65rem;
+}

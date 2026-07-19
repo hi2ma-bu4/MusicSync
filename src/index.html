@@ -1,0 +1,391 @@
+<!DOCTYPE html>
+<html lang="ja" class="h-full">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<title>MusicSync - iTunes同期ツール</title>
+</head>
+<body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
+
+	<!-- Header - Slimmed with dropdown Profile selection -->
+	<header class="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0 relative">
+		<!-- Brand & Version -->
+		<div class="flex items-center space-x-2">
+			<i class="lucide-music text-indigo-400 text-lg"></i>
+			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.0.1</span>
+		</div>
+
+		<!-- Profile Dropdown Trigger (Replaces old sidebar) -->
+		<div class="relative">
+			<button id="btn-profile-dropdown" class="flex items-center space-x-1.5 bg-gray-750 hover:bg-gray-700 border border-gray-650 px-3 py-1 rounded text-xs font-semibold text-gray-200 transition focus:outline-none">
+				<i class="lucide-smartphone text-xs"></i>
+				<span id="lbl-active-profile">プロファイルを選択...</span>
+				<i class="lucide-chevron-down text-xxs text-gray-400"></i>
+			</button>
+
+			<!-- Profile Dropdown Options -->
+			<div id="profile-dropdown-menu" class="absolute left-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded shadow-xl py-1 z-50 text-xs hidden">
+				<div id="profile-dropdown-list" class="max-h-48 overflow-y-auto divide-y divide-gray-750">
+					<!-- Dynamically injected profiles list -->
+				</div>
+				<div class="border-t border-gray-700 pt-1">
+					<button id="btn-dropdown-new-profile" class="w-full text-left px-3 py-1.5 hover:bg-indigo-900 hover:text-white transition flex items-center space-x-1.5 text-indigo-300">
+						<i class="lucide-plus text-xs"></i>
+						<span>新規プロファイル作成...</span>
+					</button>
+					<button id="btn-dropdown-edit-profile" class="w-full text-left px-3 py-1.5 hover:bg-gray-750 hover:text-white transition flex items-center space-x-1.5 text-gray-400 hidden">
+						<i class="lucide-edit-2 text-xs"></i>
+						<span>現在のプロファイル編集...</span>
+					</button>
+					<button id="btn-dropdown-delete-profile" class="w-full text-left px-3 py-1.5 hover:bg-red-950 hover:text-red-400 transition flex items-center space-x-1.5 text-red-500 hidden">
+						<i class="lucide-trash-2 text-xs"></i>
+						<span>現在のプロファイル削除...</span>
+					</button>
+					<div class="border-t border-gray-750 pt-1">
+						<button id="btn-dropdown-settings" class="w-full text-left px-3 py-1.5 hover:bg-gray-750 hover:text-white transition flex items-center space-x-1.5 text-gray-400">
+							<i class="lucide-settings text-xs"></i>
+							<span>ステータス色の設定...</span>
+						</button>
+					</div>
+				</div>
+			</div>
+		</div>
+
+		<!-- Selected Paths Small Header Badge (Saves Space) -->
+		<div id="header-paths-badge" class="hidden lg:flex items-center space-x-3 text-xxs text-gray-400">
+			<div>
+				<span>iTunes: </span><span id="header-itunes-path" class="font-mono text-gray-300"></span>
+			</div>
+			<div>
+				<span>スマホ: </span><span id="header-phone-path" class="font-mono text-gray-300"></span>
+			</div>
+		</div>
+	</header>
+
+	<!-- Main Workspace -->
+	<div class="flex-1 flex flex-col overflow-hidden relative">
+
+		<!-- No profile selected view -->
+		<div id="no-profile-selected-view" class="absolute inset-0 flex flex-col items-center justify-center p-12 text-center bg-gray-900 z-30">
+			<i class="lucide-music-4 text-gray-600 text-5xl mb-4"></i>
+			<h3 class="text-base font-bold text-gray-300">プロファイルが選択されていません</h3>
+			<p class="text-xs text-gray-500 mt-2 max-w-sm">ヘッダーの「プロファイルを選択...」をクリックして、同期元のiTunesフォルダと同期先のスマホフォルダを設定してください。</p>
+		</div>
+
+		<!-- Active Workspace -->
+		<div id="active-workspace" class="flex-1 flex flex-col overflow-hidden hidden relative">
+
+			<!-- Slim Filter & Nav Bar -->
+			<div class="px-4 py-1.5 bg-gray-850 border-b border-gray-700 flex items-center justify-between flex-shrink-0 text-xs">
+				<!-- Navigation Tabs (Dropdown on small sizes) -->
+				<div class="flex items-center space-x-4">
+					<!-- Dropdown for small screens -->
+					<div class="block sm:hidden relative">
+						<button id="btn-tabs-dropdown" class="flex items-center space-x-1 bg-gray-700 hover:bg-gray-650 px-2.5 py-1 rounded text-gray-300">
+							<span id="lbl-active-tab">アーティスト</span>
+							<i class="lucide-chevron-down text-xxs"></i>
+						</button>
+						<div id="tabs-dropdown-menu" class="absolute left-0 mt-1 w-32 bg-gray-800 border border-gray-700 rounded shadow-xl py-1 z-40 hidden">
+							<button data-tab="artist" class="tab-opt w-full text-left px-3 py-1 hover:bg-gray-700 text-gray-300">アーティスト</button>
+							<button data-tab="album" class="tab-opt w-full text-left px-3 py-1 hover:bg-gray-700 text-gray-300">アルバム</button>
+							<button data-tab="genre" class="tab-opt w-full text-left px-3 py-1 hover:bg-gray-700 text-gray-300">ジャンル</button>
+							<button data-tab="track" class="tab-opt w-full text-left px-3 py-1 hover:bg-gray-700 text-gray-300">個別曲</button>
+						</div>
+					</div>
+
+					<!-- Real Tabs for Larger Screens -->
+					<nav class="hidden sm:flex space-x-3 border-b-0" aria-label="Tabs">
+						<button id="tab-artist" class="tab-btn pb-1 pt-0.5 border-b-2 border-indigo-500 text-indigo-400 font-semibold transition flex items-center space-x-1">
+							<i class="lucide-user text-xs"></i>
+							<span>アーティスト</span>
+						</button>
+						<button id="tab-album" class="tab-btn pb-1 pt-0.5 border-b-2 border-transparent text-gray-400 hover:text-white transition flex items-center space-x-1">
+							<i class="lucide-disc text-xs"></i>
+							<span>アルバム</span>
+						</button>
+						<button id="tab-genre" class="tab-btn pb-1 pt-0.5 border-b-2 border-transparent text-gray-400 hover:text-white transition flex items-center space-x-1">
+							<i class="lucide-tags text-xs"></i>
+							<span>ジャンル</span>
+						</button>
+						<button id="tab-track" class="tab-btn pb-1 pt-0.5 border-b-2 border-transparent text-gray-400 hover:text-white transition flex items-center space-x-1">
+							<i class="lucide-music text-xs"></i>
+							<span>個別曲</span>
+						</button>
+					</nav>
+				</div>
+
+				<!-- Compact Search Box on the Right -->
+				<div class="relative w-48 sm:w-64">
+					<span class="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400 pointer-events-none">
+						<i class="lucide-search text-xs"></i>
+					</span>
+					<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-3 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
+				</div>
+			</div>
+		</div>
+		<!-- Workspace Content Container -->
+		<div class="flex-1 overflow-hidden relative">
+
+			<!-- Scan state prompt overlay -->
+			<div id="prompt-to-scan-view" class="absolute inset-0 flex flex-col items-center justify-center text-center p-8 bg-gray-900 z-10">
+				<i class="lucide-refresh-cw text-gray-600 text-4xl mb-3 animate-pulse"></i>
+				<h4 class="text-xs font-bold text-gray-300">ライブラリの比較がまだ行われていません</h4>
+				<p class="text-xxs text-gray-500 mt-1 max-w-xs">最下部の「比較開始」ボタンをクリックして、iTunesとスマホ内の曲の差分を比較してください。</p>
+			</div>
+
+			<!-- Group Accordion Trees (Artist, Album, Genre sharing same viewport) -->
+			<div id="tree-container" class="h-full overflow-y-auto p-4 space-y-2 hidden">
+				<!-- Dynamic Accordion elements are injected here -->
+			</div>
+
+			<!-- Track Flat Table (Virtual Scroll Viewport) -->
+			<div id="track-container" class="h-full hidden">
+				<!-- Resizable Colgroup Table Header -->
+				<div class="h-8 bg-gray-800 border-b border-gray-700 flex items-center text-xxs font-semibold uppercase tracking-wider text-gray-400 sticky top-0 z-20">
+					<div class="flex-1 flex items-center w-full" id="table-header-row">
+						<!-- Checking column -->
+						<div class="flex-shrink-0 text-center flex items-center justify-center" style="width: 50px;">
+							<input id="chk-master" type="checkbox" class="rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+						</div>
+						<!-- Columns with resizing headers -->
+						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 250px;" id="th-title">
+							<span>曲名</span>
+							<div class="resizer" id="resizer-title"></div>
+						</div>
+						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-artist">
+							<span>アーティスト</span>
+							<div class="resizer" id="resizer-artist"></div>
+						</div>
+						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-album">
+							<span>アルバム</span>
+							<div class="resizer" id="resizer-album"></div>
+						</div>
+						<div class="flex-shrink-0 px-2 relative truncate-cell text-center" style="width: 60px;" id="th-track">
+							<span>トラック</span>
+							<div class="resizer" id="resizer-track"></div>
+						</div>
+						<div class="flex-shrink-0 px-2 relative truncate-cell" style="width: 130px;" id="th-genre">
+							<span>ジャンル</span>
+							<div class="resizer" id="resizer-genre"></div>
+						</div>
+						<!-- Filler column for background status -->
+						<div class="flex-1 px-2">ステータス表示</div>
+					</div>
+				</div>
+
+				<!-- Virtual Scroll viewport -->
+				<div id="virtual-scroll-viewport">
+					<!-- Height spacing spacer -->
+					<div id="virtual-scroll-canvas"></div>
+					<!-- Rendered rows container -->
+					<div id="virtual-scroll-content">
+						<!-- Rows injected dynamically via virtual scroll engine -->
+					</div>
+				</div>
+			</div>
+
+		</div>
+	</div>
+
+	<!-- Bottom Unified Footer - Summary + Colored Legend + Operations -->
+	<footer class="bg-gray-800 border-t border-gray-700 px-4 py-2 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs z-30">
+		<!-- Summary and Legend integration (● missing, ● updated, ● synced, ● phoneOnly) -->
+		<div id="footer-summary" class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-400">
+			<span>● 全件: <strong id="cnt-total" class="text-white font-mono">0</strong></span>
+			<span class="flex items-center space-x-1">
+				<span class="w-2 h-2 rounded-full bg-missing inline-block"></span>
+				<span>未存在: <strong id="cnt-missing" class="text-white font-mono">0</strong></span>
+			</span>
+			<span class="flex items-center space-x-1">
+				<span class="w-2 h-2 rounded-full bg-updated inline-block"></span>
+				<span>更新あり: <strong id="cnt-updated" class="text-white font-mono">0</strong></span>
+			</span>
+			<span class="flex items-center space-x-1">
+				<span class="w-2 h-2 rounded-full bg-synced inline-block"></span>
+				<span>同期済: <strong id="cnt-synced" class="text-white font-mono">0</strong></span>
+			</span>
+			<span class="flex items-center space-x-1">
+				<span class="w-2 h-2 rounded-full bg-phone-only inline-block"></span>
+				<span>スマホのみ: <strong id="cnt-phone-only" class="text-white font-mono">0</strong></span>
+			</span>
+			<span id="cnt-path-warnings" class="text-amber-400 font-medium hidden">⚠️ 配置不一致: <strong class="font-mono">0</strong>件</span>
+			<span class="text-xxs border-l border-gray-700 pl-3">選択中: コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono">0</strong> / 削除 <strong id="cnt-checked-delete" class="text-red-400 font-mono">0</strong></span>
+		</div>
+
+		<!-- Operations buttons on the bottom right -->
+		<div class="flex items-center space-x-2 justify-end">
+			<button id="btn-scan" class="bg-gray-700 hover:bg-gray-650 text-white font-semibold px-3 py-1.5 rounded transition text-xs flex items-center space-x-1 shadow" disabled>
+				<i class="lucide-refresh-cw text-xs"></i>
+				<span>比較開始</span>
+			</button>
+			<button id="btn-sync-exec" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold px-4 py-1.5 rounded transition text-xs flex items-center space-x-1 shadow" disabled>
+				<i class="lucide-arrow-right text-xs"></i>
+				<span>同期実行</span>
+			</button>
+		</div>
+	</footer>
+
+	<!-- ==================== MODALS ==================== -->
+
+	<!-- 1. Profile Creation/Edit Modal -->
+	<div id="modal-profile" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-md p-5 mx-4 text-xs">
+			<h3 id="profile-modal-title" class="text-sm font-bold text-indigo-300 mb-3.5">同期プロファイルの作成</h3>
+			<form id="form-profile" class="space-y-3.5">
+				<input type="hidden" id="txt-profile-id">
+
+				<div>
+					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">プロファイル名</label>
+					<input type="text" id="txt-profile-name" required placeholder="例: スマホ同期" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white">
+				</div>
+
+				<div>
+					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">iTunes Music フォルダ (ReadOnly)</label>
+					<div class="flex space-x-1.5">
+						<input type="text" id="txt-profile-itunes" required placeholder="例: C:\Users\Username\Music\iTunes\iTunes Media\Music" class="flex-1 bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
+						<button type="button" id="btn-choose-itunes" class="bg-gray-600 hover:bg-gray-550 px-2 rounded text-xxs transition">参照...</button>
+					</div>
+				</div>
+
+				<div>
+					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">スマートフォン Music フォルダ (書き込み対象)</label>
+					<div class="flex space-x-1.5">
+						<input type="text" id="txt-profile-phone" required placeholder="例: M:\Music" class="flex-1 bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
+						<button type="button" id="btn-choose-phone" class="bg-gray-600 hover:bg-gray-550 px-2 rounded text-xxs transition">参照...</button>
+					</div>
+				</div>
+
+				<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+					<button type="button" id="btn-profile-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+					<button type="submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition font-semibold text-white">保存</button>
+				</div>
+			</form>
+		</div>
+	</div>
+
+	<!-- 2. Settings (Color Customizable) Modal -->
+	<div id="modal-settings" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-xs p-5 mx-4 text-xs">
+			<h3 class="text-sm font-bold text-indigo-300 mb-3.5">ステータス表示色の設定</h3>
+			<div class="space-y-3">
+				<div class="flex items-center justify-between">
+					<span class="text-gray-300">スマホに未存在 (新規)</span>
+					<input type="color" id="color-missing" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+				</div>
+				<div class="flex items-center justify-between">
+					<span class="text-gray-300">メタデータ変更あり</span>
+					<input type="color" id="color-updated" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+				</div>
+				<div class="flex items-center justify-between">
+					<span class="text-gray-300">同期済</span>
+					<input type="color" id="color-synced" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+				</div>
+				<div class="flex items-center justify-between">
+					<span class="text-gray-300">スマホ側のみに存在</span>
+					<input type="color" id="color-phone-only" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+				</div>
+
+				<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+					<button type="button" id="btn-settings-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+					<button type="button" id="btn-settings-save" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">保存</button>
+				</div>
+			</div>
+		</div>
+	</div>
+
+	<!-- 3. Secure Deletion Confirmation Modal -->
+	<div id="modal-delete-confirm" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-md p-5 mx-4 flex flex-col max-h-[80%] text-xs">
+			<div class="flex items-center space-x-2 text-red-400 mb-2">
+				<i class="lucide-alert-triangle text-xl"></i>
+				<h3 class="text-sm font-bold">スマホのみの曲の削除の厳重確認</h3>
+			</div>
+
+			<p class="text-gray-400 mb-2.5">
+				スマートフォン側のみに存在する以下の曲（合計 <strong id="lbl-del-count" class="text-red-400 font-mono">0</strong> 曲）が削除対象として選択されています。
+				PC側のiTunesにないため、削除すると復元できません。
+			</p>
+
+			<!-- Target List -->
+			<div id="delete-target-list" class="flex-1 min-h-0 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2.5 mb-3 space-y-1 font-mono text-xxs text-gray-400">
+				<!-- Dynamically injected delete list -->
+			</div>
+
+			<div class="space-y-2 pt-2 border-t border-gray-700">
+				<p class="text-amber-400 font-medium">
+					実行するには、下の入力欄に「<span class="font-bold select-all bg-gray-950 px-1 py-0.5 rounded text-white">削除</span>」と入力してください。
+				</p>
+				<input type="text" id="txt-delete-verify" placeholder="削除 と入力してください" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-red-500 text-white text-center font-bold">
+			</div>
+
+			<div class="flex justify-end space-x-2 pt-3 mt-3 border-t border-gray-700">
+				<button type="button" id="btn-delete-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+				<button type="button" id="btn-delete-confirm-submit" class="bg-red-600 hover:bg-red-500 disabled:opacity-40 disabled:cursor-not-allowed px-3.5 py-1.5 rounded transition text-white font-semibold" disabled>完全に削除する</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 4. Reorganization/Relocation Confirmation Modal (Replaces old 'Move' table column) -->
+	<div id="modal-move-confirm" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-lg p-5 mx-4 flex flex-col max-h-[80%] text-xs">
+			<div class="flex items-center space-x-2 text-amber-400 mb-2">
+				<i class="lucide-refresh-cw text-xl animate-spin" style="animation-duration: 3s;"></i>
+				<h3 class="text-sm font-bold">異なるフォルダ構造（配置移動）の確認</h3>
+			</div>
+
+			<p class="text-gray-400 mb-2">
+				iTunesとスマホ側で相対保存パスが違っている曲（合計 <strong id="lbl-move-count" class="text-amber-400 font-mono">0</strong> 曲）が見つかりました。
+				同期時に、iTunesと同じ構造になるようにスマホ側のファイルを自動移動（リネーム）しますか？
+			</p>
+
+			<!-- Master relocate checkbox in modal -->
+			<div class="flex items-center space-x-2 py-1.5 mb-1.5 bg-gray-900 border border-gray-750 px-3 rounded">
+				<input type="checkbox" id="chk-modal-move-master" class="rounded bg-gray-700 border-gray-650 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+				<label for="chk-modal-move-master" class="font-semibold text-gray-300 select-none cursor-pointer">すべてのファイルの自動移動を承認する</label>
+			</div>
+
+			<!-- Relocation list -->
+			<div id="move-target-list" class="flex-1 min-h-0 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2.5 mb-3 divide-y divide-gray-800">
+				<!-- Dynamically injected relocation rows -->
+			</div>
+
+			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+				<button type="button" id="btn-move-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">戻る</button>
+				<button type="button" id="btn-move-confirm-submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">同期を続行する</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 5. Sync Progress & Logs Modal -->
+	<div id="modal-progress" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-xl p-5 mx-4 flex flex-col max-h-[80%] text-xs">
+			<h3 id="progress-modal-title" class="text-sm font-bold text-indigo-300 mb-2.5">同期の処理中...</h3>
+
+			<div class="mb-3.5">
+				<div class="flex justify-between items-center text-xxs text-gray-400 mb-1">
+					<span id="lbl-progress-status">ファイルを処理しています...</span>
+					<span id="lbl-progress-pct" class="font-mono">0%</span>
+				</div>
+				<div class="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
+					<div id="progress-bar-fill" class="bg-indigo-500 h-full transition-all duration-300" style="width: 0%"></div>
+				</div>
+			</div>
+
+			<div class="flex-1 min-h-0 flex flex-col">
+				<span class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">処理ログ</span>
+				<div id="progress-logs" class="flex-1 bg-gray-900 border border-gray-700 rounded p-3 font-mono text-xxs text-gray-400 overflow-y-auto space-y-0.5">
+					<!-- Logs injected dynamically -->
+				</div>
+			</div>
+
+			<div class="flex justify-end pt-3 mt-3 border-t border-gray-700">
+				<button type="button" id="btn-progress-close" class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-40 disabled:cursor-not-allowed px-4 py-1.5 rounded transition text-white font-semibold" disabled>閉じる</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- Module Loader -->
+	<script type="module" src="./renderer.ts"></script>
+</body>
+</html>

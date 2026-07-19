@@ -8,19 +8,30 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "build": "node dev/esbuild.mjs",
-    "start": "npm run build && electron ."
+    "build:main": "node dev/build.mjs",
+    "build:renderer": "vite build --config vite.config.mjs",
+    "build": "npm run build:renderer && npm run build:main",
+    "start": "npm run build && electron .",
+    "dev": "vite --config vite.config.mjs"
   },
   "dependencies": {
+    "@tailwindcss/vite": "^4.3.3",
     "electron": "^43.1.1",
     "electron-store": "^11.0.2",
+    "lucide-static": "^1.25.0",
     "music-metadata": "^11.14.0",
+    "tailwindcss": "^4.3.3",
     "virtua": "^0.49.3"
   },
   "devDependencies": {
+    "@chialab/esbuild-plugin-commonjs": "^0.19.1",
     "@types/node": "^26.1.1",
+    "esbuild": "^0.28.1",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
+  },
+  "allowScripts": {
+    "esbuild": true
   },
   "volta": {
     "node": "24.18.0",
