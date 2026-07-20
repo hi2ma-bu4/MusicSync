@@ -344,7 +344,7 @@ function renderSearchCombobox() {
 	});
 }
 
-function navigateToSuggestion(tabId: "artist" | "album" | "track", targetName: string) {
+function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", targetName: string) {
 	// 1. Preserve search input and query, just hide combobox
 	elSearchCombobox.classList.add("hidden");
 
@@ -371,6 +371,17 @@ function navigateToSuggestion(tabId: "artist" | "album" | "track", targetName: s
 				el.scrollIntoView({ behavior: "smooth", block: "center" });
 			}
 		}, 100);
+	} else if (tabId === "genre") {
+		const genreKey = getSafeId("genre", targetName);
+		state.expandedGroups.add(genreKey);
+		switchTab("genre");
+		// 3. Scroll to target element
+		setTimeout(() => {
+			const el = document.getElementById(`hdr-${genreKey}`);
+			if (el) {
+				el.scrollIntoView({ behavior: "smooth", block: "center" });
+			}
+		}, 100);
 	} else if (tabId === "track") {
 		switchTab("track");
 		// 3. Scroll to target item index in the virtual scroll viewport
@@ -382,6 +393,7 @@ function navigateToSuggestion(tabId: "artist" | "album" | "track", targetName: s
 		}, 100);
 	}
 }
+(window as any).navigateToSuggestion = navigateToSuggestion;
 
 function renderActiveView() {
 	updateStatsSummary();
@@ -447,8 +459,13 @@ function updateSummaryBar() {
 	elCntCheckedCopy.textContent = String(state.checkedCopyTrackIds.size);
 	elCntCheckedDelete.textContent = String(state.checkedDeleteTrackIds.size);
 
+	const hasCheckedWarning = state.scannedTracks.some((t) => {
+		const hasWarn = (t.pathMismatch && (t.status === "synced" || t.status === "updated")) || t.status === "updated";
+		return hasWarn && isTrackChecked(t);
+	});
+
 	const totalChecks = state.checkedCopyTrackIds.size + state.checkedMoveTrackIds.size + state.checkedDeleteTrackIds.size;
-	elBtnSyncExec.disabled = totalChecks === 0;
+	elBtnSyncExec.disabled = totalChecks === 0 && !hasCheckedWarning;
 }
 
 function updateMasterCheckboxState() {
@@ -770,6 +787,217 @@ function setupEventListeners() {
 				e.preventDefault();
 				handleRedo(renderActiveView);
 			}
+		}
+	});
+
+	// Custom Warning Popover logic (delegated)
+	let closeTimeout: any = null;
+	const popoverEl = (() => {
+		let el = document.getElementById("custom-warning-popover");
+		if (!el) {
+			el = document.createElement("div");
+			el.id = "custom-warning-popover";
+			el.className = "absolute hidden bg-gray-950 border border-gray-750 text-gray-200 text-xxs p-3 rounded shadow-2xl z-50 max-w-sm pointer-events-auto select-text font-sans leading-relaxed whitespace-pre-line";
+			document.body.appendChild(el);
+
+			el.addEventListener("mouseenter", () => {
+				if (closeTimeout) clearTimeout(closeTimeout);
+			});
+			el.addEventListener("mouseleave", () => {
+				startCloseTimer();
+			});
+		}
+		return el;
+	})();
+
+	const startCloseTimer = () => {
+		if (closeTimeout) clearTimeout(closeTimeout);
+		closeTimeout = setTimeout(() => {
+			popoverEl.classList.add("hidden");
+		}, 500);
+	};
+
+	const cancelCloseTimer = () => {
+		if (closeTimeout) clearTimeout(closeTimeout);
+	};
+
+	const getWarningTracksForParent = (type: string, name: string): any[] => {
+		return state.scannedTracks.filter((t) => {
+			if (!t.pathMismatch || !(t.status === "synced" || t.status === "updated")) return false;
+			const meta = t.itunesTrack || t.phoneTrack;
+			if (!meta) return false;
+			if (type === "artist") return meta.artist === name;
+			if (type === "album") return meta.album === name;
+			if (type === "genre") return meta.genre === name;
+			return false;
+		});
+	};
+
+	document.addEventListener("mouseover", (e) => {
+		const warnTrigger = (e.target as HTMLElement).closest(".warn-icon");
+		if (warnTrigger) {
+			cancelCloseTimer();
+			const trackId = warnTrigger.getAttribute("data-track-id");
+			const parentType = warnTrigger.getAttribute("data-parent-type");
+			const parentName = warnTrigger.getAttribute("data-parent-name");
+
+			let content = "";
+			if (trackId) {
+				const track = state.scannedTracks.find((t) => t.id === trackId);
+				if (track) {
+					const pt = track.phoneTrack || track.itunesTrack;
+					const it = track.itunesTrack!;
+					content = `⚠️ 【位置不一致の警告】\n曲名: ${it.title}\nアーティスト: ${it.artist}\n\n[現在(比較先)の保存パス]:\n${pt?.relativePath || ""}\n\n[iTunesの保存パス]:\n${it.relativePath}`;
+				}
+			} else if (parentType && parentName) {
+				const warnTracks = getWarningTracksForParent(parentType, parentName);
+				content = `⚠️ 【グループ警告件数: ${warnTracks.length}件】\n`;
+				warnTracks.slice(0, 10).forEach((t, i) => {
+					const it = t.itunesTrack || t.phoneTrack;
+					content += `\n${i + 1}. ${it.artist} - ${it.title}\n   (配置不一致)`;
+				});
+				if (warnTracks.length > 10) {
+					content += `\n...他 ${warnTracks.length - 10} 件`;
+				}
+			}
+
+			if (content) {
+				popoverEl.innerHTML = content.replace(/\n/g, "<br>");
+				popoverEl.classList.remove("hidden");
+
+				const rect = warnTrigger.getBoundingClientRect();
+				const top = rect.bottom + window.scrollY + 5;
+				const left = Math.max(10, Math.min(window.innerWidth - 350, rect.left + window.scrollX));
+				popoverEl.style.top = `${top}px`;
+				popoverEl.style.left = `${left}px`;
+			}
+		}
+	});
+
+	document.addEventListener("mouseout", (e) => {
+		const warnTrigger = (e.target as HTMLElement).closest(".warn-icon");
+		if (warnTrigger) {
+			startCloseTimer();
+		}
+	});
+
+	document.addEventListener("click", (e) => {
+		const warnTrigger = (e.target as HTMLElement).closest(".warn-icon");
+		if (warnTrigger) {
+			cancelCloseTimer();
+			const isHidden = popoverEl.classList.contains("hidden");
+			if (isHidden) {
+				const mouseOverEvent = new MouseEvent("mouseover", { bubbles: true });
+				warnTrigger.dispatchEvent(mouseOverEvent);
+			} else {
+				popoverEl.classList.add("hidden");
+			}
+		} else {
+			const isClickInsidePopover = (e.target as HTMLElement).closest("#custom-warning-popover");
+			if (!isClickInsidePopover) {
+				popoverEl.classList.add("hidden");
+			}
+		}
+	});
+
+	// Custom Context Menu logic (delegated)
+	const contextMenuEl = (() => {
+		let el = document.getElementById("custom-context-menu");
+		if (!el) {
+			el = document.createElement("div");
+			el.id = "custom-context-menu";
+			el.className = "absolute hidden bg-gray-850 border border-gray-700 text-gray-200 text-xxs rounded shadow-2xl z-50 py-1 min-w-64 w-max max-w-sm font-sans pointer-events-auto select-none";
+			document.body.appendChild(el);
+
+			document.addEventListener("click", () => {
+				el!.classList.add("hidden");
+			});
+			window.addEventListener("keydown", (ev) => {
+				if (ev.key === "Escape") {
+					el!.classList.add("hidden");
+				}
+			});
+		}
+		return el;
+	})();
+
+	document.addEventListener("contextmenu", (e) => {
+		const trackRow = (e.target as HTMLElement).closest(".context-track");
+		const albumRow = (e.target as HTMLElement).closest(".context-album");
+
+		if (trackRow) {
+			e.preventDefault();
+			const title = trackRow.getAttribute("data-title") || "";
+			const artist = trackRow.getAttribute("data-artist") || "";
+			const album = trackRow.getAttribute("data-album") || "";
+			const genre = trackRow.getAttribute("data-genre") || "";
+
+			let html = "";
+			if (artist) {
+				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
+			}
+			if (album) {
+				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-album">アルバム「${album}」の曲を表示</div>`;
+			}
+			if (genre) {
+				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
+			}
+
+			if (html) {
+				contextMenuEl.innerHTML = html;
+				contextMenuEl.classList.remove("hidden");
+
+				const top = e.clientY + window.scrollY;
+				const left = Math.max(10, Math.min(window.innerWidth - 260, e.clientX + window.scrollX));
+				contextMenuEl.style.top = `${top}px`;
+				contextMenuEl.style.left = `${left}px`;
+
+				const btnArtist = document.getElementById("ctx-jump-artist");
+				if (btnArtist) {
+					btnArtist.addEventListener("click", () => navigateToSuggestion("artist", artist));
+				}
+				const btnAlbum = document.getElementById("ctx-jump-album");
+				if (btnAlbum) {
+					btnAlbum.addEventListener("click", () => navigateToSuggestion("album", album));
+				}
+				const btnGenre = document.getElementById("ctx-jump-genre");
+				if (btnGenre) {
+					btnGenre.addEventListener("click", () => navigateToSuggestion("genre", genre));
+				}
+			}
+		} else if (albumRow) {
+			e.preventDefault();
+			const artist = albumRow.getAttribute("data-artist") || "";
+			const genre = albumRow.getAttribute("data-genre") || "";
+
+			let html = "";
+			if (artist) {
+				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
+			}
+			if (genre) {
+				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
+			}
+
+			if (html) {
+				contextMenuEl.innerHTML = html;
+				contextMenuEl.classList.remove("hidden");
+
+				const top = e.clientY + window.scrollY;
+				const left = Math.max(10, Math.min(window.innerWidth - 260, e.clientX + window.scrollX));
+				contextMenuEl.style.top = `${top}px`;
+				contextMenuEl.style.left = `${left}px`;
+
+				const btnArtist = document.getElementById("ctx-jump-artist");
+				if (btnArtist) {
+					btnArtist.addEventListener("click", () => navigateToSuggestion("artist", artist));
+				}
+				const btnGenre = document.getElementById("ctx-jump-genre");
+				if (btnGenre) {
+					btnGenre.addEventListener("click", () => navigateToSuggestion("genre", genre));
+				}
+			}
+		} else {
+			contextMenuEl.classList.add("hidden");
 		}
 	});
 }

@@ -11,5 +11,8 @@ export function createWindow() {
 		},
 	});
 
+	win.setMenuBarVisibility(false);
+	win.removeMenu();
+
 	win.loadFile(path.join(process.cwd(), "dist", "index.html"));
 }

@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState } from "./utils";
+import { getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -28,7 +28,7 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 	});
 }
 
-export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (tab: "artist" | "album" | "track", targetName: string) => void) {
+export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (tab: "artist" | "album" | "genre" | "track", targetName: string) => void) {
 	container.innerHTML = "";
 
 	const query = state.searchQuery.trim().toLowerCase();
@@ -178,6 +178,139 @@ interface RenderCallbacks {
 	renderActiveView: () => void;
 }
 
+// Lazy renders tracks inside an Album
+function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, parentUpdateId: string, parentTracks: any[], cb: RenderCallbacks) {
+	elTracksChildren.innerHTML = "";
+	albumTracks.forEach((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (!meta) return;
+
+		const row = document.createElement("div");
+		row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-850 gap-2 bg-${t.status} context-track`;
+		row.setAttribute("data-track-id", t.id);
+		row.setAttribute("data-title", meta.title || "");
+		row.setAttribute("data-artist", meta.artist || "");
+		row.setAttribute("data-album", meta.album || "");
+		row.setAttribute("data-genre", meta.genre || "");
+
+		row.innerHTML = `
+			<label for="chk-track-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+				<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
+				<div class="flex items-center space-x-1 truncate">
+					<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
+					<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
+					${state.activeTab === "album" ? `<span class="text-gray-500 text-xxs truncate">by ${meta.artist}</span>` : ""}
+					${state.activeTab === "genre" ? `<span class="text-gray-500 truncate">by ${meta.artist}</span> <span class="text-gray-500 text-xxs truncate">on ${meta.album}</span>` : ""}
+				</div>
+			</label>
+			<div class="flex items-center pl-6">
+				${getStatusDot(t)}
+			</div>
+		`;
+
+		elTracksChildren.appendChild(row);
+
+		const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+		chkTrack.addEventListener("change", () => {
+			pushHistoryState();
+			setTrackCheckedState(t, chkTrack.checked);
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
+			setCheckboxState(`chk-${albumKey}`, albumTracks);
+			if (parentUpdateId) {
+				setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
+			}
+		});
+	});
+}
+
+// Lazy renders albums inside an Artist
+function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMap: Map<string, any[]>, sortedAlbums: string[], cb: RenderCallbacks, artistKey: string, artistTracks: any[]) {
+	elChildren.innerHTML = "";
+	sortedAlbums.forEach((albumName) => {
+		const albumTracks = albumMap.get(albumName)!;
+		const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
+		const isAlbumOpen = state.expandedGroups.has(albumKey);
+
+		const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+		const firstArtist = firstMeta?.artist || "";
+		const firstGenre = firstMeta?.genre || "";
+
+		const divAlbum = document.createElement("div");
+		divAlbum.id = `album-card-${albumKey}`;
+		divAlbum.className = "relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0 context-album";
+		divAlbum.setAttribute("data-album", albumName);
+		divAlbum.setAttribute("data-artist", firstArtist);
+		divAlbum.setAttribute("data-genre", firstGenre);
+
+		divAlbum.innerHTML = `
+			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
+				<div class="flex items-center space-x-2 flex-1 min-w-0">
+					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
+					<div class="flex items-center space-x-1.5 truncate">
+						<i class="icon-disc text-indigo-300 text-xxs"></i>
+						<span class="font-semibold text-gray-300">${albumName}</span>
+						<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+						${getParentWarningHtml("album", albumName, albumTracks)}
+					</div>
+				</div>
+				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
+			</div>
+			<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
+				<div id="children-${albumKey}" class="bg-gray-900 border-t border-gray-700 divide-y divide-gray-800"></div>
+			</div>
+		`;
+
+		elChildren.appendChild(divAlbum);
+		setCheckboxState(`chk-${albumKey}`, albumTracks);
+		applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
+
+		const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
+		chkAlbum.addEventListener("click", (e) => {
+			e.stopPropagation();
+			pushHistoryState();
+			const isChecked = chkAlbum.checked;
+			albumTracks.forEach((t) => {
+				setTrackCheckedState(t, isChecked);
+			});
+
+			// Directly update DOM elements without full re-render
+			albumTracks.forEach((t) => {
+				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+				if (chkTrack) chkTrack.checked = isChecked;
+			});
+			setCheckboxState(`chk-${artistKey}`, artistTracks);
+
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
+		});
+
+		document.getElementById(`hdr-${albumKey}`)!.addEventListener("click", () => {
+			const isOpenNow = state.expandedGroups.has(albumKey);
+			const newOpenState = !isOpenNow;
+			if (newOpenState) state.expandedGroups.add(albumKey);
+			else state.expandedGroups.delete(albumKey);
+
+			const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
+			const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
+			if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+			if (content) content.classList.toggle("open", newOpenState);
+
+			if (newOpenState) {
+				const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
+				if (elTracksChildren.innerHTML === "") {
+					renderAlbumTracks(elTracksChildren, albumTracks, albumKey, artistKey, artistTracks, cb);
+				}
+			}
+		});
+
+		if (isAlbumOpen) {
+			const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
+			renderAlbumTracks(elTracksChildren, albumTracks, albumKey, artistKey, artistTracks, cb);
+		}
+	});
+}
+
 export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	container.innerHTML = "";
 	if (state.filteredTracks.length === 0) {
@@ -221,6 +354,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 						<i class="icon-user text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${artistName}</span>
 						<span class="text-xxs text-gray-500">(${artistTracks.length}曲)</span>
+						${getParentWarningHtml("artist", artistName, artistTracks)}
 					</div>
 				</div>
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isArtistOpen ? "transform rotate-90" : ""}"></i>
@@ -241,99 +375,48 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			artistTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-			cb.renderActiveView();
+
+			// Directly update DOM checkboxes of Artist tree
+			sortedAlbums.forEach((albumName) => {
+				const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
+				const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
+				if (chkAlbum) {
+					chkAlbum.checked = isChecked;
+					chkAlbum.indeterminate = false;
+				}
+				const albumTracks = albumMap.get(albumName)!;
+				albumTracks.forEach((t) => {
+					const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+					if (chkTrack) chkTrack.checked = isChecked;
+				});
+			});
+
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
 		});
 
 		document.getElementById(`hdr-${artistKey}`)!.addEventListener("click", () => {
-			if (isArtistOpen) state.expandedGroups.delete(artistKey);
-			else state.expandedGroups.add(artistKey);
-			cb.renderActiveView();
+			const isOpenNow = state.expandedGroups.has(artistKey);
+			const newOpenState = !isOpenNow;
+			if (newOpenState) state.expandedGroups.add(artistKey);
+			else state.expandedGroups.delete(artistKey);
+
+			const chevron = document.querySelector(`#hdr-${artistKey} .icon-chevron-right`);
+			const content = document.querySelector(`#hdr-${artistKey} + .accordion-content`);
+			if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+			if (content) content.classList.toggle("open", newOpenState);
+
+			if (newOpenState) {
+				const elChildren = document.getElementById(`children-${artistKey}`)!;
+				if (elChildren.innerHTML === "") {
+					renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb, artistKey, artistTracks);
+				}
+			}
 		});
 
 		if (isArtistOpen) {
 			const elChildren = document.getElementById(`children-${artistKey}`)!;
-			sortedAlbums.forEach((albumName) => {
-				const albumTracks = albumMap.get(albumName)!;
-				const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
-				const isAlbumOpen = state.expandedGroups.has(albumKey);
-
-				const divAlbum = document.createElement("div");
-				divAlbum.id = `album-card-${albumKey}`;
-				divAlbum.className = "relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0";
-				divAlbum.innerHTML = `
-					<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
-						<div class="flex items-center space-x-2 flex-1 min-w-0">
-							<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
-							<div class="flex items-center space-x-1.5 truncate">
-								<i class="icon-disc text-indigo-300 text-xxs"></i>
-								<span class="font-semibold text-gray-300">${albumName}</span>
-								<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
-							</div>
-						</div>
-						<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
-					</div>
-					<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
-						<div id="children-${albumKey}" class="bg-gray-900 border-t border-gray-700 divide-y divide-gray-800"></div>
-					</div>
-				`;
-
-				elChildren.appendChild(divAlbum);
-				setCheckboxState(`chk-${albumKey}`, albumTracks);
-				applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
-
-				const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
-				chkAlbum.addEventListener("click", (e) => {
-					e.stopPropagation();
-					pushHistoryState();
-					const isChecked = chkAlbum.checked;
-					albumTracks.forEach((t) => {
-						setTrackCheckedState(t, isChecked);
-					});
-					cb.renderActiveView();
-				});
-
-				document.getElementById(`hdr-${albumKey}`)!.addEventListener("click", () => {
-					if (isAlbumOpen) state.expandedGroups.delete(albumKey);
-					else state.expandedGroups.add(albumKey);
-					cb.renderActiveView();
-				});
-
-				if (isAlbumOpen) {
-					const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
-					albumTracks.forEach((t) => {
-						const meta = t.itunesTrack || t.phoneTrack;
-						if (!meta) return;
-
-						const row = document.createElement("div");
-						row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-850 gap-2 bg-${t.status}`;
-
-						row.innerHTML = `
-							<div class="flex items-center space-x-2 flex-1 min-w-0">
-								<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
-								<div class="flex items-center space-x-1 truncate">
-									<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
-									<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
-								</div>
-							</div>
-							<div class="flex items-center pl-6">
-								${getStatusDot(t)}
-							</div>
-						`;
-
-						elTracksChildren.appendChild(row);
-
-						const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-						chkTrack.addEventListener("change", () => {
-							pushHistoryState();
-							setTrackCheckedState(t, chkTrack.checked);
-							cb.updateSummaryBar();
-							cb.updateMasterCheckboxState();
-							setCheckboxState(`chk-${albumKey}`, albumTracks);
-							setCheckboxState(`chk-${artistKey}`, artistTracks);
-						});
-					});
-				}
-			});
+			renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb, artistKey, artistTracks);
 		}
 	});
 }
@@ -360,9 +443,16 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		const albumKey = getSafeId("album", albumName);
 		const isAlbumOpen = state.expandedGroups.has(albumKey);
 
+		const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+		const firstArtist = firstMeta?.artist || "";
+		const firstGenre = firstMeta?.genre || "";
+
 		const div = document.createElement("div");
 		div.id = `album-card-${albumKey}`;
-		div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2";
+		div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2 context-album";
+		div.setAttribute("data-album", albumName);
+		div.setAttribute("data-artist", firstArtist);
+		div.setAttribute("data-genre", firstGenre);
 
 		div.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
@@ -372,6 +462,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 						<i class="icon-disc text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${albumName}</span>
 						<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+						${getParentWarningHtml("album", albumName, albumTracks)}
 					</div>
 				</div>
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
@@ -393,49 +484,38 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			albumTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-			cb.renderActiveView();
+
+			albumTracks.forEach((t) => {
+				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+				if (chkTrack) chkTrack.checked = isChecked;
+			});
+
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
 		});
 
 		document.getElementById(`hdr-${albumKey}`)!.addEventListener("click", () => {
-			if (isAlbumOpen) state.expandedGroups.delete(albumKey);
-			else state.expandedGroups.add(albumKey);
-			cb.renderActiveView();
+			const isOpenNow = state.expandedGroups.has(albumKey);
+			const newOpenState = !isOpenNow;
+			if (newOpenState) state.expandedGroups.add(albumKey);
+			else state.expandedGroups.delete(albumKey);
+
+			const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
+			const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
+			if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+			if (content) content.classList.toggle("open", newOpenState);
+
+			if (newOpenState) {
+				const elChildren = document.getElementById(`children-${albumKey}`)!;
+				if (elChildren.innerHTML === "") {
+					renderAlbumTracks(elChildren, albumTracks, albumKey, "", [], cb);
+				}
+			}
 		});
 
 		if (isAlbumOpen) {
 			const elChildren = document.getElementById(`children-${albumKey}`)!;
-			albumTracks.forEach((t) => {
-				const meta = t.itunesTrack || t.phoneTrack;
-				if (!meta) return;
-
-				const row = document.createElement("div");
-				row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900 gap-2 bg-${t.status}`;
-
-				row.innerHTML = `
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
-						<div class="flex items-center space-x-1.5 truncate">
-							<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
-							<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
-							<span class="text-gray-500 text-xxs truncate">by ${meta.artist}</span>
-						</div>
-					</div>
-					<div class="flex items-center pl-6">
-						${getStatusDot(t)}
-					</div>
-				`;
-
-				elChildren.appendChild(row);
-
-				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-				chkTrack.addEventListener("change", () => {
-					pushHistoryState();
-					setTrackCheckedState(t, chkTrack.checked);
-					cb.updateSummaryBar();
-					cb.updateMasterCheckboxState();
-					setCheckboxState(`chk-${albumKey}`, albumTracks);
-				});
-			});
+			renderAlbumTracks(elChildren, albumTracks, albumKey, "", [], cb);
 		}
 	});
 }
@@ -473,6 +553,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 						<i class="icon-tags text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${genreName}</span>
 						<span class="text-xxs text-gray-500">(${genreTracks.length}曲)</span>
+						${getParentWarningHtml("genre", genreName, genreTracks)}
 					</div>
 				</div>
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isGenreOpen ? "transform rotate-90" : ""}"></i>
@@ -493,49 +574,38 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			genreTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-			cb.renderActiveView();
+
+			genreTracks.forEach((t) => {
+				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+				if (chkTrack) chkTrack.checked = isChecked;
+			});
+
+			cb.updateSummaryBar();
+			cb.updateMasterCheckboxState();
 		});
 
 		document.getElementById(`hdr-${genreKey}`)!.addEventListener("click", () => {
-			if (isGenreOpen) state.expandedGroups.delete(genreKey);
-			else state.expandedGroups.add(genreKey);
-			cb.renderActiveView();
+			const isOpenNow = state.expandedGroups.has(genreKey);
+			const newOpenState = !isOpenNow;
+			if (newOpenState) state.expandedGroups.add(genreKey);
+			else state.expandedGroups.delete(genreKey);
+
+			const chevron = document.querySelector(`#hdr-${genreKey} .icon-chevron-right`);
+			const content = document.querySelector(`#hdr-${genreKey} + .accordion-content`);
+			if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+			if (content) content.classList.toggle("open", newOpenState);
+
+			if (newOpenState) {
+				const elChildren = document.getElementById(`children-${genreKey}`)!;
+				if (elChildren.innerHTML === "") {
+					renderAlbumTracks(elChildren, genreTracks, genreKey, "", [], cb);
+				}
+			}
 		});
 
 		if (isGenreOpen) {
 			const elChildren = document.getElementById(`children-${genreKey}`)!;
-			genreTracks.forEach((t) => {
-				const meta = t.itunesTrack || t.phoneTrack;
-				if (!meta) return;
-
-				const row = document.createElement("div");
-				row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900 gap-2 bg-${t.status}`;
-
-				row.innerHTML = `
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
-						<div class="flex items-center space-x-1.5 truncate">
-							<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
-							<span class="text-gray-500 truncate">by ${meta.artist}</span>
-							<span class="text-gray-500 text-xxs truncate">on ${meta.album}</span>
-						</div>
-					</div>
-					<div class="flex items-center pl-6">
-						${getStatusDot(t)}
-					</div>
-				`;
-
-				elChildren.appendChild(row);
-
-				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-				chkTrack.addEventListener("change", () => {
-					pushHistoryState();
-					setTrackCheckedState(t, chkTrack.checked);
-					cb.updateSummaryBar();
-					cb.updateMasterCheckboxState();
-					setCheckboxState(`chk-${genreKey}`, genreTracks);
-				});
-			});
+			renderAlbumTracks(elChildren, genreTracks, genreKey, "", [], cb);
 		}
 	});
 }

@@ -13,6 +13,8 @@ function createWindow() {
       contextIsolation: true
     }
   });
+  win.setMenuBarVisibility(false);
+  win.removeMenu();
   win.loadFile(path.join(process.cwd(), "dist", "index.html"));
 }
 

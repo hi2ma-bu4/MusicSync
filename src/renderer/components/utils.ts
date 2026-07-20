@@ -20,10 +20,7 @@ export function getStatusDot(track: any): string {
 
 	let pathWarnIcon = "";
 	if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
-		const pt = track.phoneTrack || track.itunesTrack;
-		const it = track.itunesTrack;
-		const tooltipText = `位置不一致\\n現在: ${pt.relativePath}\\niTunes: ${it.relativePath}`;
-		pathWarnIcon = `<span class="text-amber-500 font-bold ml-1 hover:scale-110 transition cursor-help" title="${tooltipText}">⚠️</span>`;
+		pathWarnIcon = `<span class="warn-icon text-amber-500 font-bold ml-1 hover:scale-110 transition cursor-help select-none" data-track-id="${track.id}">⚠️</span>`;
 	}
 
 	return `<span class="flex items-center space-x-1.5" title="${label}">
@@ -86,4 +83,11 @@ export function setCheckboxState(chkId: string, tracks: any[]) {
 			el.indeterminate = true;
 		}
 	}, 0);
+}
+
+// Generate warnings icon for parent headers (bubbles warning state up)
+export function getParentWarningHtml(parentType: string, parentName: string, parentTracks: any[]): string {
+	const warnCount = parentTracks.filter((t) => t.pathMismatch && (t.status === "synced" || t.status === "updated")).length;
+	if (warnCount === 0) return "";
+	return `<span class="warn-icon text-amber-500 font-bold ml-1.5 hover:scale-110 transition cursor-help select-none" data-parent-type="${parentType}" data-parent-name="${parentName}">⚠️</span>`;
 }

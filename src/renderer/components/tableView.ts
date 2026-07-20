@@ -52,8 +52,8 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 		const rowChecked = isTrackChecked(t);
 
 		rowsHtml += `
-			<div class="flex items-center text-xxs border-b border-gray-800 hover:bg-gray-800 hover:bg-opacity-40 transition-colors bg-${t.status} select-none pointer-events-auto" style="height: ${rowHeight}px;">
-				<div class="shrink-0 text-center flex items-center justify-center" style="width: 50px;">
+			<div class="vs-row flex items-center text-xxs border-b border-gray-800 hover:bg-gray-800 hover:bg-opacity-40 transition-colors bg-${t.status} select-none pointer-events-auto cursor-pointer context-track" data-track-id="${t.id}" data-title="${meta.title || ""}" data-artist="${meta.artist || ""}" data-album="${meta.album || ""}" data-genre="${meta.genre || ""}" style="height: ${rowHeight}px;">
+				<div class="shrink-0 text-center flex items-center justify-center vs-chk-cell" style="width: 50px;">
 					<input type="checkbox" data-id="${t.id}" class="vs-row-checkbox rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${rowChecked ? "checked" : ""}>
 				</div>
 				<div class="shrink-0 px-2 truncate-cell font-medium text-gray-200" style="width: ${widthTitle}; min-width: ${widthTitle}; max-width: ${widthTitle};" title="${meta.title}">${meta.title}</div>
@@ -80,6 +80,19 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 			setTrackCheckedState(track, el.checked);
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
+		});
+	});
+
+	document.querySelectorAll(".vs-row").forEach((row: any) => {
+		row.addEventListener("click", (e: MouseEvent) => {
+			if ((e.target as HTMLElement).closest("input") || (e.target as HTMLElement).closest(".warn-icon")) {
+				return;
+			}
+			const chk = row.querySelector(".vs-row-checkbox") as HTMLInputElement;
+			if (chk) {
+				chk.checked = !chk.checked;
+				chk.dispatchEvent(new Event("change"));
+			}
 		});
 	});
 }

@@ -123,13 +123,13 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-850 gap-3 border-b border-gray-800";
 
 				row.innerHTML = `
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
+					<label for="chk-modal-move-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
 						<input type="checkbox" id="chk-modal-move-${t.id}" class="chk-modal-move-item rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${state.checkedMoveTrackIds.has(t.id) ? "checked" : ""}>
 						<div class="truncate flex-1">
 							<div class="font-semibold text-gray-200">${it.artist} - ${it.title}</div>
 							<div class="text-gray-500 truncate font-mono text-xxs">現在: ${pt.relativePath} -> iTunes: ${it.relativePath}</div>
 						</div>
-					</div>
+					</label>
 				`;
 				elMoveTargetList.appendChild(row);
 
@@ -237,13 +237,13 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-850 gap-3 border-b border-gray-800";
 
 				row.innerHTML = `
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
+					<label for="chk-modal-del-itunes-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
 						<input type="checkbox" id="chk-modal-del-itunes-${t.id}" class="chk-modal-del-itunes-item rounded bg-gray-700 border-gray-650 text-red-500 focus:ring-red-400 h-3.5 w-3.5">
 						<div class="truncate flex-1">
 							<div class="font-semibold text-gray-200">${pt.artist || "Unknown"} - ${pt.title || "Unknown"}</div>
 							<div class="text-gray-500 truncate font-mono text-xxs">${pt.relativePath}</div>
 						</div>
-					</div>
+					</label>
 				`;
 				elDeleteItunesTargetList.appendChild(row);
 
