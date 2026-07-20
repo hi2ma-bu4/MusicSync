@@ -29,8 +29,107 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	const elColorUpdated = document.getElementById("color-updated") as HTMLInputElement;
 	const elColorSynced = document.getElementById("color-synced") as HTMLInputElement;
 	const elColorPhoneOnly = document.getElementById("color-phone_only") as HTMLInputElement;
+	const elBtnSettingsResetCache = document.getElementById("btn-settings-reset-cache")!;
 	const elBtnSettingsCancel = document.getElementById("btn-settings-cancel")!;
 	const elBtnSettingsSave = document.getElementById("btn-settings-save")!;
+
+	const elDelimsContainer = document.getElementById("settings-delims-container")!;
+	const elExceptionsContainer = document.getElementById("settings-exceptions-container")!;
+	const elBtnAddDelim = document.getElementById("btn-settings-add-delim")!;
+	const elBtnAddException = document.getElementById("btn-settings-add-exception")!;
+
+	let activeDelims: string[] = [];
+	let activeExceptions: string[] = [];
+
+	function renderDelimsInputs() {
+		elDelimsContainer.innerHTML = "";
+		if (activeDelims.length === 0) {
+			elDelimsContainer.innerHTML = '<p class="text-xxs text-gray-500 italic p-1">区切り文字が設定されていません</p>';
+			return;
+		}
+		activeDelims.forEach((delim, idx) => {
+			const div = document.createElement("div");
+			div.className = "flex items-center space-x-2";
+			div.innerHTML = `
+				<input type="text" data-idx="${idx}" class="settings-delim-input flex-1 bg-gray-700 border border-gray-650 rounded px-2 py-1 text-white text-xxs font-mono" value="${delim.replace(/"/g, "&quot;")}">
+				<button type="button" class="btn-settings-del-delim text-gray-500 hover:text-red-400 p-1 cursor-pointer focus:outline-none" data-idx="${idx}">
+					<i class="icon-trash-2 text-xxs"></i>
+				</button>
+			`;
+			elDelimsContainer.appendChild(div);
+		});
+
+		elDelimsContainer.querySelectorAll(".settings-delim-input").forEach((el: any) => {
+			el.addEventListener("input", () => {
+				const idx = parseInt(el.getAttribute("data-idx")!, 10);
+				activeDelims[idx] = el.value;
+			});
+		});
+
+		elDelimsContainer.querySelectorAll(".btn-settings-del-delim").forEach((el: any) => {
+			el.addEventListener("click", () => {
+				const idx = parseInt(el.getAttribute("data-idx")!, 10);
+				activeDelims.splice(idx, 1);
+				renderDelimsInputs();
+			});
+		});
+	}
+
+	function renderExceptionsInputs() {
+		elExceptionsContainer.innerHTML = "";
+		if (activeExceptions.length === 0) {
+			elExceptionsContainer.innerHTML = '<p class="text-xxs text-gray-500 italic p-1">例外アーティストが設定されていません</p>';
+			return;
+		}
+		activeExceptions.forEach((exc, idx) => {
+			const div = document.createElement("div");
+			div.className = "flex items-center space-x-2";
+			div.innerHTML = `
+				<input type="text" data-idx="${idx}" class="settings-exception-input flex-1 bg-gray-700 border border-gray-650 rounded px-2 py-1 text-white text-xxs" value="${exc.replace(/"/g, "&quot;")}">
+				<button type="button" class="btn-settings-del-exception text-gray-500 hover:text-red-400 p-1 cursor-pointer focus:outline-none" data-idx="${idx}">
+					<i class="icon-trash-2 text-xxs"></i>
+				</button>
+			`;
+			elExceptionsContainer.appendChild(div);
+		});
+
+		elExceptionsContainer.querySelectorAll(".settings-exception-input").forEach((el: any) => {
+			el.addEventListener("input", () => {
+				const idx = parseInt(el.getAttribute("data-idx")!, 10);
+				activeExceptions[idx] = el.value;
+			});
+		});
+
+		elExceptionsContainer.querySelectorAll(".btn-settings-del-exception").forEach((el: any) => {
+			el.addEventListener("click", () => {
+				const idx = parseInt(el.getAttribute("data-idx")!, 10);
+				activeExceptions.splice(idx, 1);
+				renderExceptionsInputs();
+			});
+		});
+	}
+
+	elBtnAddDelim.addEventListener("click", () => {
+		activeDelims.push("");
+		renderDelimsInputs();
+		setTimeout(() => {
+			const inputs = elDelimsContainer.querySelectorAll(".settings-delim-input");
+			if (inputs.length > 0) {
+				(inputs[inputs.length - 1] as HTMLInputElement).focus();
+			}
+		}, 50);
+	});
+
+	elBtnAddException.addEventListener("click", () => {
+		activeExceptions.push("");
+		renderExceptionsInputs();
+		setTimeout(() => {
+			const inputs = elExceptionsContainer.querySelectorAll(".settings-exception-input");
+			if (inputs.length > 0) {
+				(inputs[inputs.length - 1] as HTMLInputElement).focus();
+			}
+		}, 50);
+	});
 
 	const elModalDeleteConfirm = document.getElementById("modal-delete-confirm")!;
 	const elDeleteTargetList = document.getElementById("delete-target-list")!;
@@ -84,17 +183,22 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 		cb.selectProfile(id);
 	});
 
-	// Colors
+	// Colors and Extra Settings
 	elBtnSettingsCancel.addEventListener("click", () => {
 		elModalSettings.classList.add("hidden");
 	});
 
 	elBtnSettingsSave.addEventListener("click", async () => {
+		const delimiters = activeDelims.map((s) => s.trim()).filter((s) => s.length > 0);
+		const exceptions = activeExceptions.map((s) => s.trim()).filter((s) => s.length > 0);
+
 		const newSettings = {
 			colorMissing: elColorMissing.value,
 			colorUpdated: elColorUpdated.value,
 			colorSynced: elColorSynced.value,
 			colorPhoneOnly: elColorPhoneOnly.value,
+			delimiters,
+			exceptions,
 		};
 		await api.saveSettings(newSettings);
 		state.currentSettings = newSettings;
@@ -102,6 +206,33 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 		elModalSettings.classList.add("hidden");
 		cb.renderActiveView();
 	});
+
+	elBtnSettingsResetCache.addEventListener("click", async () => {
+		if (confirm("スキャン結果キャッシュおよびサムネイル画像を全て削除（リセット）します。よろしいですか？")) {
+			try {
+				await api.resetCache();
+				alert("キャッシュの全削除が完了しました。");
+				elModalSettings.classList.add("hidden");
+				if (state.currentProfileId) {
+					const btnScan = document.getElementById("btn-scan");
+					if (btnScan) {
+						(btnScan as HTMLButtonElement).click();
+					}
+				}
+			} catch (e: any) {
+				alert("キャッシュ削除中にエラーが発生しました: " + e.message);
+			}
+		}
+	});
+
+	return {
+		loadSettings(delimiters: string[], exceptions: string[]) {
+			activeDelims = [...delimiters];
+			activeExceptions = [...exceptions];
+			renderDelimsInputs();
+			renderExceptionsInputs();
+		},
+	};
 
 	// Sync count confirm modal
 	elBtnSyncConfirmCancel.addEventListener("click", () => {

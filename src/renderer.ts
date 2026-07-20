@@ -4,8 +4,8 @@ import "./style.css";
 import { api, isMock } from "./renderer/api";
 import { initModals, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
-import { renderAlbumView, renderArtistView, renderGenreView } from "./renderer/components/treeView";
-import { getSafeId, isTrackChecked, setTrackCheckedState } from "./renderer/components/utils";
+import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
+import { compareTracks, getSafeId, isTrackChecked, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 
 // DOM Elements
@@ -46,6 +46,8 @@ const elTabTrack = document.getElementById("tab-track")!;
 const elTreeContainer = document.getElementById("tree-container")!;
 const elTrackContainer = document.getElementById("track-container")!;
 const elChkMaster = document.getElementById("chk-master") as HTMLInputElement;
+
+let modalsController: any = null;
 
 // Summary stats footer
 const elCntTotal = document.getElementById("cnt-total")!;
@@ -92,18 +94,33 @@ const vsContent = document.getElementById("virtual-scroll-content")!;
 
 async function init() {
 	state.currentSettings = await api.getSettings();
+	if (!state.currentSettings.delimiters) state.currentSettings.delimiters = [",", "|", "feat.", ";", "、", "／"];
+	if (!state.currentSettings.exceptions) state.currentSettings.exceptions = [];
 	updateDynamicColors(state.currentSettings);
 
 	state.profiles = await api.getProfiles();
 	renderProfileDropdown();
 
-	initModals({
+	api.onContextMenuCommand((command, arg) => {
+		navigateToSuggestion(command === "jump-artist" ? "artist" : command === "jump-album" ? "album" : "genre", arg);
+	});
+
+	modalsController = initModals({
 		renderProfileDropdown,
 		selectProfile,
 		renderActiveView,
 		updateSummaryBar,
 		startSyncExecution,
 	});
+
+	setupFilterButton("stat-btn-total", "total");
+	setupFilterButton("stat-btn-missing", "missing");
+	setupFilterButton("stat-btn-updated", "updated");
+	setupFilterButton("stat-btn-synced", "synced");
+	setupFilterButton("stat-btn-phone_only", "phone_only");
+	setupFilterButton("stat-btn-path_warning", "path_warning");
+	updateFilterUI();
+	renderSortRules();
 
 	setupEventListeners();
 	setupColumnResize();
@@ -348,6 +365,10 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 	// 1. Preserve search input and query, just hide combobox
 	elSearchCombobox.classList.add("hidden");
 
+	if (state.searchQuery) {
+		addSearchHistory(state.searchQuery);
+	}
+
 	// 2. Switch tab and auto-expand target group
 	if (tabId === "artist") {
 		const artistKey = getSafeId("artist", targetName);
@@ -417,6 +438,8 @@ function renderActiveView() {
 	else if (state.activeTab === "album") renderAlbumView(elTreeContainer, callbacks);
 	else if (state.activeTab === "genre") renderGenreView(elTreeContainer, callbacks);
 	else if (state.activeTab === "track") renderVirtualTracks(vsViewport, vsCanvas, vsContent, callbacks);
+
+	updateAllTreeCheckboxes();
 }
 
 function updateStatsSummary() {
@@ -447,11 +470,18 @@ function updateStatsSummary() {
 	elCntSynced.textContent = String(synced);
 	elCntPhoneOnly.textContent = String(phoneOnly);
 
+	const elStatBtnPathWarning = document.getElementById("stat-btn-path_warning");
 	if (pathWarnings > 0) {
-		elCntPathWarnings.textContent = `⚠️ 配置不一致: ${pathWarnings}`;
-		elCntPathWarnings.classList.remove("hidden");
+		elCntPathWarnings.textContent = String(pathWarnings);
+		if (elStatBtnPathWarning) {
+			elStatBtnPathWarning.classList.remove("hidden");
+			elStatBtnPathWarning.classList.add("flex");
+		}
 	} else {
-		elCntPathWarnings.classList.add("hidden");
+		if (elStatBtnPathWarning) {
+			elStatBtnPathWarning.classList.add("hidden");
+			elStatBtnPathWarning.classList.remove("flex");
+		}
 	}
 }
 
@@ -497,21 +527,68 @@ function updateMasterCheckboxState() {
 }
 
 function applyFilterAndRender() {
-	if (state.searchQuery === "") {
-		state.filteredTracks = state.scannedTracks;
-	} else {
-		state.filteredTracks = state.scannedTracks.filter((t) => {
+	let tracks = state.scannedTracks;
+
+	// 1. Filter by search query
+	if (state.searchQuery !== "") {
+		const q = state.searchQuery.toLowerCase();
+		tracks = tracks.filter((t) => {
 			const meta = t.itunesTrack || t.phoneTrack;
 			if (!meta) return false;
-			return (meta.title || "").toLowerCase().includes(state.searchQuery) || (meta.artist || "").toLowerCase().includes(state.searchQuery) || (meta.album || "").toLowerCase().includes(state.searchQuery);
+			return (meta.title || "").toLowerCase().includes(q) || (meta.artist || "").toLowerCase().includes(q) || (meta.album || "").toLowerCase().includes(q);
 		});
 	}
 
+	// 2. Filter by bottom status filters
+	tracks = tracks.filter((t) => {
+		if (!state.activeStatusFilters.has(t.status)) {
+			return false;
+		}
+		if (t.pathMismatch && !state.activeStatusFilters.has("path_warning")) {
+			return false;
+		}
+		return true;
+	});
+
+	state.filteredTracks = tracks.sort((a, b) => compareTracks(a, b, state.sortRules));
 	renderActiveView();
 	updateMasterCheckboxState();
 }
 
 function setupEventListeners() {
+	const btnSortToggle = document.getElementById("btn-sort-toggle")!;
+	const sortDropdownPanel = document.getElementById("sort-dropdown-panel")!;
+	const btnSortAddRule = document.getElementById("btn-sort-add-rule")!;
+	const btnSortClear = document.getElementById("btn-sort-clear")!;
+
+	btnSortToggle.addEventListener("click", (e) => {
+		e.stopPropagation();
+		sortDropdownPanel.classList.toggle("hidden");
+		sortDropdownPanel.classList.toggle("flex");
+	});
+
+	// Close when clicking outside
+	document.addEventListener("click", (e) => {
+		if (sortDropdownPanel && !sortDropdownPanel.contains(e.target as Node) && e.target !== btnSortToggle) {
+			sortDropdownPanel.classList.add("hidden");
+			sortDropdownPanel.classList.remove("flex");
+		}
+	});
+
+	btnSortAddRule.addEventListener("click", (e) => {
+		e.stopPropagation();
+		state.sortRules.push({ field: "title", direction: "asc" });
+		renderSortRules();
+		applyFilterAndRender();
+	});
+
+	btnSortClear.addEventListener("click", (e) => {
+		e.stopPropagation();
+		state.sortRules = [];
+		renderSortRules();
+		applyFilterAndRender();
+	});
+
 	elBtnProfileDropdown.addEventListener("click", (e) => {
 		e.stopPropagation();
 		elProfileDropdownMenu.classList.toggle("hidden");
@@ -567,6 +644,11 @@ function setupEventListeners() {
 		elColorUpdated.value = state.currentSettings.colorUpdated || "#f59e0b";
 		elColorSynced.value = state.currentSettings.colorSynced || "#94a3b8";
 		elColorPhoneOnly.value = state.currentSettings.colorPhoneOnly || "#ef4444";
+
+		if (modalsController) {
+			modalsController.loadSettings(state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		}
+
 		elModalSettings.classList.remove("hidden");
 	});
 
@@ -689,6 +771,8 @@ function setupEventListeners() {
 		if (query.length >= 1) {
 			state.searchQuery = query;
 			renderSearchCombobox();
+		} else {
+			renderSearchHistory();
 		}
 	};
 
@@ -706,8 +790,7 @@ function setupEventListeners() {
 			`;
 			elSearchCombobox.classList.remove("hidden");
 		} else {
-			elSearchCombobox.classList.add("hidden");
-			elSearchCombobox.innerHTML = "";
+			renderSearchHistory();
 		}
 
 		if (searchDebounceTimeout) {
@@ -718,6 +801,7 @@ function setupEventListeners() {
 			applyFilterAndRender();
 			if (state.searchQuery.length >= 1) {
 				renderSearchCombobox();
+				addSearchHistory(state.searchQuery);
 			}
 		}, 250); // 250ms debouncing delay
 	});
@@ -902,27 +986,7 @@ function setupEventListeners() {
 		}
 	});
 
-	// Custom Context Menu logic (delegated)
-	const contextMenuEl = (() => {
-		let el = document.getElementById("custom-context-menu");
-		if (!el) {
-			el = document.createElement("div");
-			el.id = "custom-context-menu";
-			el.className = "absolute hidden bg-gray-900 border border-gray-700 text-gray-200 text-xxs rounded shadow-2xl z-50 py-1 min-w-64 w-max max-w-sm font-sans pointer-events-auto select-none";
-			document.body.appendChild(el);
-
-			document.addEventListener("click", () => {
-				el!.classList.add("hidden");
-			});
-			window.addEventListener("keydown", (ev) => {
-				if (ev.key === "Escape") {
-					el!.classList.add("hidden");
-				}
-			});
-		}
-		return el;
-	})();
-
+	// Custom Context Menu logic (delegated to Electron Native Menu)
 	document.addEventListener("contextmenu", (e) => {
 		const trackRow = (e.target as HTMLElement).closest(".context-track");
 		const albumRow = (e.target as HTMLElement).closest(".context-album");
@@ -937,96 +1001,32 @@ function setupEventListeners() {
 			const album = trackRow.getAttribute("data-album") || "";
 			const genre = trackRow.getAttribute("data-genre") || "";
 
-			let html = "";
-			if (artist) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
-			}
-			if (album) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-album">アルバム「${album}」の曲を表示</div>`;
-			}
-			if (genre) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
-			}
+			const artists = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
 
-			if (track) {
-				if (track.itunesTrack) {
-					html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer border-t border-gray-800" id="ctx-explorer-itunes">エクスプローラーで表示 (iTunes)</div>`;
-				}
-				if (track.phoneTrack) {
-					html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer ${!track.itunesTrack ? "border-t border-gray-800" : ""}" id="ctx-explorer-phone">エクスプローラーで表示 (比較先)</div>`;
-				}
-			}
-
-			if (html) {
-				contextMenuEl.innerHTML = html;
-				contextMenuEl.classList.remove("hidden");
-
-				const top = e.clientY + window.scrollY;
-				const left = Math.max(10, Math.min(window.innerWidth - 260, e.clientX + window.scrollX));
-				contextMenuEl.style.top = `${top}px`;
-				contextMenuEl.style.left = `${left}px`;
-
-				const btnArtist = document.getElementById("ctx-jump-artist");
-				if (btnArtist) {
-					btnArtist.addEventListener("click", () => navigateToSuggestion("artist", artist));
-				}
-				const btnAlbum = document.getElementById("ctx-jump-album");
-				if (btnAlbum) {
-					btnAlbum.addEventListener("click", () => navigateToSuggestion("album", album));
-				}
-				const btnGenre = document.getElementById("ctx-jump-genre");
-				if (btnGenre) {
-					btnGenre.addEventListener("click", () => navigateToSuggestion("genre", genre));
-				}
-
-				if (track) {
-					const btnExplorerItunes = document.getElementById("ctx-explorer-itunes");
-					if (btnExplorerItunes && track.itunesTrack) {
-						btnExplorerItunes.addEventListener("click", () => {
-							api.showItemInFolder(track.itunesTrack!.filePath);
-						});
-					}
-					const btnExplorerPhone = document.getElementById("ctx-explorer-phone");
-					if (btnExplorerPhone && track.phoneTrack) {
-						btnExplorerPhone.addEventListener("click", () => {
-							api.showItemInFolder(track.phoneTrack!.filePath);
-						});
-					}
-				}
-			}
+			api.showContextMenu({
+				trackId,
+				title,
+				artist,
+				artists,
+				album,
+				genre,
+				itunesFilePath: track?.itunesTrack?.filePath,
+				phoneFilePath: track?.phoneTrack?.filePath,
+			});
 		} else if (albumRow) {
 			e.preventDefault();
 			const artist = albumRow.getAttribute("data-artist") || "";
+			const album = albumRow.getAttribute("data-album") || "";
 			const genre = albumRow.getAttribute("data-genre") || "";
 
-			let html = "";
-			if (artist) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
-			}
-			if (genre) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
-			}
+			const artists = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
 
-			if (html) {
-				contextMenuEl.innerHTML = html;
-				contextMenuEl.classList.remove("hidden");
-
-				const top = e.clientY + window.scrollY;
-				const left = Math.max(10, Math.min(window.innerWidth - 260, e.clientX + window.scrollX));
-				contextMenuEl.style.top = `${top}px`;
-				contextMenuEl.style.left = `${left}px`;
-
-				const btnArtist = document.getElementById("ctx-jump-artist");
-				if (btnArtist) {
-					btnArtist.addEventListener("click", () => navigateToSuggestion("artist", artist));
-				}
-				const btnGenre = document.getElementById("ctx-jump-genre");
-				if (btnGenre) {
-					btnGenre.addEventListener("click", () => navigateToSuggestion("genre", genre));
-				}
-			}
-		} else {
-			contextMenuEl.classList.add("hidden");
+			api.showContextMenu({
+				artist,
+				artists,
+				album,
+				genre,
+			});
 		}
 	});
 }
@@ -1135,6 +1135,234 @@ function setupColumnResize() {
 			document.addEventListener("mouseup", onMouseUp);
 			e.preventDefault();
 		});
+	});
+}
+
+function renderSortRules() {
+	const elList = document.getElementById("sort-rules-list")!;
+	const elBadge = document.getElementById("sort-badge")!;
+	if (!elList) return;
+
+	elList.innerHTML = "";
+	elBadge.textContent = String(state.sortRules.length);
+
+	const fields = [
+		{ val: "artist", label: "アーティスト" },
+		{ val: "album", label: "アルバム" },
+		{ val: "title", label: "曲名" },
+		{ val: "year", label: "発売年" },
+		{ val: "track", label: "トラック" },
+		{ val: "status", label: "ステータス" },
+	];
+
+	state.sortRules.forEach((rule, idx) => {
+		const row = document.createElement("div");
+		row.className = "flex items-center space-x-1 bg-gray-900/50 p-1.5 rounded border border-gray-750 gap-1";
+
+		// 1. Priority Indicator / Index
+		const priorityLabel = document.createElement("span");
+		priorityLabel.className = "text-[10px] text-gray-500 font-mono w-4 text-center select-none";
+		priorityLabel.textContent = `${idx + 1}`;
+		row.appendChild(priorityLabel);
+
+		// 2. Select Field
+		const selField = document.createElement("select");
+		selField.className = "bg-gray-800 text-white rounded px-1.5 py-0.5 border border-gray-650 focus:outline-none flex-1 font-semibold text-[10px]";
+		fields.forEach((f) => {
+			const opt = document.createElement("option");
+			opt.value = f.val;
+			opt.textContent = f.label;
+			if (rule.field === f.val) opt.selected = true;
+			selField.appendChild(opt);
+		});
+		selField.addEventListener("change", () => {
+			rule.field = selField.value;
+			applyFilterAndRender();
+		});
+		row.appendChild(selField);
+
+		// 3. Select Direction
+		const selDir = document.createElement("select");
+		selDir.className = "bg-gray-800 text-white rounded px-1.5 py-0.5 border border-gray-650 focus:outline-none w-16 text-[10px]";
+		const optAsc = document.createElement("option");
+		optAsc.value = "asc";
+		optAsc.textContent = "昇順";
+		if (rule.direction === "asc") optAsc.selected = true;
+		selDir.appendChild(optAsc);
+
+		const optDesc = document.createElement("option");
+		optDesc.value = "desc";
+		optDesc.textContent = "降順";
+		if (rule.direction === "desc") optDesc.selected = true;
+		selDir.appendChild(optDesc);
+
+		selDir.addEventListener("change", () => {
+			rule.direction = selDir.value as "asc" | "desc";
+			applyFilterAndRender();
+		});
+		row.appendChild(selDir);
+
+		// 4. Move Up / Move Down buttons
+		const moveBtnContainer = document.createElement("div");
+		moveBtnContainer.className = "flex flex-col space-y-0.5";
+
+		const btnUp = document.createElement("button");
+		btnUp.className = `text-[8px] text-gray-500 hover:text-white transition focus:outline-none px-0.5 ${idx === 0 ? "opacity-30 pointer-events-none" : ""}`;
+		btnUp.innerHTML = "▲";
+		btnUp.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const tmp = state.sortRules[idx];
+			state.sortRules[idx] = state.sortRules[idx - 1];
+			state.sortRules[idx - 1] = tmp;
+			renderSortRules();
+			applyFilterAndRender();
+		});
+		moveBtnContainer.appendChild(btnUp);
+
+		const btnDown = document.createElement("button");
+		btnDown.className = `text-[8px] text-gray-500 hover:text-white transition focus:outline-none px-0.5 ${idx === state.sortRules.length - 1 ? "opacity-30 pointer-events-none" : ""}`;
+		btnDown.innerHTML = "▼";
+		btnDown.addEventListener("click", (e) => {
+			e.stopPropagation();
+			const tmp = state.sortRules[idx];
+			state.sortRules[idx] = state.sortRules[idx + 1];
+			state.sortRules[idx + 1] = tmp;
+			renderSortRules();
+			applyFilterAndRender();
+		});
+		moveBtnContainer.appendChild(btnDown);
+
+		row.appendChild(moveBtnContainer);
+
+		// 5. Delete Button
+		const btnDel = document.createElement("button");
+		btnDel.className = "text-gray-500 hover:text-red-400 transition focus:outline-none px-1 py-0.5";
+		btnDel.innerHTML = '<i class="icon-trash-2 text-[10px]"></i>';
+		btnDel.addEventListener("click", (e) => {
+			e.stopPropagation();
+			state.sortRules.splice(idx, 1);
+			renderSortRules();
+			applyFilterAndRender();
+		});
+		row.appendChild(btnDel);
+
+		elList.appendChild(row);
+	});
+}
+
+function updateFilterUI() {
+	const filters = [
+		{ id: "missing", el: document.getElementById("stat-btn-missing") },
+		{ id: "updated", el: document.getElementById("stat-btn-updated") },
+		{ id: "synced", el: document.getElementById("stat-btn-synced") },
+		{ id: "phone_only", el: document.getElementById("stat-btn-phone_only") },
+		{ id: "path_warning", el: document.getElementById("stat-btn-path_warning") },
+	];
+
+	filters.forEach((f) => {
+		if (!f.el) return;
+		const isActive = state.activeStatusFilters.has(f.id);
+		if (isActive) {
+			f.el.classList.remove("opacity-40", "bg-gray-800/20");
+			f.el.classList.add("opacity-100", "bg-gray-700/30");
+		} else {
+			f.el.classList.remove("opacity-100", "bg-gray-700/30");
+			f.el.classList.add("opacity-40", "bg-gray-800/20");
+		}
+	});
+}
+
+function toggleStatusFilter(filterId: string) {
+	if (filterId === "total") {
+		state.activeStatusFilters = new Set(["missing", "updated", "synced", "phone_only", "path_warning"]);
+	} else {
+		if (state.activeStatusFilters.has(filterId)) {
+			state.activeStatusFilters.delete(filterId);
+		} else {
+			state.activeStatusFilters.add(filterId);
+		}
+	}
+	updateFilterUI();
+	applyFilterAndRender();
+}
+
+function setupFilterButton(elId: string, filterId: string) {
+	const el = document.getElementById(elId);
+	if (!el) return;
+	el.addEventListener("click", () => {
+		toggleStatusFilter(filterId);
+	});
+	el.addEventListener("keydown", (e: KeyboardEvent) => {
+		if (e.key === "Enter" || e.key === " ") {
+			e.preventDefault();
+			toggleStatusFilter(filterId);
+		}
+	});
+}
+
+function renderSearchHistory() {
+	if (!state.currentProfileId) return;
+	const p = state.profiles.find((x) => x.id === state.currentProfileId);
+	if (!p) return;
+
+	const history = p.searchHistory || [];
+	if (history.length === 0) {
+		elSearchCombobox.classList.add("hidden");
+		elSearchCombobox.innerHTML = "";
+		return;
+	}
+
+	elSearchCombobox.innerHTML = "";
+	elSearchCombobox.classList.remove("hidden");
+
+	const section = document.createElement("div");
+	section.className = "px-3 py-1.5";
+
+	const header = document.createElement("div");
+	header.className = "font-bold text-gray-400 border-b border-gray-700 pb-1 mb-1.5 flex items-center space-x-1.5";
+	header.innerHTML = `<i class="icon-history text-indigo-400"></i><span>検索履歴 (最近の5件)</span>`;
+	section.appendChild(header);
+
+	const listContainer = document.createElement("div");
+	listContainer.className = "divide-y divide-gray-750/30";
+
+	history.forEach((q) => {
+		const row = document.createElement("div");
+		row.className = "py-1.5 flex items-center justify-between hover:bg-gray-750/30 rounded px-2 transition cursor-pointer select-none text-gray-300 truncate font-sans text-xxs";
+		row.innerHTML = `
+			<span class="truncate flex-1">　${q}</span>
+			<i class="icon-corner-down-left text-gray-500 text-[10px]"></i>
+		`;
+		row.addEventListener("mousedown", (e) => {
+			e.preventDefault();
+			e.stopPropagation();
+			elTxtSearch.value = q;
+			state.searchQuery = q;
+			applyFilterAndRender();
+			renderSearchCombobox();
+			addSearchHistory(q);
+		});
+		listContainer.appendChild(row);
+	});
+
+	section.appendChild(listContainer);
+	elSearchCombobox.appendChild(section);
+}
+
+function addSearchHistory(query: string) {
+	const q = query.trim();
+	if (!q || !state.currentProfileId) return;
+
+	const p = state.profiles.find((x) => x.id === state.currentProfileId);
+	if (!p) return;
+
+	let history = p.searchHistory || [];
+	history = history.filter((x) => x.toLowerCase() !== q.toLowerCase());
+	history.unshift(q);
+	p.searchHistory = history.slice(0, 5);
+
+	api.saveProfile(p).then((updatedProfiles) => {
+		state.profiles = updatedProfiles;
 	});
 }
 

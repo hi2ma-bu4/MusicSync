@@ -47,10 +47,21 @@ if (!window.api) {
 						colorUpdated: "#f59e0b",
 						colorSynced: "#94a3b8",
 						colorPhoneOnly: "#ef4444",
+						delimiters: [",", "|", "feat.", ";", "、", "／"],
+						exceptions: [],
 					};
 		},
 		saveSettings: async (settings: any) => {
 			localStorage.setItem("mock_settings", JSON.stringify(settings));
+		},
+		resetCache: async () => {
+			console.log("Mock resetCache");
+		},
+		showContextMenu: (params: any) => {
+			console.log("Mock showContextMenu:", params);
+		},
+		onContextMenuCommand: (callback: any) => {
+			return () => {};
 		},
 		startScan: async (_profileId: string) => {
 			console.log("Mock scan started");

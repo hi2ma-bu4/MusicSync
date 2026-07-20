@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState } from "./utils";
+import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -23,6 +23,65 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 						}
 					}
 				});
+			}
+		}
+	});
+}
+
+// Synchronizes and updates all checkbox elements (tracks, discs, albums, artists, genres) in the tree view to match the state
+export function updateAllTreeCheckboxes() {
+	// 1. Sync all track checkboxes
+	const trackInputs = document.querySelectorAll(`input[id^="chk-track-"]`);
+	trackInputs.forEach((el: any) => {
+		const track = state.filteredTracks.find((t) => el.id.endsWith("-" + t.id));
+		if (track) {
+			el.checked = isTrackChecked(track);
+		}
+	});
+
+	// 2. Sync all disc, album, genre, and artist checkboxes based on DOM hierarchy
+	const parentInputs = document.querySelectorAll(`input[id^="chk-"]:not([id^="chk-track-"])`);
+	parentInputs.forEach((el: any) => {
+		if (el.id.startsWith("chk-disc-")) {
+			const prefix = el.id.replace("chk-disc-", "chk-track-");
+			const trackCheckboxes = document.querySelectorAll(`input[id^="${prefix}-"]`);
+			let checkedCount = 0;
+			trackCheckboxes.forEach((chk: any) => {
+				if (chk.checked) checkedCount++;
+			});
+			if (trackCheckboxes.length > 0) {
+				if (checkedCount === 0) {
+					el.checked = false;
+					el.indeterminate = false;
+				} else if (checkedCount === trackCheckboxes.length) {
+					el.checked = true;
+					el.indeterminate = false;
+				} else {
+					el.checked = false;
+					el.indeterminate = true;
+				}
+			}
+		} else {
+			const key = el.id.substring(4); // Remove "chk-"
+			const childrenContainer = document.getElementById(`children-${key}`);
+			if (childrenContainer) {
+				const trackCheckboxes = childrenContainer.querySelectorAll(`input[id^="chk-track-"]`);
+				let checkedCount = 0;
+				trackCheckboxes.forEach((chk: any) => {
+					if (chk.checked) checkedCount++;
+				});
+				if (trackCheckboxes.length > 0) {
+					if (checkedCount === 0) {
+						el.checked = false;
+						el.indeterminate = false;
+					} else if (checkedCount === trackCheckboxes.length) {
+						el.checked = true;
+						el.indeterminate = false;
+					} else {
+						el.checked = false;
+						el.indeterminate = true;
+					}
+				}
 			}
 		}
 	});
@@ -191,8 +250,8 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 	row.setAttribute("data-genre", meta.genre || "");
 
 	row.innerHTML = `
-		<label for="chk-track-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
-			<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
+		<label for="chk-track-${albumKey}-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+			<input type="checkbox" id="chk-track-${albumKey}-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 			<div class="flex items-center space-x-1 truncate">
 				<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
 				<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -207,21 +266,13 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 
 	elTracksChildren.appendChild(row);
 
-	const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+	const chkTrack = document.getElementById(`chk-track-${albumKey}-${t.id}`) as HTMLInputElement;
 	chkTrack.addEventListener("change", () => {
 		pushHistoryState();
 		setTrackCheckedState(t, chkTrack.checked);
+		updateAllTreeCheckboxes();
 		cb.updateSummaryBar();
 		cb.updateMasterCheckboxState();
-
-		if (hasMultipleDiscs) {
-			setCheckboxState(`chk-disc-${albumKey}-${discNum}`, discTracks);
-		}
-
-		setCheckboxState(`chk-${albumKey}`, albumTracks);
-		if (parentUpdateId) {
-			setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
-		}
 	});
 }
 
@@ -229,19 +280,8 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, parentUpdateId: string, parentTracks: any[], cb: RenderCallbacks) {
 	elTracksChildren.innerHTML = "";
 
-	// Sort albumTracks by disc, then track
-	albumTracks.sort((a, b) => {
-		const ma = a.itunesTrack || a.phoneTrack;
-		const mb = b.itunesTrack || b.phoneTrack;
-		const discA = parseInt(ma?.disc || "1", 10) || 1;
-		const discB = parseInt(mb?.disc || "1", 10) || 1;
-		if (discA !== discB) {
-			return discA - discB;
-		}
-		const trkA = parseInt(ma?.track || "0", 10) || 0;
-		const trkB = parseInt(mb?.track || "0", 10) || 0;
-		return trkA - trkB;
-	});
+	// Sort albumTracks using active sort rules
+	albumTracks.sort((a, b) => compareTracks(a, b, state.sortRules));
 
 	// Find the maximum disc number to determine if we should group
 	const maxDisc = albumTracks.reduce((max, t) => {
@@ -291,20 +331,11 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 				const isChecked = chkDisc.checked;
 				discTracks.forEach((t) => {
 					setTrackCheckedState(t, isChecked);
-					const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-					if (chkTrack) chkTrack.checked = isChecked;
 				});
-
-				setCheckboxState(`chk-${albumKey}`, albumTracks);
-				if (parentUpdateId) {
-					setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
-				}
+				updateAllTreeCheckboxes();
 				cb.updateSummaryBar();
 				cb.updateMasterCheckboxState();
 			});
-
-			// Set initial state
-			setCheckboxState(`chk-disc-${albumKey}-${discNum}`, discTracks);
 		});
 	} else {
 		// Just render normally
@@ -319,7 +350,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 	elChildren.innerHTML = "";
 	sortedAlbums.forEach((albumName) => {
 		const albumTracks = albumMap.get(albumName)!;
-		const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
+		const albumKey = getSafeId("artistalbum", artistName + "_" + albumName);
 		const isAlbumOpen = state.expandedGroups.has(albumKey);
 
 		const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
@@ -363,14 +394,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			albumTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-
-			// Directly update DOM elements without full re-render
-			albumTracks.forEach((t) => {
-				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-				if (chkTrack) chkTrack.checked = isChecked;
-			});
-			setCheckboxState(`chk-${artistKey}`, artistTracks);
-
+			updateAllTreeCheckboxes();
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
 		});
@@ -390,6 +414,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 				const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
 				if (elTracksChildren.innerHTML === "") {
 					renderAlbumTracks(elTracksChildren, albumTracks, albumKey, artistKey, artistTracks, cb);
+					updateAllTreeCheckboxes();
 				}
 			}
 		});
@@ -412,11 +437,23 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	state.filteredTracks.forEach((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
 		const artistName = (meta && meta.artist) || "Unknown Artist";
-		if (!artistMap.has(artistName)) artistMap.set(artistName, []);
-		artistMap.get(artistName)!.push(t);
+		const splitNames = splitAndNormalizeArtist(artistName, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		splitNames.forEach((name) => {
+			if (!artistMap.has(name)) artistMap.set(name, []);
+			artistMap.get(name)!.push(t);
+		});
 	});
 
-	const sortedArtists = Array.from(artistMap.keys()).sort();
+	const sortedArtists = Array.from(artistMap.keys()).sort((a, b) => {
+		const artistRule = state.sortRules.find((r) => r.field === "artist");
+		if (artistRule) {
+			const cmp = a.localeCompare(b, "ja");
+			return artistRule.direction === "asc" ? cmp : -cmp;
+		}
+		const tracksA = artistMap.get(a)!;
+		const tracksB = artistMap.get(b)!;
+		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+	});
 
 	sortedArtists.forEach((artistName) => {
 		const artistTracks = artistMap.get(artistName)!;
@@ -431,7 +468,16 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			albumMap.get(albumName)!.push(t);
 		});
 
-		const sortedAlbums = Array.from(albumMap.keys()).sort();
+		const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
+			const albumRule = state.sortRules.find((r) => r.field === "album");
+			if (albumRule) {
+				const cmp = a.localeCompare(b, "ja");
+				return albumRule.direction === "asc" ? cmp : -cmp;
+			}
+			const tracksA = albumMap.get(a)!;
+			const tracksB = albumMap.get(b)!;
+			return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+		});
 
 		const divArtist = document.createElement("div");
 		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
@@ -465,22 +511,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			artistTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-
-			// Directly update DOM checkboxes of Artist tree
-			sortedAlbums.forEach((albumName) => {
-				const albumKey = getSafeId("artist_" + artistName + "_album", albumName);
-				const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
-				if (chkAlbum) {
-					chkAlbum.checked = isChecked;
-					chkAlbum.indeterminate = false;
-				}
-				const albumTracks = albumMap.get(albumName)!;
-				albumTracks.forEach((t) => {
-					const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-					if (chkTrack) chkTrack.checked = isChecked;
-				});
-			});
-
+			updateAllTreeCheckboxes();
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
 		});
@@ -500,6 +531,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 				const elChildren = document.getElementById(`children-${artistKey}`)!;
 				if (elChildren.innerHTML === "") {
 					renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb, artistKey, artistTracks);
+					updateAllTreeCheckboxes();
 				}
 			}
 		});
@@ -526,7 +558,16 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		albumMap.get(albumName)!.push(t);
 	});
 
-	const sortedAlbums = Array.from(albumMap.keys()).sort();
+	const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
+		const albumRule = state.sortRules.find((r) => r.field === "album");
+		if (albumRule) {
+			const cmp = a.localeCompare(b, "ja");
+			return albumRule.direction === "asc" ? cmp : -cmp;
+		}
+		const tracksA = albumMap.get(a)!;
+		const tracksB = albumMap.get(b)!;
+		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+	});
 
 	sortedAlbums.forEach((albumName) => {
 		const albumTracks = albumMap.get(albumName)!;
@@ -574,12 +615,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			albumTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-
-			albumTracks.forEach((t) => {
-				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-				if (chkTrack) chkTrack.checked = isChecked;
-			});
-
+			updateAllTreeCheckboxes();
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
 		});
@@ -599,6 +635,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				const elChildren = document.getElementById(`children-${albumKey}`)!;
 				if (elChildren.innerHTML === "") {
 					renderAlbumTracks(elChildren, albumTracks, albumKey, "", [], cb);
+					updateAllTreeCheckboxes();
 				}
 			}
 		});
@@ -625,7 +662,16 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		genreMap.get(genreName)!.push(t);
 	});
 
-	const sortedGenres = Array.from(genreMap.keys()).sort();
+	const sortedGenres = Array.from(genreMap.keys()).sort((a, b) => {
+		const genreRule = state.sortRules.find((r) => r.field === "genre");
+		if (genreRule) {
+			const cmp = a.localeCompare(b, "ja");
+			return genreRule.direction === "asc" ? cmp : -cmp;
+		}
+		const tracksA = genreMap.get(a)!;
+		const tracksB = genreMap.get(b)!;
+		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+	});
 
 	sortedGenres.forEach((genreName) => {
 		const genreTracks = genreMap.get(genreName)!;
@@ -664,12 +710,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			genreTracks.forEach((t) => {
 				setTrackCheckedState(t, isChecked);
 			});
-
-			genreTracks.forEach((t) => {
-				const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-				if (chkTrack) chkTrack.checked = isChecked;
-			});
-
+			updateAllTreeCheckboxes();
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
 		});
@@ -689,6 +730,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 				const elChildren = document.getElementById(`children-${genreKey}`)!;
 				if (elChildren.innerHTML === "") {
 					renderAlbumTracks(elChildren, genreTracks, genreKey, "", [], cb);
+					updateAllTreeCheckboxes();
 				}
 			}
 		});

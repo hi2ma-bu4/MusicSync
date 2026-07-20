@@ -17,6 +17,12 @@ export const state = {
 	// Scanned results
 	scannedTracks: [] as ScanResultItem[],
 	filteredTracks: [] as ScanResultItem[],
+	activeStatusFilters: new Set<string>(["missing", "updated", "synced", "phone_only", "path_warning"]),
+	sortRules: [
+		{ field: "artist", direction: "asc" },
+		{ field: "album", direction: "asc" },
+		{ field: "track", direction: "asc" },
+	] as { field: string; direction: "asc" | "desc" }[],
 
 	// Selection sets
 	checkedCopyTrackIds: new Set<string>(), // missing & updated

@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, shell } from "electron";
+import { app, dialog, ipcMain, Menu, MenuItem, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
@@ -45,12 +45,137 @@ export function registerIpcHandlers() {
 			colorUpdated: "#f59e0b",
 			colorSynced: "#94a3b8",
 			colorPhoneOnly: "#ef4444",
+			delimiters: [",", "|", "feat.", ";", "、", "／"],
+			exceptions: [],
 		});
 	});
 
 	ipcMain.handle("save-settings", (_event, settings: any) => {
 		store.set("settings", settings);
 	});
+
+	ipcMain.handle("reset-cache", async () => {
+		const cachesDir = path.join(app.getPath("userData"), "caches");
+		if (fs.existsSync(cachesDir)) {
+			try {
+				fs.rmSync(cachesDir, { recursive: true, force: true });
+			} catch (e) {
+				console.error("Failed to delete caches directory", e);
+			}
+		}
+		// Re-create the empty caches directory
+		fs.mkdirSync(cachesDir, { recursive: true });
+
+		// Clear scan results cache in-memory
+		for (const key of Object.keys(lastScanResults)) {
+			delete lastScanResults[key];
+		}
+	});
+
+	ipcMain.on(
+		"show-context-menu",
+		(
+			event,
+			params: {
+				trackId?: string;
+				title?: string;
+				artist?: string;
+				artists?: string[];
+				album?: string;
+				genre?: string;
+				itunesFilePath?: string;
+				phoneFilePath?: string;
+			},
+		) => {
+			const menu = new Menu();
+
+			const sendCommand = (command: string, arg: string) => {
+				event.sender.send("context-menu-command", { command, arg });
+			};
+
+			if (params.artist) {
+				if (params.artists && params.artists.length > 1) {
+					const submenu = new Menu();
+					params.artists.forEach((art) => {
+						submenu.append(
+							new MenuItem({
+								label: `「${art}」の曲を表示`,
+								click: () => sendCommand("jump-artist", art),
+							}),
+						);
+					});
+					menu.append(
+						new MenuItem({
+							label: `「${params.artist}」の曲を表示`,
+							submenu: submenu,
+						}),
+					);
+				} else {
+					menu.append(
+						new MenuItem({
+							label: `「${params.artist}」の曲を表示`,
+							click: () => sendCommand("jump-artist", params.artist!),
+						}),
+					);
+				}
+			}
+
+			if (params.album) {
+				menu.append(
+					new MenuItem({
+						label: `アルバム「${params.album}」の曲を表示`,
+						click: () => sendCommand("jump-album", params.album!),
+					}),
+				);
+			}
+
+			if (params.genre) {
+				menu.append(
+					new MenuItem({
+						label: `ジャンル「${params.genre}」の曲を表示`,
+						click: () => sendCommand("jump-genre", params.genre!),
+					}),
+				);
+			}
+
+			let hasSeparator = false;
+			if (params.itunesFilePath && fs.existsSync(params.itunesFilePath)) {
+				if (!hasSeparator) {
+					menu.append(new MenuItem({ type: "separator" }));
+					hasSeparator = true;
+				}
+				menu.append(
+					new MenuItem({
+						label: "エクスプローラーで表示 (iTunes)",
+						click: () => {
+							shell.showItemInFolder(params.itunesFilePath!);
+						},
+					}),
+				);
+			}
+			if (params.phoneFilePath && fs.existsSync(params.phoneFilePath)) {
+				if (!hasSeparator) {
+					menu.append(new MenuItem({ type: "separator" }));
+					hasSeparator = true;
+				}
+				menu.append(
+					new MenuItem({
+						label: "エクスプローラーで表示 (比較先)",
+						click: () => {
+							shell.showItemInFolder(params.phoneFilePath!);
+						},
+					}),
+				);
+			}
+
+			const win = (event as any).sender.getOwnerBrowserWindow();
+			if (win) {
+				menu.popup({ window: win });
+			} else {
+				menu.popup();
+			}
+		},
+	);
 
 	ipcMain.handle("select-folder", async () => {
 		const result = await dialog.showOpenDialog({

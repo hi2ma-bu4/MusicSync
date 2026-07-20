@@ -8,6 +8,15 @@ contextBridge.exposeInMainWorld("api", {
 	deleteProfile: (id: string) => ipcRenderer.invoke("delete-profile", id),
 	getSettings: () => ipcRenderer.invoke("get-settings"),
 	saveSettings: (settings: any) => ipcRenderer.invoke("save-settings", settings),
+	resetCache: () => ipcRenderer.invoke("reset-cache"),
+	showContextMenu: (params: any) => ipcRenderer.send("show-context-menu", params),
+	onContextMenuCommand: (callback: (command: string, arg: string) => void) => {
+		const listener = (_event: any, payload: { command: string; arg: string }) => callback(payload.command, payload.arg);
+		ipcRenderer.on("context-menu-command", listener);
+		return () => {
+			ipcRenderer.removeListener("context-menu-command", listener);
+		};
+	},
 	startScan: (profileId: string) => ipcRenderer.invoke("start-scan", profileId),
 	getScanResult: (profileId: string) => ipcRenderer.invoke("get-scan-result", profileId),
 	executeSync: (profileId: string, options: any) => ipcRenderer.invoke("execute-sync", profileId, options),

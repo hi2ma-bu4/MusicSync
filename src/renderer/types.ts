@@ -3,6 +3,7 @@ export interface Profile {
 	name: string;
 	itunesPath: string;
 	phonePath: string;
+	searchHistory?: string[];
 }
 
 export interface Settings {
@@ -10,6 +11,8 @@ export interface Settings {
 	colorUpdated: string;
 	colorSynced: string;
 	colorPhoneOnly: string;
+	delimiters?: string[];
+	exceptions?: string[];
 }
 
 export interface TrackMetadata {
@@ -26,6 +29,10 @@ export interface TrackMetadata {
 	hasCoverArt: boolean;
 	coverArtSize: number;
 	disc?: string;
+	albumartist?: string;
+	composer?: string;
+	year?: string;
+	comment?: string;
 }
 
 export interface ScanResultItem {
@@ -58,6 +65,9 @@ export interface WindowAPI {
 	deleteProfile: (id: string) => Promise<Profile[]>;
 	getSettings: () => Promise<Settings>;
 	saveSettings: (settings: Settings) => Promise<void>;
+	resetCache: () => Promise<void>;
+	showContextMenu: (params: any) => void;
+	onContextMenuCommand: (callback: (command: string, arg: string) => void) => () => void;
 	startScan: (profileId: string) => Promise<void>;
 	getScanResult: (profileId: string) => Promise<ScanResultItem[]>;
 	executeSync: (profileId: string, options: SyncOptions) => Promise<void>;

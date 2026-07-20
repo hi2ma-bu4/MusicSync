@@ -19,13 +19,13 @@ function createWindow() {
 }
 
 // src/main/ipc.ts
-import { app as app2, dialog, ipcMain, shell } from "electron";
+import { app as app2, dialog as dialog2, ipcMain, Menu, MenuItem, shell } from "electron";
 import Store from "electron-store";
 import fs4 from "node:fs";
 import path5 from "node:path";
 
 // src/main/scanner.ts
-import { app } from "electron";
+import { app, dialog } from "electron";
 import fs2 from "node:fs";
 import path3 from "node:path";
 
@@ -91,6 +91,28 @@ async function getTrackMetadata(filePath, relativePath) {
     const picture = metadata.common.picture && metadata.common.picture[0];
     const hasCoverArt = !!picture;
     const coverArtSize = picture ? picture.data.length : 0;
+    const albumartist = metadata.common.albumartist || "";
+    const composer = metadata.common.composer && metadata.common.composer[0] || "";
+    let yearStr = "";
+    if (metadata.common.year) {
+      yearStr = String(metadata.common.year);
+    } else if (metadata.common.date) {
+      const match = metadata.common.date.match(/\d{4}/);
+      if (match) {
+        yearStr = match[0];
+      } else {
+        yearStr = metadata.common.date;
+      }
+    }
+    let commentStr = "";
+    if (metadata.common.comment && metadata.common.comment.length > 0) {
+      const c = metadata.common.comment[0];
+      if (typeof c === "string") {
+        commentStr = c;
+      } else if (c && typeof c === "object" && "text" in c) {
+        commentStr = c.text || "";
+      }
+    }
     return {
       id: "",
       filePath,
@@ -104,7 +126,11 @@ async function getTrackMetadata(filePath, relativePath) {
       mtimeMs: stats.mtimeMs,
       hasCoverArt,
       coverArtSize,
-      disc: discStr
+      disc: discStr,
+      albumartist,
+      composer,
+      year: yearStr,
+      comment: commentStr
     };
   } catch (err) {
     const stats = await fs.promises.stat(filePath);
@@ -121,7 +147,11 @@ async function getTrackMetadata(filePath, relativePath) {
       mtimeMs: stats.mtimeMs,
       hasCoverArt: false,
       coverArtSize: 0,
-      disc: ""
+      disc: "",
+      albumartist: "",
+      composer: "",
+      year: "",
+      comment: ""
     };
   }
 }
@@ -139,9 +169,39 @@ function loadCache(profileId, suffix) {
   const cachePath = getCachePath(profileId, suffix);
   if (fs2.existsSync(cachePath)) {
     try {
-      return JSON.parse(fs2.readFileSync(cachePath, "utf-8"));
+      const cache = JSON.parse(fs2.readFileSync(cachePath, "utf-8"));
+      let hasFormatMismatch = false;
+      const keys = Object.keys(cache);
+      if (keys.length > 0) {
+        const firstItem = cache[keys[0]];
+        if (firstItem && firstItem.comment === void 0) {
+          hasFormatMismatch = true;
+        }
+      }
+      if (hasFormatMismatch) {
+        const choice = dialog.showMessageBoxSync({
+          type: "question",
+          buttons: ["\u306F\u3044 (Yes)", "\u3044\u3044\u3048 (No)"],
+          title: "\u30AD\u30E3\u30C3\u30B7\u30E5\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u5909\u66F4\u306E\u78BA\u8A8D",
+          message: "\u30A2\u30C3\u30D7\u30C7\u30FC\u30C8\u306B\u3088\u308A\u30AD\u30E3\u30C3\u30B7\u30E5\u30C7\u30FC\u30BF\u306E\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u304C\u65B0\u3057\u304F\u306A\u308A\u307E\u3057\u305F\u3002\u53E4\u3044\u30AD\u30E3\u30C3\u30B7\u30E5\u3092\u524A\u9664\uFF08\u30EA\u30BB\u30C3\u30C8\uFF09\u3057\u3066\u518D\u69CB\u7BC9\u3057\u307E\u3059\u304B\uFF1F"
+        });
+        if (choice === 0) {
+          try {
+            fs2.unlinkSync(cachePath);
+          } catch (e) {
+          }
+          return {};
+        }
+      }
+      return cache;
     } catch (e) {
       console.error("Failed to parse cache", e);
+      dialog.showMessageBoxSync({
+        type: "warning",
+        buttons: ["\u4E86\u89E3"],
+        title: "\u30AD\u30E3\u30C3\u30B7\u30E5\u8AAD\u307F\u8FBC\u307F\u30A8\u30E9\u30FC",
+        message: "\u30D7\u30ED\u30D5\u30A1\u30A4\u30EB\u306E\u30AD\u30E3\u30C3\u30B7\u30E5\u30D5\u30A1\u30A4\u30EB\u304C\u7834\u640D\u3057\u3066\u3044\u308B\u304B\u3001\u30D5\u30A9\u30FC\u30DE\u30C3\u30C8\u304C\u53E4\u3044\u305F\u3081\u8AAD\u307F\u8FBC\u3081\u307E\u305B\u3093\u3067\u3057\u305F\u3002\u30AD\u30E3\u30C3\u30B7\u30E5\u306F\u81EA\u52D5\u7684\u306B\u518D\u69CB\u7BC9\u3055\u308C\u307E\u3059\u3002"
+      });
     }
   }
   return {};
@@ -379,6 +439,18 @@ async function runScan(profile, event) {
       if (I.genre !== bestMatch.genre) {
         metadataMismatch = true;
       }
+      if ((I.albumartist || "") !== (bestMatch.albumartist || "")) {
+        metadataMismatch = true;
+      }
+      if ((I.composer || "") !== (bestMatch.composer || "")) {
+        metadataMismatch = true;
+      }
+      if ((I.year || "") !== (bestMatch.year || "")) {
+        metadataMismatch = true;
+      }
+      if ((I.comment || "") !== (bestMatch.comment || "")) {
+        metadataMismatch = true;
+      }
       results.push({
         id: I.id,
         itunesTrack: I,
@@ -572,14 +644,116 @@ function registerIpcHandlers() {
       colorMissing: "#22c55e",
       colorUpdated: "#f59e0b",
       colorSynced: "#94a3b8",
-      colorPhoneOnly: "#ef4444"
+      colorPhoneOnly: "#ef4444",
+      delimiters: [",", "|", "feat.", ";", "\u3001", "\uFF0F"],
+      exceptions: []
     });
   });
   ipcMain.handle("save-settings", (_event, settings) => {
     store.set("settings", settings);
   });
+  ipcMain.handle("reset-cache", async () => {
+    const cachesDir2 = path5.join(app2.getPath("userData"), "caches");
+    if (fs4.existsSync(cachesDir2)) {
+      try {
+        fs4.rmSync(cachesDir2, { recursive: true, force: true });
+      } catch (e) {
+        console.error("Failed to delete caches directory", e);
+      }
+    }
+    fs4.mkdirSync(cachesDir2, { recursive: true });
+    for (const key of Object.keys(lastScanResults)) {
+      delete lastScanResults[key];
+    }
+  });
+  ipcMain.on(
+    "show-context-menu",
+    (event, params) => {
+      const menu = new Menu();
+      const sendCommand = (command, arg) => {
+        event.sender.send("context-menu-command", { command, arg });
+      };
+      if (params.artist) {
+        if (params.artists && params.artists.length > 1) {
+          const submenu = new Menu();
+          params.artists.forEach((art) => {
+            submenu.append(
+              new MenuItem({
+                label: `\u300C${art}\u300D\u306E\u66F2\u3092\u8868\u793A`,
+                click: () => sendCommand("jump-artist", art)
+              })
+            );
+          });
+          menu.append(
+            new MenuItem({
+              label: `\u300C${params.artist}\u300D\u306E\u66F2\u3092\u8868\u793A`,
+              submenu
+            })
+          );
+        } else {
+          menu.append(
+            new MenuItem({
+              label: `\u300C${params.artist}\u300D\u306E\u66F2\u3092\u8868\u793A`,
+              click: () => sendCommand("jump-artist", params.artist)
+            })
+          );
+        }
+      }
+      if (params.album) {
+        menu.append(
+          new MenuItem({
+            label: `\u30A2\u30EB\u30D0\u30E0\u300C${params.album}\u300D\u306E\u66F2\u3092\u8868\u793A`,
+            click: () => sendCommand("jump-album", params.album)
+          })
+        );
+      }
+      if (params.genre) {
+        menu.append(
+          new MenuItem({
+            label: `\u30B8\u30E3\u30F3\u30EB\u300C${params.genre}\u300D\u306E\u66F2\u3092\u8868\u793A`,
+            click: () => sendCommand("jump-genre", params.genre)
+          })
+        );
+      }
+      let hasSeparator = false;
+      if (params.itunesFilePath && fs4.existsSync(params.itunesFilePath)) {
+        if (!hasSeparator) {
+          menu.append(new MenuItem({ type: "separator" }));
+          hasSeparator = true;
+        }
+        menu.append(
+          new MenuItem({
+            label: "\u30A8\u30AF\u30B9\u30D7\u30ED\u30FC\u30E9\u30FC\u3067\u8868\u793A (iTunes)",
+            click: () => {
+              shell.showItemInFolder(params.itunesFilePath);
+            }
+          })
+        );
+      }
+      if (params.phoneFilePath && fs4.existsSync(params.phoneFilePath)) {
+        if (!hasSeparator) {
+          menu.append(new MenuItem({ type: "separator" }));
+          hasSeparator = true;
+        }
+        menu.append(
+          new MenuItem({
+            label: "\u30A8\u30AF\u30B9\u30D7\u30ED\u30FC\u30E9\u30FC\u3067\u8868\u793A (\u6BD4\u8F03\u5148)",
+            click: () => {
+              shell.showItemInFolder(params.phoneFilePath);
+            }
+          })
+        );
+      }
+      const win = event.sender.getOwnerBrowserWindow();
+      if (win) {
+        menu.popup({ window: win });
+      } else {
+        menu.popup();
+      }
+    }
+  );
   ipcMain.handle("select-folder", async () => {
-    const result = await dialog.showOpenDialog({
+    const result = await dialog2.showOpenDialog({
       properties: ["openDirectory"]
     });
     if (result.canceled) {

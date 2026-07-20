@@ -1,4 +1,4 @@
-import { app } from "electron";
+import { app, dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
 import { ScanResultItem, TrackMetadata } from "./types";
@@ -20,9 +20,39 @@ function loadCache(profileId: string, suffix: string): Record<string, TrackMetad
 	const cachePath = getCachePath(profileId, suffix);
 	if (fs.existsSync(cachePath)) {
 		try {
-			return JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+			const cache = JSON.parse(fs.readFileSync(cachePath, "utf-8"));
+			// Check if cache needs conversion or is empty/corrupt
+			let hasFormatMismatch = false;
+			const keys = Object.keys(cache);
+			if (keys.length > 0) {
+				const firstItem = cache[keys[0]];
+				if (firstItem && firstItem.comment === undefined) {
+					hasFormatMismatch = true;
+				}
+			}
+			if (hasFormatMismatch) {
+				const choice = dialog.showMessageBoxSync({
+					type: "question",
+					buttons: ["はい (Yes)", "いいえ (No)"],
+					title: "キャッシュフォーマット変更の確認",
+					message: "アップデートによりキャッシュデータのフォーマットが新しくなりました。古いキャッシュを削除（リセット）して再構築しますか？",
+				});
+				if (choice === 0) {
+					try {
+						fs.unlinkSync(cachePath);
+					} catch (e) {}
+					return {};
+				}
+			}
+			return cache;
 		} catch (e) {
 			console.error("Failed to parse cache", e);
+			dialog.showMessageBoxSync({
+				type: "warning",
+				buttons: ["了解"],
+				title: "キャッシュ読み込みエラー",
+				message: "プロファイルのキャッシュファイルが破損しているか、フォーマットが古いため読み込めませんでした。キャッシュは自動的に再構築されます。",
+			});
 		}
 	}
 	return {};
@@ -326,6 +356,20 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 				metadataMismatch = true;
 			}
 			if (I.genre !== bestMatch.genre) {
+				metadataMismatch = true;
+			}
+
+			// Check the new fields: albumartist, composer, year, comment
+			if ((I.albumartist || "") !== (bestMatch.albumartist || "")) {
+				metadataMismatch = true;
+			}
+			if ((I.composer || "") !== (bestMatch.composer || "")) {
+				metadataMismatch = true;
+			}
+			if ((I.year || "") !== (bestMatch.year || "")) {
+				metadataMismatch = true;
+			}
+			if ((I.comment || "") !== (bestMatch.comment || "")) {
 				metadataMismatch = true;
 			}
 

@@ -12,6 +12,10 @@ export interface TrackMetadata {
 	hasCoverArt: boolean;
 	coverArtSize: number;
 	disc?: string;
+	albumartist?: string;
+	composer?: string;
+	year?: string;
+	comment?: string;
 }
 
 export interface ScanResultItem {

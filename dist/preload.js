@@ -10,6 +10,15 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   deleteProfile: (id) => import_electron.ipcRenderer.invoke("delete-profile", id),
   getSettings: () => import_electron.ipcRenderer.invoke("get-settings"),
   saveSettings: (settings) => import_electron.ipcRenderer.invoke("save-settings", settings),
+  resetCache: () => import_electron.ipcRenderer.invoke("reset-cache"),
+  showContextMenu: (params) => import_electron.ipcRenderer.send("show-context-menu", params),
+  onContextMenuCommand: (callback) => {
+    const listener = (_event, payload) => callback(payload.command, payload.arg);
+    import_electron.ipcRenderer.on("context-menu-command", listener);
+    return () => {
+      import_electron.ipcRenderer.removeListener("context-menu-command", listener);
+    };
+  },
   startScan: (profileId) => import_electron.ipcRenderer.invoke("start-scan", profileId),
   getScanResult: (profileId) => import_electron.ipcRenderer.invoke("get-scan-result", profileId),
   executeSync: (profileId, options) => import_electron.ipcRenderer.invoke("execute-sync", profileId, options),

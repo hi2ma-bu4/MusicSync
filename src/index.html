@@ -45,7 +45,7 @@
 					<div class="border-t border-gray-700 pt-1">
 						<button id="btn-dropdown-settings" class="w-full text-left px-3 py-1.5 hover:bg-gray-700 hover:text-white transition flex items-center space-x-1.5 text-gray-400">
 							<i class="icon-settings text-xs"></i>
-							<span>ステータス色の設定...</span>
+							<span>環境設定...</span>
 						</button>
 					</div>
 				</div>
@@ -115,15 +115,49 @@
 					</nav>
 				</div>
 
-				<!-- Compact Search Box on the Right -->
-				<div class="relative w-48 sm:w-64">
-					<span class="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400 pointer-events-none">
-						<i class="icon-search text-xs"></i>
-					</span>
-					<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-3 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
-					<!-- Combobox suggestion dropdown -->
-					<div id="search-combobox" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl py-2 z-50 text-xxs hidden max-h-96 overflow-y-auto">
-						<!-- Dynamic suggestions rendered here -->
+				<!-- Compact Sort & Search on the Right -->
+				<div class="flex items-center space-x-2">
+					<!-- Notion-like Sort Button & Dropdown Panel -->
+					<div class="relative">
+						<button id="btn-sort-toggle" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none">
+							<i class="icon-sliders text-xxs"></i>
+							<span>ソート</span>
+							<span id="sort-badge" class="bg-indigo-650 text-indigo-200 px-1 rounded font-mono text-[9px]">3</span>
+						</button>
+
+						<!-- Notion-like Sort Dropdown Panel -->
+						<div id="sort-dropdown-panel" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl p-3 z-50 text-xxs hidden flex-col space-y-2.5">
+							<div class="flex items-center justify-between border-b border-gray-700 pb-1.5">
+								<span class="font-bold text-gray-300 flex items-center space-x-1">
+									<i class="icon-sliders"></i>
+									<span>並び替え条件の優先順位</span>
+								</span>
+								<button id="btn-sort-clear" class="text-gray-500 hover:text-red-400 transition text-[10px]">クリア</button>
+							</div>
+
+							<!-- Sort Rules List -->
+							<div id="sort-rules-list" class="space-y-2 max-h-48 overflow-y-auto">
+								<!-- Dynamically rendered sorting rules with remove/move buttons -->
+							</div>
+
+							<!-- Add Rule Button -->
+							<button id="btn-sort-add-rule" class="w-full bg-gray-700 hover:bg-gray-650 text-gray-300 hover:text-white transition py-1 rounded border border-gray-650 flex items-center justify-center space-x-1 font-semibold">
+								<i class="icon-plus text-[10px]"></i>
+								<span>条件を追加...</span>
+							</button>
+						</div>
+					</div>
+
+					<!-- Search Box -->
+					<div class="relative w-48 sm:w-64">
+						<span class="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400 pointer-events-none">
+							<i class="icon-search text-xs"></i>
+						</span>
+						<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-3 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
+						<!-- Combobox suggestion dropdown -->
+						<div id="search-combobox" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl py-2 z-50 text-xxs hidden max-h-96 overflow-y-auto">
+							<!-- Dynamic suggestions rendered here -->
+						</div>
 					</div>
 				</div>
 			</div>
@@ -195,25 +229,29 @@
 	<!-- Bottom Unified Footer - Summary + Colored Legend + Operations -->
 	<footer class="bg-gray-800 border-t border-gray-700 px-4 py-2 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-3 text-xs z-30">
 		<!-- Summary and Legend integration (● missing, ● updated, ● synced, ● phoneOnly) -->
-		<div id="footer-summary" class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-400">
-			<span>● 全件: <strong id="cnt-total" class="text-white font-mono">0</strong></span>
-			<span class="flex items-center space-x-1">
+		<div id="footer-summary" class="flex flex-wrap items-center gap-x-4 gap-y-1.5 text-gray-400 select-none">
+			<span id="stat-btn-total" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500">
+				<span>全件:</span> <strong id="cnt-total" class="text-white font-mono">0</strong>
+			</span>
+			<span id="stat-btn-missing" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30">
 				<span class="w-2 h-2 rounded-full bg-missing inline-block"></span>
-				<span>未存在: <strong id="cnt-missing" class="text-white font-mono">0</strong></span>
+				<span>未存在:</span> <strong id="cnt-missing" class="text-white font-mono">0</strong>
 			</span>
-			<span class="flex items-center space-x-1">
+			<span id="stat-btn-updated" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30">
 				<span class="w-2 h-2 rounded-full bg-updated inline-block"></span>
-				<span>更新あり: <strong id="cnt-updated" class="text-white font-mono">0</strong></span>
+				<span>更新あり:</span> <strong id="cnt-updated" class="text-white font-mono">0</strong>
 			</span>
-			<span class="flex items-center space-x-1">
+			<span id="stat-btn-synced" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30">
 				<span class="w-2 h-2 rounded-full bg-synced inline-block"></span>
-				<span>同期済: <strong id="cnt-synced" class="text-white font-mono">0</strong></span>
+				<span>同期済:</span> <strong id="cnt-synced" class="text-white font-mono">0</strong>
 			</span>
-			<span class="flex items-center space-x-1">
+			<span id="stat-btn-phone_only" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30">
 				<span class="w-2 h-2 rounded-full bg-phone_only inline-block"></span>
-				<span>比較先のみ: <strong id="cnt-phone_only" class="text-white font-mono">0</strong></span>
+				<span>比較先のみ:</span> <strong id="cnt-phone_only" class="text-white font-mono">0</strong>
 			</span>
-			<span id="cnt-path-warnings" class="text-amber-400 font-medium hidden">⚠️ 配置不一致: <strong class="font-mono">0</strong>件</span>
+			<span id="stat-btn-path_warning" tabindex="0" class="cursor-pointer hover:text-white transition items-center space-x-1 px-1.5 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30 text-amber-400 font-medium hidden">
+				<span>⚠️ 配置不一致:</span> <strong id="cnt-path-warnings" class="font-mono">0</strong>
+			</span>
 			<span class="text-xxs border-l border-gray-700 pl-3">選択中: コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono">0</strong> / 削除 <strong id="cnt-checked-delete" class="text-red-400 font-mono">0</strong></span>
 		</div>
 
@@ -268,32 +306,84 @@
 		</div>
 	</div>
 
-	<!-- 2. Settings (Color Customizable) Modal -->
+	<!-- 2. Settings (Color Customizable & Extra Settings) Modal -->
 	<div id="modal-settings" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
-		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-xs p-5 mx-4 text-xs">
-			<h3 class="text-sm font-bold text-indigo-300 mb-3.5">ステータス表示色の設定</h3>
-			<div class="space-y-3">
-				<div class="flex items-center justify-between">
-					<span class="text-gray-300">比較先に未存在 (新規)</span>
-					<input type="color" id="color-missing" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
-				</div>
-				<div class="flex items-center justify-between">
-					<span class="text-gray-300">メタデータ変更あり</span>
-					<input type="color" id="color-updated" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
-				</div>
-				<div class="flex items-center justify-between">
-					<span class="text-gray-300">同期済</span>
-					<input type="color" id="color-synced" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
-				</div>
-				<div class="flex items-center justify-between">
-					<span class="text-gray-300">比較先側のみに存在</span>
-					<input type="color" id="color-phone_only" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-md p-5 mx-4 text-xs flex flex-col max-h-[90%]">
+			<h3 class="text-sm font-bold text-indigo-300 mb-3.5">設定</h3>
+
+			<div class="space-y-4 overflow-y-auto flex-1 pr-1.5">
+				<!-- Status Colors -->
+				<div>
+					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">ステータス表示色</h4>
+					<div class="space-y-2.5">
+						<div class="flex items-center justify-between">
+							<span class="text-gray-300">比較先に未存在 (新規)</span>
+							<input type="color" id="color-missing" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-300">メタデータ変更あり</span>
+							<input type="color" id="color-updated" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-300">同期済</span>
+							<input type="color" id="color-synced" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+						</div>
+						<div class="flex items-center justify-between">
+							<span class="text-gray-300">比較先側のみに存在</span>
+							<input type="color" id="color-phone_only" class="w-10 h-7 rounded bg-transparent border border-gray-650 cursor-pointer">
+						</div>
+					</div>
 				</div>
 
-				<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
-					<button type="button" id="btn-settings-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
-					<button type="button" id="btn-settings-save" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">保存</button>
+				<!-- Artist Splitting Configuration -->
+				<div>
+					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">アーティスト名の分割・正規化</h4>
+					<div class="space-y-3">
+						<div>
+							<div class="flex items-center justify-between mb-1">
+								<label class="block text-gray-400 font-semibold">区切り文字</label>
+								<button type="button" id="btn-settings-add-delim" class="text-indigo-400 hover:text-indigo-300 font-semibold text-[10px] flex items-center space-x-0.5 cursor-pointer">
+									<i class="icon-plus text-[9px]"></i>
+									<span>追加</span>
+								</button>
+							</div>
+							<div id="settings-delims-container" class="space-y-1.5 max-h-32 overflow-y-auto">
+								<!-- Dynamically rendered delimiter inputs -->
+							</div>
+						</div>
+						<div>
+							<div class="flex items-center justify-between mb-1">
+								<label class="block text-gray-400 font-semibold">分割の例外にするアーティスト名</label>
+								<button type="button" id="btn-settings-add-exception" class="text-indigo-400 hover:text-indigo-300 font-semibold text-[10px] flex items-center space-x-0.5 cursor-pointer">
+									<i class="icon-plus text-[9px]"></i>
+									<span>追加</span>
+								</button>
+							</div>
+							<div id="settings-exceptions-container" class="space-y-1.5 max-h-32 overflow-y-auto">
+								<!-- Dynamically rendered exception inputs -->
+							</div>
+						</div>
+					</div>
 				</div>
+
+				<!-- Cache Reset Section -->
+				<div>
+					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">システム管理</h4>
+					<div class="bg-gray-900/60 p-3 border border-gray-750 rounded space-y-2">
+						<p class="text-[10px] text-gray-400 leading-normal">
+							スキャン結果のキャッシュファイルや、アルバムアートのサムネイル画像をすべてクリアします。
+							読み込み速度が低下したり不具合が発生した場合に実行してください。
+						</p>
+						<button type="button" id="btn-settings-reset-cache" class="w-full bg-red-900/40 hover:bg-red-800 border border-red-700/60 text-red-300 font-semibold py-1.5 rounded transition text-center select-none cursor-pointer">
+							キャッシュを全削除 (リセット)
+						</button>
+					</div>
+				</div>
+			</div>
+
+			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700 mt-4">
+				<button type="button" id="btn-settings-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+				<button type="button" id="btn-settings-save" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">保存</button>
 			</div>
 		</div>
 	</div>

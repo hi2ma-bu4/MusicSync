@@ -74,6 +74,33 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 		const hasCoverArt = !!picture;
 		const coverArtSize = picture ? picture.data.length : 0;
 
+		const albumartist = metadata.common.albumartist || "";
+		const composer = (metadata.common.composer && metadata.common.composer[0]) || "";
+
+		// Year can be stored in metadata.common.year or metadata.common.date
+		let yearStr = "";
+		if (metadata.common.year) {
+			yearStr = String(metadata.common.year);
+		} else if (metadata.common.date) {
+			// Extract year from date string if present
+			const match = metadata.common.date.match(/\d{4}/);
+			if (match) {
+				yearStr = match[0];
+			} else {
+				yearStr = metadata.common.date;
+			}
+		}
+
+		let commentStr = "";
+		if (metadata.common.comment && metadata.common.comment.length > 0) {
+			const c = metadata.common.comment[0];
+			if (typeof c === "string") {
+				commentStr = c;
+			} else if (c && typeof c === "object" && "text" in c) {
+				commentStr = (c as any).text || "";
+			}
+		}
+
 		return {
 			id: "",
 			filePath,
@@ -88,6 +115,10 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			hasCoverArt,
 			coverArtSize,
 			disc: discStr,
+			albumartist,
+			composer,
+			year: yearStr,
+			comment: commentStr,
 		};
 	} catch (err) {
 		const stats = await fs.promises.stat(filePath);
@@ -105,6 +136,10 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			hasCoverArt: false,
 			coverArtSize: 0,
 			disc: "",
+			albumartist: "",
+			composer: "",
+			year: "",
+			comment: "",
 		};
 	}
 }
