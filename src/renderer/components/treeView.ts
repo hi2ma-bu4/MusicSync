@@ -9,9 +9,8 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 			const el = document.getElementById(elementId);
 			if (el) {
 				const bgOverlay = document.createElement("div");
-				bgOverlay.className = "absolute inset-0 pointer-events-none bg-cover bg-center z-0";
-				bgOverlay.style.backgroundImage = `url("${dataUri}")`;
-				bgOverlay.style.opacity = "0.8"; // 80% transparency
+				bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
+				bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
 				el.prepend(bgOverlay);
 
 				Array.from(el.children).forEach((child) => {

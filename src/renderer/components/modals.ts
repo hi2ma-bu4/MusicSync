@@ -29,6 +29,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	const elColorUpdated = document.getElementById("color-updated") as HTMLInputElement;
 	const elColorSynced = document.getElementById("color-synced") as HTMLInputElement;
 	const elColorPhoneOnly = document.getElementById("color-phone_only") as HTMLInputElement;
+	const elChkSettingsDevMode = document.getElementById("chk-settings-devmode") as HTMLInputElement;
 	const elBtnSettingsResetCache = document.getElementById("btn-settings-reset-cache")!;
 	const elBtnSettingsCancel = document.getElementById("btn-settings-cancel")!;
 	const elBtnSettingsSave = document.getElementById("btn-settings-save")!;
@@ -199,6 +200,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			colorPhoneOnly: elColorPhoneOnly.value,
 			delimiters,
 			exceptions,
+			devMode: elChkSettingsDevMode.checked,
 		};
 		await api.saveSettings(newSettings);
 		state.currentSettings = newSettings;
@@ -499,9 +501,12 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	}
 
 	return {
-		loadSettings(delimiters: string[], exceptions: string[]) {
+		loadSettings(delimiters: string[], exceptions: string[], devMode: boolean) {
 			activeDelims = [...delimiters];
 			activeExceptions = [...exceptions];
+			if (elChkSettingsDevMode) {
+				elChkSettingsDevMode.checked = !!devMode;
+			}
 			renderDelimsInputs();
 			renderExceptionsInputs();
 		},

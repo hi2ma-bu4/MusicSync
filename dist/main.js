@@ -3,6 +3,7 @@ import { app as app3 } from "electron";
 
 // src/main/index.ts
 import { BrowserWindow } from "electron";
+import Store from "electron-store";
 import path from "node:path";
 function createWindow() {
   const win = new BrowserWindow({
@@ -13,16 +14,27 @@ function createWindow() {
       contextIsolation: true
     }
   });
+  const store2 = new Store();
+  win.webContents.on("before-input-event", (event, input) => {
+    if ((input.control || input.meta) && input.shift && input.key.toLowerCase() === "i") {
+      const settings = store2.get("settings", {});
+      if (settings && settings.devMode) {
+        win.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    }
+  });
   win.setMenuBarVisibility(false);
   win.removeMenu();
   win.loadFile(path.join(process.cwd(), "dist", "index.html"));
 }
 
 // src/main/ipc.ts
-import { app as app2, dialog as dialog2, ipcMain, Menu, MenuItem, shell } from "electron";
-import Store from "electron-store";
+import { app as app2, dialog as dialog2, ipcMain, Menu, MenuItem, net, protocol, shell } from "electron";
+import Store2 from "electron-store";
 import fs4 from "node:fs";
 import path5 from "node:path";
+import { pathToFileURL } from "node:url";
 
 // src/shared/constants.ts
 var DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "\u3001", "\uFF0F"];
@@ -697,8 +709,19 @@ async function runSync(profile, options, event) {
 }
 
 // src/main/ipc.ts
-var store = new Store();
+var store = new Store2();
 function registerIpcHandlers() {
+  protocol.handle("media", (request) => {
+    try {
+      const url = new URL(request.url);
+      const base64Str = url.pathname.slice(1);
+      const decodedPath = decodeURIComponent(Buffer.from(base64Str, "base64").toString("utf-8"));
+      return net.fetch(pathToFileURL(decodedPath).toString());
+    } catch (e) {
+      console.error("Failed to fetch media protocol file", e);
+      return new Response("Not Found", { status: 404 });
+    }
+  });
   ipcMain.handle("show-item-in-folder", (_event, filePath) => {
     if (fs4.existsSync(filePath)) {
       shell.showItemInFolder(filePath);
@@ -733,7 +756,8 @@ function registerIpcHandlers() {
       colorSynced: "#94a3b8",
       colorPhoneOnly: "#ef4444",
       delimiters: DEFAULT_DELIMITERS,
-      exceptions: []
+      exceptions: [],
+      devMode: false
     });
   });
   ipcMain.handle("save-settings", (_event, settings) => {
@@ -760,6 +784,15 @@ function registerIpcHandlers() {
       const sendCommand = (command, arg) => {
         event.sender.send("context-menu-command", { command, arg });
       };
+      if (params.trackId) {
+        menu.append(
+          new MenuItem({
+            label: "\u30D7\u30EC\u30D3\u30E5\u30FC\u518D\u751F",
+            click: () => sendCommand("play-track", params.trackId)
+          })
+        );
+        menu.append(new MenuItem({ type: "separator" }));
+      }
       if (params.artist) {
         if (params.artists && params.artists.length > 1) {
           const submenu = new Menu();

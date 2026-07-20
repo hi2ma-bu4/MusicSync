@@ -4,63 +4,114 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-CJL6O3Iu.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-DZqjQquw.css">
+  <script type="module" crossorigin src="./assets/js/index-Cls3PTc1.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-Bv5MReVo.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
 	<!-- Header - Slimmed with dropdown Profile selection -->
-	<header class="bg-gray-800 border-b border-gray-700 px-4 py-2 flex items-center justify-between shrink-0 relative">
+	<header class="bg-gray-800 border-b border-gray-700 px-4 flex items-center justify-between shrink-0 relative">
 		<!-- Brand & Version -->
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.3.2</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.3.3</span>
 		</div>
 
-		<!-- Profile Dropdown Trigger (Replaces old sidebar) -->
-		<div class="relative">
-			<button id="btn-profile-dropdown" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-600 border border-gray-650 px-3 py-1 rounded text-xs font-semibold text-gray-200 transition focus:outline-none">
-				<i class="icon-smartphone text-xs"></i>
-				<span id="lbl-active-profile">プロファイルを選択...</span>
-				<i class="icon-chevron-down text-xxs text-gray-400"></i>
-			</button>
-
-			<!-- Profile Dropdown Options -->
-			<div id="profile-dropdown-menu" class="absolute left-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded shadow-xl py-1 z-50 text-xs hidden">
-				<div id="profile-dropdown-list" class="max-h-48 overflow-y-auto divide-y divide-gray-700">
-					<!-- Dynamically injected profiles list -->
-				</div>
-				<div class="border-t border-gray-700 pt-1">
-					<button id="btn-dropdown-new-profile" class="w-full text-left px-3 py-1.5 hover:bg-indigo-900 hover:text-white transition flex items-center space-x-1.5 text-indigo-300">
-						<i class="icon-plus text-xs"></i>
-						<span>新規プロファイル作成...</span>
-					</button>
-					<button id="btn-dropdown-edit-profile" class="w-full text-left px-3 py-1.5 hover:bg-gray-700 hover:text-white transition flex items-center space-x-1.5 text-gray-400 hidden">
-						<i class="icon-edit-2 text-xs"></i>
-						<span>現在のプロファイル編集...</span>
-					</button>
-					<button id="btn-dropdown-delete-profile" class="w-full text-left px-3 py-1.5 hover:bg-red-950 hover:text-red-400 transition flex items-center space-x-1.5 text-red-500 hidden">
-						<i class="icon-trash-2 text-xs"></i>
-						<span>現在のプロファイル削除...</span>
-					</button>
-					<div class="border-t border-gray-700 pt-1">
-						<button id="btn-dropdown-settings" class="w-full text-left px-3 py-1.5 hover:bg-gray-700 hover:text-white transition flex items-center space-x-1.5 text-gray-400">
-							<i class="icon-settings text-xs"></i>
-							<span>環境設定...</span>
-						</button>
+		<!-- Central Music Preview Player -->
+		<div id="preview-player" class="flex flex-col items-center select-none w-90 md:w-120 bg-gray-900/60 pt-1.5 pb-1 px-3 shadow-inner text-xxs z-20">
+			<!-- Top Row: Controls & Info -->
+			<div class="flex items-center justify-between w-full gap-2">
+				<!-- Track metadata / Art -->
+				<div class="flex items-center space-x-2 min-w-0 flex-1">
+					<div class="w-7 h-7 rounded bg-gray-850 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative">
+						<img id="player-album-art" class="w-full h-full object-cover hidden" src="" alt="">
+						<i id="player-art-placeholder" class="icon-music text-gray-500 text-xs"></i>
+					</div>
+					<div class="flex flex-col min-w-0 text-left">
+						<span id="player-title" class="font-bold text-gray-200 truncate leading-tight">再生されていません</span>
+						<span id="player-artist" class="text-gray-500 text-[9px] truncate leading-tight">アーティスト情報</span>
 					</div>
 				</div>
+
+				<!-- Playback Controls Buttons -->
+				<div class="flex items-center space-x-1.5 shrink-0">
+					<!-- Prev Track / Rewind -->
+					<button id="btn-player-prev" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-700 text-gray-300 transition focus:outline-none cursor-pointer" title="先頭に戻す (長押しで早戻し)">
+						<i id="icon-player-prev" class="icon-skip-back text-xs"></i>
+					</button>
+
+					<!-- Play / Pause -->
+					<button id="btn-player-play" class="w-8 h-8 flex items-center justify-center rounded-full bg-indigo-600 hover:bg-indigo-500 text-white transition shadow-md focus:outline-none cursor-pointer" title="再生 / 一時停止">
+						<i id="icon-player-play" class="icon-play text-sm"></i>
+					</button>
+
+					<!-- Next Track / Fast-forward -->
+					<button id="btn-player-next" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-700 text-gray-300 transition focus:outline-none cursor-pointer" title="次の曲 / 最後に飛ばす (長押しで早送り)">
+						<i id="icon-player-next" class="icon-skip-forward text-xs"></i>
+					</button>
+
+					<!-- Loop/Repeat Toggle -->
+					<button id="btn-player-loop" class="w-7 h-7 flex items-center justify-center rounded-full hover:bg-gray-700 text-gray-400 transition focus:outline-none cursor-pointer" title="ループ再生/1回再生で停止/リスト順次再生">
+						<i id="icon-player-loop" class="icon-repeat-off text-xs"></i>
+					</button>
+				</div>
+			</div>
+
+			<!-- Bottom Row: Seek Bar & Time counter -->
+			<div class="flex items-center w-full gap-2.5">
+				<span id="player-time-current" class="font-mono text-gray-500 text-[9px] shrink-0">00:00</span>
+				<input id="player-seekbar" type="range" min="0" max="100" value="0" class="flex-1 h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer focus:outline-none accent-indigo-500">
+				<span id="player-time-total" class="font-mono text-gray-500 text-[9px] shrink-0">00:00</span>
 			</div>
 		</div>
 
-		<!-- Selected Paths Small Header Badge (Saves Space) -->
-		<div id="header-paths-badge" class="hidden lg:flex items-center space-x-3 text-xxs text-gray-400">
-			<div>
-				<span>iTunes: </span><span id="header-itunes-path" class="font-mono text-gray-300"></span>
+		<!-- Right Side Containers (Profile, Paths) -->
+		<div class="flex items-center space-x-3 shrink-0">
+			<!-- Selected Paths Small Header Badge (Saves Space) -->
+			<div id="header-paths-badge" class="hidden xl:flex flex-col space-y-0.5 text-right text-gray-400 text-[10px]">
+				<div>
+					<span>iTunes: </span><span id="header-itunes-path" class="font-mono text-gray-300"></span>
+				</div>
+				<div>
+					<span>比較先: </span><span id="header-phone-path" class="font-mono text-gray-300"></span>
+				</div>
 			</div>
-			<div>
-				<span>比較先: </span><span id="header-phone-path" class="font-mono text-gray-300"></span>
+
+			<!-- Profile Dropdown Trigger (Replaces old sidebar) -->
+			<div class="relative">
+				<button id="btn-profile-dropdown" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-3 py-1 rounded text-xs font-semibold text-gray-200 transition focus:outline-none cursor-pointer">
+					<i class="icon-smartphone text-xs"></i>
+					<span id="lbl-active-profile">プロファイルを選択...</span>
+					<i class="icon-chevron-down text-xxs text-gray-400"></i>
+				</button>
+
+				<!-- Profile Dropdown Options -->
+				<div id="profile-dropdown-menu" class="absolute right-0 mt-1 w-64 bg-gray-800 border border-gray-700 rounded shadow-xl py-1 z-50 text-xs hidden">
+					<div id="profile-dropdown-list" class="max-h-48 overflow-y-auto divide-y divide-gray-700">
+						<!-- Dynamically injected profiles list -->
+					</div>
+					<div class="border-t border-gray-700 pt-1">
+						<button id="btn-dropdown-new-profile" class="w-full text-left px-3 py-1.5 hover:bg-indigo-900 hover:text-white transition flex items-center space-x-1.5 text-indigo-300 cursor-pointer">
+							<i class="icon-plus text-xs"></i>
+							<span>新規プロファイル作成...</span>
+						</button>
+						<button id="btn-dropdown-edit-profile" class="w-full text-left px-3 py-1.5 hover:bg-gray-700 hover:text-white transition flex items-center space-x-1.5 text-gray-400 hidden cursor-pointer">
+							<i class="icon-edit-2 text-xs"></i>
+							<span>現在のプロファイル編集...</span>
+						</button>
+						<button id="btn-dropdown-delete-profile" class="w-full text-left px-3 py-1.5 hover:bg-red-950 hover:text-red-400 transition flex items-center space-x-1.5 text-red-500 hidden cursor-pointer">
+							<i class="icon-trash-2 text-xs"></i>
+							<span>現在のプロファイル削除...</span>
+						</button>
+						<div class="border-t border-gray-700 pt-1">
+							<button id="btn-dropdown-settings" class="w-full text-left px-3 py-1.5 hover:bg-gray-700 hover:text-white transition flex items-center space-x-1.5 text-gray-400 cursor-pointer">
+								<i class="icon-settings text-xs"></i>
+								<span>環境設定...</span>
+							</button>
+						</div>
+					</div>
+				</div>
 			</div>
 		</div>
 	</header>
@@ -371,7 +422,12 @@
 				<!-- Cache Reset Section -->
 				<div>
 					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">システム管理</h4>
-					<div class="bg-gray-900/60 p-3 border border-gray-750 rounded space-y-2">
+					<div class="bg-gray-900/60 p-3 border border-gray-750 rounded space-y-2.5">
+						<!-- Developer Mode -->
+						<div class="flex items-center justify-between pb-1 border-b border-gray-800/40">
+							<span class="text-gray-300 font-semibold">開発者モード (Ctrl+Shift+I 許可)</span>
+							<input type="checkbox" id="chk-settings-devmode" class="rounded bg-gray-700 border-gray-650 text-indigo-600 focus:ring-indigo-500 h-4 w-4 cursor-pointer">
+						</div>
 						<p class="text-[10px] text-gray-400 leading-normal">
 							スキャン結果のキャッシュファイルや、アルバムアートのサムネイル画像をすべてクリアします。
 							読み込み速度が低下したり不具合が発生した場合に実行してください。

@@ -1,7 +1,8 @@
-import { app, dialog, ipcMain, Menu, MenuItem, shell } from "electron";
+import { app, dialog, ipcMain, Menu, MenuItem, net, protocol, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
+import { pathToFileURL } from "node:url";
 import { DEFAULT_DELIMITERS } from "../shared/constants";
 import { lastScanResults, runScan } from "./scanner";
 import { runSync } from "./sync";
@@ -9,6 +10,18 @@ import { runSync } from "./sync";
 const store = new Store();
 
 export function registerIpcHandlers() {
+	protocol.handle("media", (request) => {
+		try {
+			const url = new URL(request.url);
+			const base64Str = url.pathname.slice(1);
+			const decodedPath = decodeURIComponent(Buffer.from(base64Str, "base64").toString("utf-8"));
+			return net.fetch(pathToFileURL(decodedPath).toString());
+		} catch (e) {
+			console.error("Failed to fetch media protocol file", e);
+			return new Response("Not Found", { status: 404 });
+		}
+	});
+
 	ipcMain.handle("show-item-in-folder", (_event, filePath: string) => {
 		if (fs.existsSync(filePath)) {
 			shell.showItemInFolder(filePath);
@@ -48,6 +61,7 @@ export function registerIpcHandlers() {
 			colorPhoneOnly: "#ef4444",
 			delimiters: DEFAULT_DELIMITERS,
 			exceptions: [],
+			devMode: false,
 		});
 	});
 
@@ -93,6 +107,16 @@ export function registerIpcHandlers() {
 			const sendCommand = (command: string, arg: string) => {
 				event.sender.send("context-menu-command", { command, arg });
 			};
+
+			if (params.trackId) {
+				menu.append(
+					new MenuItem({
+						label: "プレビュー再生",
+						click: () => sendCommand("play-track", params.trackId!),
+					}),
+				);
+				menu.append(new MenuItem({ type: "separator" }));
+			}
 
 			if (params.artist) {
 				if (params.artists && params.artists.length > 1) {

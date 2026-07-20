@@ -13,6 +13,7 @@ export interface Settings {
 	colorPhoneOnly: string;
 	delimiters?: string[];
 	exceptions?: string[];
+	devMode?: boolean;
 }
 
 export interface TrackMetadata {
