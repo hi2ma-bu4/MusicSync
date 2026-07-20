@@ -19,7 +19,7 @@ function createWindow() {
 }
 
 // src/main/ipc.ts
-import { app as app2, dialog, ipcMain } from "electron";
+import { app as app2, dialog, ipcMain, shell } from "electron";
 import Store from "electron-store";
 import fs4 from "node:fs";
 import path5 from "node:path";
@@ -83,6 +83,10 @@ async function getTrackMetadata(filePath, relativePath) {
     if (metadata.common.track && metadata.common.track.no !== null) {
       trackStr = String(metadata.common.track.no);
     }
+    let discStr = "";
+    if (metadata.common.disk && metadata.common.disk.no !== null) {
+      discStr = String(metadata.common.disk.no);
+    }
     const genre = metadata.common.genre && metadata.common.genre[0] || "Unknown Genre";
     const picture = metadata.common.picture && metadata.common.picture[0];
     const hasCoverArt = !!picture;
@@ -99,7 +103,8 @@ async function getTrackMetadata(filePath, relativePath) {
       size: stats.size,
       mtimeMs: stats.mtimeMs,
       hasCoverArt,
-      coverArtSize
+      coverArtSize,
+      disc: discStr
     };
   } catch (err) {
     const stats = await fs.promises.stat(filePath);
@@ -115,7 +120,8 @@ async function getTrackMetadata(filePath, relativePath) {
       size: stats.size,
       mtimeMs: stats.mtimeMs,
       hasCoverArt: false,
-      coverArtSize: 0
+      coverArtSize: 0,
+      disc: ""
     };
   }
 }
@@ -534,6 +540,13 @@ async function runSync(profile, options, event) {
 // src/main/ipc.ts
 var store = new Store();
 function registerIpcHandlers() {
+  ipcMain.handle("show-item-in-folder", (_event, filePath) => {
+    if (fs4.existsSync(filePath)) {
+      shell.showItemInFolder(filePath);
+      return true;
+    }
+    return false;
+  });
   ipcMain.handle("get-profiles", () => {
     return store.get("profiles", []);
   });

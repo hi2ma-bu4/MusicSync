@@ -25,6 +25,7 @@ export interface TrackMetadata {
 	mtimeMs: number;
 	hasCoverArt: boolean;
 	coverArtSize: number;
+	disc?: string;
 }
 
 export interface ScanResultItem {
@@ -50,6 +51,7 @@ export interface ProgressPayload {
 }
 
 export interface WindowAPI {
+	showItemInFolder: (filePath: string) => Promise<boolean>;
 	selectFolder: () => Promise<string | null>;
 	getProfiles: () => Promise<Profile[]>;
 	saveProfile: (profile: Profile) => Promise<Profile[]>;

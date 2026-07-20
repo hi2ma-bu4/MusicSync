@@ -49,12 +49,18 @@ export function setTrackCheckedState(track: any, checked: boolean) {
 		if (track.status === "updated" || track.status === "synced" || track.status === "phone_only") {
 			state.checkedDeleteTrackIds.delete(track.id);
 		}
+		if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
+			state.checkedMoveTrackIds.add(track.id);
+		}
 	} else {
 		if (track.status === "missing" || track.status === "updated") {
 			state.checkedCopyTrackIds.delete(track.id);
 		}
 		if (track.status === "updated" || track.status === "synced" || track.status === "phone_only") {
 			state.checkedDeleteTrackIds.add(track.id);
+		}
+		if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
+			state.checkedMoveTrackIds.delete(track.id);
 		}
 	}
 }

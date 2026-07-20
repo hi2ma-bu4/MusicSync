@@ -11,6 +11,10 @@ if (!window.api) {
 	console.warn("window.api is not defined. Initializing mock API for web development/testing.");
 	(window as any).api = {
 		__isMock: true,
+		showItemInFolder: async (filePath: string) => {
+			console.log("Mock showItemInFolder:", filePath);
+			return true;
+		},
 		selectFolder: async () => {
 			return "/mock/selected/path";
 		},
@@ -63,6 +67,20 @@ if (!window.api) {
 						album: "BE",
 						track: "1",
 						genre: "K-Pop",
+						disc: "1",
+					},
+				},
+				{
+					id: "mock_1_disc2",
+					status: "missing",
+					pathMismatch: false,
+					itunesTrack: {
+						title: "Life Goes On",
+						artist: "BTS",
+						album: "BE",
+						track: "1",
+						genre: "K-Pop",
+						disc: "2",
 					},
 				},
 				{

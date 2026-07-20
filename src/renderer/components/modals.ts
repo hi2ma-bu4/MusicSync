@@ -46,6 +46,13 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	const elBtnMoveCancel = document.getElementById("btn-move-cancel")!;
 	const elBtnMoveConfirmSubmit = document.getElementById("btn-move-confirm-submit")!;
 
+	const elModalOverwriteConfirm = document.getElementById("modal-overwrite-confirm")!;
+	const elLblOverwriteCount = document.getElementById("lbl-overwrite-count")!;
+	const elChkModalOverwriteMaster = document.getElementById("chk-modal-overwrite-master") as HTMLInputElement;
+	const elOverwriteTargetList = document.getElementById("overwrite-target-list")!;
+	const elBtnOverwriteCancel = document.getElementById("btn-overwrite-cancel")!;
+	const elBtnOverwriteConfirmSubmit = document.getElementById("btn-overwrite-confirm-submit")!;
+
 	// Profile choosing
 	elBtnChooseItunes.addEventListener("click", async () => {
 		const path = await api.selectFolder();
@@ -120,7 +127,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 				const it = t.itunesTrack!;
 				const pt = t.phoneTrack || it;
 				const row = document.createElement("div");
-				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-850 gap-3 border-b border-gray-800";
+				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-900/60 gap-3 border-b border-gray-800";
 
 				row.innerHTML = `
 					<label for="chk-modal-move-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
@@ -151,7 +158,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 
 			elModalMoveConfirm.classList.remove("hidden");
 		} else {
-			proceedWithDeleteOrSync();
+			proceedWithOverwriteConfirmOrDelete();
 		}
 	});
 
@@ -178,8 +185,85 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 
 	elBtnMoveConfirmSubmit.addEventListener("click", () => {
 		elModalMoveConfirm.classList.add("hidden");
+		proceedWithOverwriteConfirmOrDelete();
+	});
+
+	// Overwrite/Metadata Update modal listeners
+	elChkModalOverwriteMaster.addEventListener("change", () => {
+		const isChecked = elChkModalOverwriteMaster.checked;
+		const overwriteTracksSelected = state.scannedTracks.filter((t) => t.status === "updated" && state.checkedCopyTrackIds.has(t.id));
+
+		overwriteTracksSelected.forEach((t) => {
+			if (isChecked) {
+				state.checkedCopyTrackIds.add(t.id);
+			} else {
+				state.checkedCopyTrackIds.delete(t.id);
+			}
+			const chk = document.getElementById(`chk-modal-overwrite-${t.id}`) as HTMLInputElement;
+			if (chk) chk.checked = isChecked;
+		});
+		cb.updateSummaryBar();
+	});
+
+	elBtnOverwriteCancel.addEventListener("click", () => {
+		elModalOverwriteConfirm.classList.add("hidden");
+	});
+
+	elBtnOverwriteConfirmSubmit.addEventListener("click", () => {
+		elModalOverwriteConfirm.classList.add("hidden");
 		proceedWithDeleteOrSync();
 	});
+
+	function proceedWithOverwriteConfirmOrDelete() {
+		const overwriteTracksSelected = state.scannedTracks.filter((t) => t.status === "updated" && state.checkedCopyTrackIds.has(t.id));
+
+		if (overwriteTracksSelected.length > 0) {
+			elLblOverwriteCount.textContent = String(overwriteTracksSelected.length);
+			elOverwriteTargetList.innerHTML = "";
+
+			let allChecked = true;
+			overwriteTracksSelected.forEach((t) => {
+				if (!state.checkedCopyTrackIds.has(t.id)) allChecked = false;
+			});
+			elChkModalOverwriteMaster.checked = allChecked;
+
+			overwriteTracksSelected.forEach((t) => {
+				const it = t.itunesTrack!;
+				const row = document.createElement("div");
+				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-900/60 gap-3 border-b border-gray-800";
+
+				row.innerHTML = `
+					<label for="chk-modal-overwrite-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+						<input type="checkbox" id="chk-modal-overwrite-${t.id}" class="chk-modal-overwrite-item rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${state.checkedCopyTrackIds.has(t.id) ? "checked" : ""}>
+						<div class="truncate flex-1">
+							<div class="font-semibold text-gray-200">${it.artist} - ${it.title}</div>
+							<div class="text-gray-500 truncate font-mono text-xxs">${it.relativePath}</div>
+						</div>
+					</label>
+				`;
+				elOverwriteTargetList.appendChild(row);
+
+				const chkOverwrite = document.getElementById(`chk-modal-overwrite-${t.id}`) as HTMLInputElement;
+				chkOverwrite.addEventListener("change", () => {
+					if (chkOverwrite.checked) {
+						state.checkedCopyTrackIds.add(t.id);
+					} else {
+						state.checkedCopyTrackIds.delete(t.id);
+					}
+					let allCheckState = true;
+					document.querySelectorAll(".chk-modal-overwrite-item").forEach((el: any) => {
+						if (!el.checked) allCheckState = false;
+					});
+					elChkModalOverwriteMaster.checked = allCheckState;
+					cb.updateSummaryBar();
+				});
+			});
+
+			elModalOverwriteConfirm.classList.remove("hidden");
+		} else {
+			proceedWithDeleteOrSync();
+		}
+	}
 
 	// iTunes-side delete checklist modal listeners
 	elChkModalDelItunesMaster.addEventListener("change", () => {
@@ -234,7 +318,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			deleteItunesTracks.forEach((t) => {
 				const pt = t.phoneTrack!;
 				const row = document.createElement("div");
-				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-850 gap-3 border-b border-gray-800";
+				row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-900/60 gap-3 border-b border-gray-800";
 
 				row.innerHTML = `
 					<label for="chk-modal-del-itunes-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">

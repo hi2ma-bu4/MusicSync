@@ -11,6 +11,7 @@ export interface TrackMetadata {
 	mtimeMs: number;
 	hasCoverArt: boolean;
 	coverArtSize: number;
+	disc?: string;
 }
 
 export interface ScanResultItem {

@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain } from "electron";
+import { app, dialog, ipcMain, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
@@ -8,6 +8,14 @@ import { runSync } from "./sync";
 const store = new Store();
 
 export function registerIpcHandlers() {
+	ipcMain.handle("show-item-in-folder", (_event, filePath: string) => {
+		if (fs.existsSync(filePath)) {
+			shell.showItemInFolder(filePath);
+			return true;
+		}
+		return false;
+	});
+
 	ipcMain.handle("get-profiles", () => {
 		return store.get("profiles", []);
 	});

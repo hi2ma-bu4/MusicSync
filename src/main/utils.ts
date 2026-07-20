@@ -64,6 +64,11 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			trackStr = String(metadata.common.track.no);
 		}
 
+		let discStr = "";
+		if (metadata.common.disk && metadata.common.disk.no !== null) {
+			discStr = String(metadata.common.disk.no);
+		}
+
 		const genre = (metadata.common.genre && metadata.common.genre[0]) || "Unknown Genre";
 		const picture = metadata.common.picture && metadata.common.picture[0];
 		const hasCoverArt = !!picture;
@@ -82,6 +87,7 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			mtimeMs: stats.mtimeMs,
 			hasCoverArt,
 			coverArtSize,
+			disc: discStr,
 		};
 	} catch (err) {
 		const stats = await fs.promises.stat(filePath);
@@ -98,6 +104,7 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			mtimeMs: stats.mtimeMs,
 			hasCoverArt: false,
 			coverArtSize: 0,
+			disc: "",
 		};
 	}
 }

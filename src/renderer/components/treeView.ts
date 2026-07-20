@@ -178,50 +178,140 @@ interface RenderCallbacks {
 	renderActiveView: () => void;
 }
 
+function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, parentUpdateId: string, parentTracks: any[], albumTracks: any[], cb: RenderCallbacks, hasMultipleDiscs: boolean, discNum: number, discTracks: any[]) {
+	const meta = t.itunesTrack || t.phoneTrack;
+	if (!meta) return;
+
+	const row = document.createElement("div");
+	row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900/60 gap-2 bg-${t.status} context-track`;
+	row.setAttribute("data-track-id", t.id);
+	row.setAttribute("data-title", meta.title || "");
+	row.setAttribute("data-artist", meta.artist || "");
+	row.setAttribute("data-album", meta.album || "");
+	row.setAttribute("data-genre", meta.genre || "");
+
+	row.innerHTML = `
+		<label for="chk-track-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+			<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
+			<div class="flex items-center space-x-1 truncate">
+				<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
+				<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
+				${state.activeTab === "album" ? `<span class="text-gray-500 text-xxs truncate">by ${meta.artist}</span>` : ""}
+				${state.activeTab === "genre" ? `<span class="text-gray-500 truncate">by ${meta.artist}</span> <span class="text-gray-500 text-xxs truncate">on ${meta.album}</span>` : ""}
+			</div>
+		</label>
+		<div class="flex items-center pl-6">
+			${getStatusDot(t)}
+		</div>
+	`;
+
+	elTracksChildren.appendChild(row);
+
+	const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+	chkTrack.addEventListener("change", () => {
+		pushHistoryState();
+		setTrackCheckedState(t, chkTrack.checked);
+		cb.updateSummaryBar();
+		cb.updateMasterCheckboxState();
+
+		if (hasMultipleDiscs) {
+			setCheckboxState(`chk-disc-${albumKey}-${discNum}`, discTracks);
+		}
+
+		setCheckboxState(`chk-${albumKey}`, albumTracks);
+		if (parentUpdateId) {
+			setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
+		}
+	});
+}
+
 // Lazy renders tracks inside an Album
 function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, parentUpdateId: string, parentTracks: any[], cb: RenderCallbacks) {
 	elTracksChildren.innerHTML = "";
-	albumTracks.forEach((t) => {
-		const meta = t.itunesTrack || t.phoneTrack;
-		if (!meta) return;
 
-		const row = document.createElement("div");
-		row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-850 gap-2 bg-${t.status} context-track`;
-		row.setAttribute("data-track-id", t.id);
-		row.setAttribute("data-title", meta.title || "");
-		row.setAttribute("data-artist", meta.artist || "");
-		row.setAttribute("data-album", meta.album || "");
-		row.setAttribute("data-genre", meta.genre || "");
-
-		row.innerHTML = `
-			<label for="chk-track-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
-				<input type="checkbox" id="chk-track-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
-				<div class="flex items-center space-x-1 truncate">
-					<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
-					<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
-					${state.activeTab === "album" ? `<span class="text-gray-500 text-xxs truncate">by ${meta.artist}</span>` : ""}
-					${state.activeTab === "genre" ? `<span class="text-gray-500 truncate">by ${meta.artist}</span> <span class="text-gray-500 text-xxs truncate">on ${meta.album}</span>` : ""}
-				</div>
-			</label>
-			<div class="flex items-center pl-6">
-				${getStatusDot(t)}
-			</div>
-		`;
-
-		elTracksChildren.appendChild(row);
-
-		const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
-		chkTrack.addEventListener("change", () => {
-			pushHistoryState();
-			setTrackCheckedState(t, chkTrack.checked);
-			cb.updateSummaryBar();
-			cb.updateMasterCheckboxState();
-			setCheckboxState(`chk-${albumKey}`, albumTracks);
-			if (parentUpdateId) {
-				setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
-			}
-		});
+	// Sort albumTracks by disc, then track
+	albumTracks.sort((a, b) => {
+		const ma = a.itunesTrack || a.phoneTrack;
+		const mb = b.itunesTrack || b.phoneTrack;
+		const discA = parseInt(ma?.disc || "1", 10) || 1;
+		const discB = parseInt(mb?.disc || "1", 10) || 1;
+		if (discA !== discB) {
+			return discA - discB;
+		}
+		const trkA = parseInt(ma?.track || "0", 10) || 0;
+		const trkB = parseInt(mb?.track || "0", 10) || 0;
+		return trkA - trkB;
 	});
+
+	// Find the maximum disc number to determine if we should group
+	const maxDisc = albumTracks.reduce((max, t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		const discNum = parseInt(meta?.disc || "1", 10) || 1;
+		return Math.max(max, discNum);
+	}, 1);
+
+	const hasMultipleDiscs = maxDisc >= 2;
+
+	if (hasMultipleDiscs) {
+		// Group tracks by disc
+		const discGroups = new Map<number, any[]>();
+		albumTracks.forEach((t) => {
+			const meta = t.itunesTrack || t.phoneTrack;
+			const discNum = parseInt(meta?.disc || "1", 10) || 1;
+			if (!discGroups.has(discNum)) {
+				discGroups.set(discNum, []);
+			}
+			discGroups.get(discNum)!.push(t);
+		});
+
+		// Render groups
+		const sortedDiscs = Array.from(discGroups.keys()).sort((a, b) => a - b);
+		sortedDiscs.forEach((discNum) => {
+			const discTracks = discGroups.get(discNum)!;
+
+			// Add Disc Header
+			const discHeader = document.createElement("div");
+			discHeader.className = "px-3 py-1 bg-gray-900/40 text-[10px] text-gray-400 flex items-center space-x-2 border-b border-gray-800/60 select-none";
+			discHeader.innerHTML = `
+				<input type="checkbox" id="chk-disc-${albumKey}-${discNum}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3 w-3 cursor-pointer">
+				<span class="font-semibold text-gray-400">ディスク ${discNum}</span>
+			`;
+			elTracksChildren.appendChild(discHeader);
+
+			// Render tracks of this disc
+			discTracks.forEach((t) => {
+				renderSingleTrackRow(elTracksChildren, t, albumKey, parentUpdateId, parentTracks, albumTracks, cb, hasMultipleDiscs, discNum, discTracks);
+			});
+
+			// Setup Disc Checkbox Listener
+			const chkDisc = document.getElementById(`chk-disc-${albumKey}-${discNum}`) as HTMLInputElement;
+			chkDisc.addEventListener("click", (e) => {
+				e.stopPropagation();
+				pushHistoryState();
+				const isChecked = chkDisc.checked;
+				discTracks.forEach((t) => {
+					setTrackCheckedState(t, isChecked);
+					const chkTrack = document.getElementById(`chk-track-${t.id}`) as HTMLInputElement;
+					if (chkTrack) chkTrack.checked = isChecked;
+				});
+
+				setCheckboxState(`chk-${albumKey}`, albumTracks);
+				if (parentUpdateId) {
+					setCheckboxState(`chk-${parentUpdateId}`, parentTracks);
+				}
+				cb.updateSummaryBar();
+				cb.updateMasterCheckboxState();
+			});
+
+			// Set initial state
+			setCheckboxState(`chk-disc-${albumKey}-${discNum}`, discTracks);
+		});
+	} else {
+		// Just render normally
+		albumTracks.forEach((t) => {
+			renderSingleTrackRow(elTracksChildren, t, albumKey, parentUpdateId, parentTracks, albumTracks, cb, false, 1, []);
+		});
+	}
 }
 
 // Lazy renders albums inside an Artist
@@ -244,7 +334,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 		divAlbum.setAttribute("data-genre", firstGenre);
 
 		divAlbum.innerHTML = `
-			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
+			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1.5 truncate">
@@ -344,10 +434,10 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		const sortedAlbums = Array.from(albumMap.keys()).sort();
 
 		const divArtist = document.createElement("div");
-		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2";
+		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
 
 		divArtist.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${artistKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${artistKey}">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
@@ -360,7 +450,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isArtistOpen ? "transform rotate-90" : ""}"></i>
 			</div>
 			<div class="accordion-content ${isArtistOpen ? "open" : ""}">
-				<div id="children-${artistKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 space-y-2.5"></div>
+				<div id="children-${artistKey}" class="border-t border-gray-700 bg-gray-900/40 p-2.5 space-y-2.5"></div>
 			</div>
 		`;
 
@@ -449,13 +539,13 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 		const div = document.createElement("div");
 		div.id = `album-card-${albumKey}`;
-		div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2 context-album";
+		div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-album";
 		div.setAttribute("data-album", albumName);
 		div.setAttribute("data-artist", firstArtist);
 		div.setAttribute("data-genre", firstGenre);
 
 		div.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${albumKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
@@ -468,7 +558,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
 			</div>
 			<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
-				<div id="children-${albumKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-800"></div>
+				<div id="children-${albumKey}" class="border-t border-gray-700 bg-gray-900/40 p-2.5 divide-y divide-gray-800"></div>
 			</div>
 		`;
 
@@ -543,10 +633,10 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		const isGenreOpen = state.expandedGroups.has(genreKey);
 
 		const div = document.createElement("div");
-		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-750 shadow-sm text-xxs mb-2";
+		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
 
 		div.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-750 transition cursor-pointer select-none" id="hdr-${genreKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${genreKey}">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
 					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
 					<div class="flex items-center space-x-1 truncate">
@@ -559,7 +649,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isGenreOpen ? "transform rotate-90" : ""}"></i>
 			</div>
 			<div class="accordion-content ${isGenreOpen ? "open" : ""}">
-				<div id="children-${genreKey}" class="border-t border-gray-750 bg-gray-850 p-2.5 divide-y divide-gray-800"></div>
+				<div id="children-${genreKey}" class="border-t border-gray-700 bg-gray-900/40 p-2.5 divide-y divide-gray-800"></div>
 			</div>
 		`;
 

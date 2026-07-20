@@ -626,7 +626,9 @@ function setupEventListeners() {
 				}
 				// Note: synced and phone_only do not require checkedCopyTrackIds since they already exist,
 				// they are checked by default because checkedDeleteTrackIds does not contain them.
-				// Relocation (checkedMoveTrackIds) is explicitly left unchecked by default.
+				if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
+					state.checkedMoveTrackIds.add(track.id);
+				}
 			}
 
 			applyFilterAndRender();
@@ -906,7 +908,7 @@ function setupEventListeners() {
 		if (!el) {
 			el = document.createElement("div");
 			el.id = "custom-context-menu";
-			el.className = "absolute hidden bg-gray-850 border border-gray-700 text-gray-200 text-xxs rounded shadow-2xl z-50 py-1 min-w-64 w-max max-w-sm font-sans pointer-events-auto select-none";
+			el.className = "absolute hidden bg-gray-900 border border-gray-700 text-gray-200 text-xxs rounded shadow-2xl z-50 py-1 min-w-64 w-max max-w-sm font-sans pointer-events-auto select-none";
 			document.body.appendChild(el);
 
 			document.addEventListener("click", () => {
@@ -927,6 +929,9 @@ function setupEventListeners() {
 
 		if (trackRow) {
 			e.preventDefault();
+			const trackId = trackRow.getAttribute("data-track-id");
+			const track = state.scannedTracks.find((t) => t.id === trackId);
+
 			const title = trackRow.getAttribute("data-title") || "";
 			const artist = trackRow.getAttribute("data-artist") || "";
 			const album = trackRow.getAttribute("data-album") || "";
@@ -934,13 +939,22 @@ function setupEventListeners() {
 
 			let html = "";
 			if (artist) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
+				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
 			}
 			if (album) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-album">アルバム「${album}」の曲を表示</div>`;
+				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-album">アルバム「${album}」の曲を表示</div>`;
 			}
 			if (genre) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
+				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
+			}
+
+			if (track) {
+				if (track.itunesTrack) {
+					html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer border-t border-gray-800" id="ctx-explorer-itunes">エクスプローラーで表示 (iTunes)</div>`;
+				}
+				if (track.phoneTrack) {
+					html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer ${!track.itunesTrack ? "border-t border-gray-800" : ""}" id="ctx-explorer-phone">エクスプローラーで表示 (比較先)</div>`;
+				}
 			}
 
 			if (html) {
@@ -964,6 +978,21 @@ function setupEventListeners() {
 				if (btnGenre) {
 					btnGenre.addEventListener("click", () => navigateToSuggestion("genre", genre));
 				}
+
+				if (track) {
+					const btnExplorerItunes = document.getElementById("ctx-explorer-itunes");
+					if (btnExplorerItunes && track.itunesTrack) {
+						btnExplorerItunes.addEventListener("click", () => {
+							api.showItemInFolder(track.itunesTrack!.filePath);
+						});
+					}
+					const btnExplorerPhone = document.getElementById("ctx-explorer-phone");
+					if (btnExplorerPhone && track.phoneTrack) {
+						btnExplorerPhone.addEventListener("click", () => {
+							api.showItemInFolder(track.phoneTrack!.filePath);
+						});
+					}
+				}
 			}
 		} else if (albumRow) {
 			e.preventDefault();
@@ -972,10 +1001,10 @@ function setupEventListeners() {
 
 			let html = "";
 			if (artist) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
+				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-artist">「${artist}」の曲を表示</div>`;
 			}
 			if (genre) {
-				html += `<div class="px-3 py-2 hover:bg-indigo-650 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
+				html += `<div class="px-3 py-2 hover:bg-indigo-700 hover:text-white transition cursor-pointer" id="ctx-jump-genre">ジャンル「${genre}」の曲を表示</div>`;
 			}
 
 			if (html) {

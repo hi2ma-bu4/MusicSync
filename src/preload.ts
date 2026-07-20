@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from "electron";
 
 contextBridge.exposeInMainWorld("api", {
+	showItemInFolder: (filePath: string) => ipcRenderer.invoke("show-item-in-folder", filePath),
 	selectFolder: () => ipcRenderer.invoke("select-folder"),
 	getProfiles: () => ipcRenderer.invoke("get-profiles"),
 	saveProfile: (profile: any) => ipcRenderer.invoke("save-profile", profile),

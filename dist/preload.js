@@ -3,6 +3,7 @@
 // src/preload.ts
 var import_electron = require("electron");
 import_electron.contextBridge.exposeInMainWorld("api", {
+  showItemInFolder: (filePath) => import_electron.ipcRenderer.invoke("show-item-in-folder", filePath),
   selectFolder: () => import_electron.ipcRenderer.invoke("select-folder"),
   getProfiles: () => import_electron.ipcRenderer.invoke("get-profiles"),
   saveProfile: (profile) => import_electron.ipcRenderer.invoke("save-profile", profile),

@@ -27,7 +27,7 @@
 }
 
 .accordion-content.open {
-	max-height: 2000px;
+	max-height: 20000px;
 	transition: max-height .3s ease-in;
 }
 
