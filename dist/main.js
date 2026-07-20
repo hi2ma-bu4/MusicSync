@@ -1,5 +1,5 @@
 // src/main.ts
-import { app as app3 } from "electron";
+import { app as app3, protocol as protocol2 } from "electron";
 
 // src/main/index.ts
 import { BrowserWindow } from "electron";
@@ -711,15 +711,19 @@ async function runSync(profile, options, event) {
 // src/main/ipc.ts
 var store = new Store2();
 function registerIpcHandlers() {
-  protocol.handle("media", (request) => {
+  protocol.handle("media", async (request) => {
     try {
       const url = new URL(request.url);
-      const base64Str = url.pathname.slice(1);
-      const decodedPath = decodeURIComponent(Buffer.from(base64Str, "base64").toString("utf-8"));
-      return net.fetch(pathToFileURL(decodedPath).toString());
+      const hexStr = url.pathname.slice(1);
+      const decodedPath = Buffer.from(hexStr, "hex").toString("utf-8");
+      if (!fs4.existsSync(decodedPath)) {
+        console.error(`[media protocol] File not found on disk: "${decodedPath}"`);
+        return new Response("Not Found", { status: 404 });
+      }
+      return await net.fetch(pathToFileURL(decodedPath).toString());
     } catch (e) {
-      console.error("Failed to fetch media protocol file", e);
-      return new Response("Not Found", { status: 404 });
+      console.error("[media protocol] Failed to fetch media protocol file:", e);
+      return new Response("Internal Server Error", { status: 500 });
     }
   });
   ipcMain.handle("show-item-in-folder", (_event, filePath) => {
@@ -958,6 +962,18 @@ function registerIpcHandlers() {
 }
 
 // src/main.ts
+protocol2.registerSchemesAsPrivileged([
+  {
+    scheme: "media",
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      bypassCSP: true,
+      stream: true
+    }
+  }
+]);
 app3.whenReady().then(() => {
   registerIpcHandlers();
   createWindow();

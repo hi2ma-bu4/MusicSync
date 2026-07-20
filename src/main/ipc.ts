@@ -10,15 +10,21 @@ import { runSync } from "./sync";
 const store = new Store();
 
 export function registerIpcHandlers() {
-	protocol.handle("media", (request) => {
+	protocol.handle("media", async (request) => {
 		try {
 			const url = new URL(request.url);
-			const base64Str = url.pathname.slice(1);
-			const decodedPath = decodeURIComponent(Buffer.from(base64Str, "base64").toString("utf-8"));
-			return net.fetch(pathToFileURL(decodedPath).toString());
+			const hexStr = url.pathname.slice(1);
+			const decodedPath = Buffer.from(hexStr, "hex").toString("utf-8");
+
+			if (!fs.existsSync(decodedPath)) {
+				console.error(`[media protocol] File not found on disk: "${decodedPath}"`);
+				return new Response("Not Found", { status: 404 });
+			}
+
+			return await net.fetch(pathToFileURL(decodedPath).toString());
 		} catch (e) {
-			console.error("Failed to fetch media protocol file", e);
-			return new Response("Not Found", { status: 404 });
+			console.error("[media protocol] Failed to fetch media protocol file:", e);
+			return new Response("Internal Server Error", { status: 500 });
 		}
 	});
 

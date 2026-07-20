@@ -1668,12 +1668,10 @@ function playTrack(track: ScanResultItem) {
 	playTrackInternal(track);
 }
 
-function encodeBase64(str: string): string {
-	return btoa(
-		encodeURIComponent(str).replace(/%([0-9A-F]{2})/g, (match, p1) => {
-			return String.fromCharCode(parseInt(p1, 16));
-		}),
-	);
+function encodeHex(str: string): string {
+	return Array.from(new TextEncoder().encode(str))
+		.map((b) => b.toString(16).padStart(2, "0"))
+		.join("");
 }
 
 function playTrackInternal(track: ScanResultItem) {
@@ -1681,7 +1679,7 @@ function playTrackInternal(track: ScanResultItem) {
 	if (!meta || !meta.filePath) return;
 
 	// Use custom media:// protocol to load file safely
-	const fileUrl = `media://local-file/${encodeBase64(meta.filePath)}`;
+	const fileUrl = `media://local-file/${encodeHex(meta.filePath)}`;
 
 	if (audioElement) {
 		audioElement.pause();
@@ -1745,6 +1743,10 @@ function setupAudioEventListeners(audio: HTMLAudioElement) {
 
 	audio.addEventListener("pause", () => {
 		updatePlayPauseButtonUI();
+	});
+
+	audio.addEventListener("error", (e) => {
+		console.error("Audio element error occurred:", audio.error || e);
 	});
 }
 
