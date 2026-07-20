@@ -2,6 +2,7 @@ import { app, dialog, ipcMain, Menu, MenuItem, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
+import { DEFAULT_DELIMITERS } from "../shared/constants";
 import { lastScanResults, runScan } from "./scanner";
 import { runSync } from "./sync";
 
@@ -45,7 +46,7 @@ export function registerIpcHandlers() {
 			colorUpdated: "#f59e0b",
 			colorSynced: "#94a3b8",
 			colorPhoneOnly: "#ef4444",
-			delimiters: [",", "|", "feat.", ";", "、", "／"],
+			delimiters: DEFAULT_DELIMITERS,
 			exceptions: [],
 		});
 	});
@@ -96,7 +97,8 @@ export function registerIpcHandlers() {
 			if (params.artist) {
 				if (params.artists && params.artists.length > 1) {
 					const submenu = new Menu();
-					params.artists.forEach((art) => {
+					const sortedArtists = [...params.artists].sort((a, b) => a.localeCompare(b, "ja"));
+					sortedArtists.forEach((art) => {
 						submenu.append(
 							new MenuItem({
 								label: `「${art}」の曲を表示`,
@@ -206,7 +208,7 @@ export function registerIpcHandlers() {
 		if (!profile) {
 			throw new Error("Profile not found");
 		}
-		await runSync(profile, options, event);
+		return await runSync(profile, options, event);
 	});
 
 	ipcMain.handle("get-thumbnail", async (_event, profileId: string, albumName: string) => {

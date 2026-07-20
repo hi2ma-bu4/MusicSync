@@ -89,3 +89,12 @@ input[type="checkbox"]:indeterminate {
 .text-xxs {
 	font-size: .65rem;
 }
+
+/* Focus outlines for keyboard accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex="0"]:focus-visible {
+	outline: 2px solid #6366f1 !important;
+	outline-offset: 2px !important;
+}

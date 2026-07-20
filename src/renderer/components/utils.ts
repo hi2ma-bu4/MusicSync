@@ -1,3 +1,4 @@
+import { DEFAULT_DELIMITERS } from "../../shared/constants";
 import { PHONE_DISPLAY_LABEL, state } from "../state";
 
 // Generates a safe HTML ID by hex-encoding the identifier part
@@ -98,6 +99,27 @@ export function getParentWarningHtml(parentType: string, parentName: string, par
 	return `<span class="warn-icon text-amber-500 font-bold ml-1.5 hover:scale-110 transition cursor-help select-none" data-parent-type="${parentType}" data-parent-name="${parentName}">⚠️</span>`;
 }
 
+// Generates a fully generalized regular expression for any delimiter,
+// respecting word boundaries for alphanumeric bounds while preserving exact characters like periods.
+export function getDelimiterRegex(delim: string): RegExp {
+	const escapedDelim = delim.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
+	const startsWithWord = /^\w/.test(delim);
+	const endsWithWord = /\w$/.test(delim);
+
+	let pattern = "";
+	if (startsWithWord && endsWithWord) {
+		pattern = `\\b${escapedDelim}\\b`;
+	} else if (startsWithWord) {
+		pattern = `\\b${escapedDelim}`;
+	} else if (endsWithWord) {
+		pattern = `${escapedDelim}\\b`;
+	} else {
+		pattern = escapedDelim;
+	}
+
+	return new RegExp(`\\s*${pattern}\\s*`, "i");
+}
+
 // Split artist name based on settings delimiters and exceptions list
 export function splitAndNormalizeArtist(artist: string | null | undefined, delimiters: string[], exceptions: string[]): string[] {
 	if (!artist) return ["Unknown Artist"];
@@ -110,18 +132,12 @@ export function splitAndNormalizeArtist(artist: string | null | undefined, delim
 	}
 
 	let parts = [trimmedArtist];
-	const activeDelim = delimiters && delimiters.length > 0 ? delimiters : [",", "|", "feat.", ";", "、", "／"];
+	const activeDelim = delimiters && delimiters.length > 0 ? delimiters : DEFAULT_DELIMITERS;
 	for (const delim of activeDelim) {
 		const newParts: string[] = [];
+		const regex = getDelimiterRegex(delim);
 		for (const part of parts) {
-			if (delim.toLowerCase() === "feat.") {
-				const regex = new RegExp(`\\s+feat\\.\\s+|\\s+feat\\s+|\\s*feat\\.\\s*|\\s*feat\\s*`, "i");
-				newParts.push(...part.split(regex));
-			} else {
-				const escapedDelim = delim.replace(/[-\/\\^$*+?.()|[\]{}]/g, "\\$&");
-				const regex = new RegExp(`\\s*${escapedDelim}\\s*`, "i");
-				newParts.push(...part.split(regex));
-			}
+			newParts.push(...part.split(regex));
 		}
 		parts = newParts;
 	}
@@ -174,4 +190,124 @@ export function compareTracks(a: any, b: any, rules: { field: string; direction:
 		}
 	}
 	return 0;
+}
+
+const hwKatakanaMap: { [key: string]: string } = {
+	ｦ: "ヲ",
+	ｧ: "ァ",
+	ｨ: "ィ",
+	ｩ: "ゥ",
+	ｪ: "ェ",
+	ｫ: "ォ",
+	ｬ: "ャ",
+	ｭ: "ュ",
+	ｮ: "ョ",
+	ｯ: "ッ",
+	ｰ: "ー",
+	ｱ: "ア",
+	ｲ: "イ",
+	ｳ: "ウ",
+	ｴ: "エ",
+	ｵ: "オ",
+	ｶ: "カ",
+	ｷ: "キ",
+	ｸ: "ク",
+	ｹ: "ケ",
+	ｺ: "コ",
+	ｻ: "サ",
+	ｼ: "シ",
+	ｽ: "ス",
+	ｾ: "セ",
+	ｿ: "ソ",
+	ﾀ: "タ",
+	ﾁ: "チ",
+	ﾂ: "ツ",
+	ﾃ: "テ",
+	ﾄ: "ト",
+	ﾅ: "ナ",
+	ﾆ: "ニ",
+	ﾇ: "ヌ",
+	ﾈ: "ネ",
+	ﾉ: "ノ",
+	ﾊ: "ハ",
+	ﾋ: "ヒ",
+	ﾌ: "フ",
+	ﾍ: "ヘ",
+	ﾎ: "ホ",
+	ﾏ: "マ",
+	ﾐ: "ミ",
+	ﾑ: "ム",
+	ﾒ: "メ",
+	ﾓ: "モ",
+	ﾔ: "ヤ",
+	ﾕ: "ユ",
+	ﾖ: "ヨ",
+	ﾗ: "ラ",
+	ﾘ: "リ",
+	ﾙ: "ル",
+	ﾚ: "レ",
+	ﾛ: "ロ",
+	ﾜ: "ワ",
+	ﾝ: "ン",
+};
+
+const voicedHwMap: { [key: string]: string } = {
+	ｶﾞ: "ガ",
+	ｷﾞ: "ギ",
+	ｸﾞ: "グ",
+	ｹﾞ: "ゲ",
+	ｺﾞ: "ゴ",
+	ｻﾞ: "ザ",
+	ｼﾞ: "ジ",
+	ｽﾞ: "ズ",
+	ｾﾞ: "ゼ",
+	ｿﾞ: "ゾ",
+	ﾀﾞ: "ダ",
+	ﾁﾞ: "ヂ",
+	ﾂﾞ: "ヅ",
+	ﾃﾞ: "デ",
+	ﾄﾞ: "ド",
+	ﾊﾞ: "バ",
+	ﾋﾞ: "ビ",
+	ﾌﾞ: "ブ",
+	ﾍﾞ: "ベ",
+	ﾎﾞ: "ボ",
+	ｳﾞ: "ヴ",
+	ﾜﾞ: "ヷ",
+	ｦﾞ: "ヺ",
+};
+
+const semiVoicedHwMap: { [key: string]: string } = {
+	ﾊﾟ: "パ",
+	ﾋﾟ: "ピ",
+	ﾌﾟ: "プ",
+	ﾍﾟ: "ペ",
+	ﾎﾟ: "ポ",
+};
+
+export function normalizeArtistForIntegration(name: string): string {
+	// 1. Remove all whitespace characters (half-width and full-width)
+	let res = name.replace(/[\s\u3000]+/g, "");
+
+	// 2. Convert half-width katakana (voiced/semi-voiced first, then single characters) to full-width katakana
+	for (const [hw, fw] of Object.entries(voicedHwMap)) {
+		res = res.replace(new RegExp(hw, "g"), fw);
+	}
+	for (const [hw, fw] of Object.entries(semiVoicedHwMap)) {
+		res = res.replace(new RegExp(hw, "g"), fw);
+	}
+	res = res.replace(/[\uFF61-\uFF9F]/g, (ch) => hwKatakanaMap[ch] || ch);
+
+	// 3. Convert full-width katakana to hiragana
+	res = res.replace(/[\u30A1-\u30F6]/g, (ch) => {
+		return String.fromCharCode(ch.charCodeAt(0) - 0x60);
+	});
+
+	// 4. Convert full-width alphanumeric/symbols in range FF01-FF5E to half-width ASCII
+	res = res.replace(/[\uFF01-\uFF5E]/g, (ch) => {
+		return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+	});
+
+	// 5. Convert to lowercase
+	return res.toLowerCase();
 }

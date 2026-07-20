@@ -15,4 +15,6 @@ export function createWindow() {
 	win.removeMenu();
 
 	win.loadFile(path.join(process.cwd(), "dist", "index.html"));
+
+	// win.webContents.openDevTools();
 }

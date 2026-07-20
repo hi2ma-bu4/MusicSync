@@ -4,5 +4,12 @@
 			"path": "."
 		}
 	],
-	"settings": {}
+	"settings": {
+		"search.exclude": {
+			"package-lock.json": true,
+			"**/node_modules": true,
+			"**/cache/**": true,
+			"**/dist/**": true
+		}
+	}
 }

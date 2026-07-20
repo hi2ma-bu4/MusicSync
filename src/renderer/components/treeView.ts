@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -365,9 +365,9 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 		divAlbum.setAttribute("data-genre", firstGenre);
 
 		divAlbum.innerHTML = `
-			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}">
+			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
+					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
 					<div class="flex items-center space-x-1.5 truncate">
 						<i class="icon-disc text-indigo-300 text-xxs"></i>
 						<span class="font-semibold text-gray-300">${albumName}</span>
@@ -399,7 +399,16 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			cb.updateMasterCheckboxState();
 		});
 
-		document.getElementById(`hdr-${albumKey}`)!.addEventListener("click", () => {
+		const elHdr = document.getElementById(`hdr-${albumKey}`)!;
+		elHdr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				if (e.target === chkAlbum) return; // Prevent double toggling if checking the checkbox directly
+				e.preventDefault();
+				elHdr.click();
+			}
+		});
+
+		elHdr.addEventListener("click", () => {
 			const isOpenNow = state.expandedGroups.has(albumKey);
 			const newOpenState = !isOpenNow;
 			if (newOpenState) state.expandedGroups.add(albumKey);
@@ -433,31 +442,38 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		return;
 	}
 
-	const artistMap = new Map<string, any[]>();
+	const artistMap = new Map<string, { displayName: string; tracks: any[] }>();
 	state.filteredTracks.forEach((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
 		const artistName = (meta && meta.artist) || "Unknown Artist";
 		const splitNames = splitAndNormalizeArtist(artistName, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
 		splitNames.forEach((name) => {
-			if (!artistMap.has(name)) artistMap.set(name, []);
-			artistMap.get(name)!.push(t);
+			const normalizedKey = normalizeArtistForIntegration(name);
+			if (!artistMap.has(normalizedKey)) {
+				artistMap.set(normalizedKey, { displayName: name, tracks: [] });
+			}
+			artistMap.get(normalizedKey)!.tracks.push(t);
 		});
 	});
 
-	const sortedArtists = Array.from(artistMap.keys()).sort((a, b) => {
+	const sortedArtistKeys = Array.from(artistMap.keys()).sort((keyA, keyB) => {
+		const nameA = artistMap.get(keyA)!.displayName;
+		const nameB = artistMap.get(keyB)!.displayName;
 		const artistRule = state.sortRules.find((r) => r.field === "artist");
 		if (artistRule) {
-			const cmp = a.localeCompare(b, "ja");
+			const cmp = nameA.localeCompare(nameB, "ja");
 			return artistRule.direction === "asc" ? cmp : -cmp;
 		}
-		const tracksA = artistMap.get(a)!;
-		const tracksB = artistMap.get(b)!;
+		const tracksA = artistMap.get(keyA)!.tracks;
+		const tracksB = artistMap.get(keyB)!.tracks;
 		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
 	});
 
-	sortedArtists.forEach((artistName) => {
-		const artistTracks = artistMap.get(artistName)!;
-		const artistKey = getSafeId("artist", artistName);
+	sortedArtistKeys.forEach((normalizedKey) => {
+		const group = artistMap.get(normalizedKey)!;
+		const artistName = group.displayName;
+		const artistTracks = group.tracks;
+		const artistKey = getSafeId("artist", normalizedKey);
 		const isArtistOpen = state.expandedGroups.has(artistKey);
 
 		const albumMap = new Map<string, any[]>();
@@ -483,9 +499,9 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
 
 		divArtist.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${artistKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${artistKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
+					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-user text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${artistName}</span>
@@ -516,7 +532,16 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			cb.updateMasterCheckboxState();
 		});
 
-		document.getElementById(`hdr-${artistKey}`)!.addEventListener("click", () => {
+		const elHdr = document.getElementById(`hdr-${artistKey}`)!;
+		elHdr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				if (e.target === chkArtist) return; // Prevent double toggling if checking the checkbox directly
+				e.preventDefault();
+				elHdr.click();
+			}
+		});
+
+		elHdr.addEventListener("click", () => {
 			const isOpenNow = state.expandedGroups.has(artistKey);
 			const newOpenState = !isOpenNow;
 			if (newOpenState) state.expandedGroups.add(artistKey);
@@ -586,9 +611,9 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		div.setAttribute("data-genre", firstGenre);
 
 		div.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
+					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-disc text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${albumName}</span>
@@ -620,7 +645,16 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			cb.updateMasterCheckboxState();
 		});
 
-		document.getElementById(`hdr-${albumKey}`)!.addEventListener("click", () => {
+		const elHdr = document.getElementById(`hdr-${albumKey}`)!;
+		elHdr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				if (e.target === chkAlbum) return; // Prevent double toggling if checking the checkbox directly
+				e.preventDefault();
+				elHdr.click();
+			}
+		});
+
+		elHdr.addEventListener("click", () => {
 			const isOpenNow = state.expandedGroups.has(albumKey);
 			const newOpenState = !isOpenNow;
 			if (newOpenState) state.expandedGroups.add(albumKey);
@@ -682,9 +716,9 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
 
 		div.innerHTML = `
-			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${genreKey}">
+			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${genreKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5">
+					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-tags text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${genreName}</span>
@@ -715,7 +749,16 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			cb.updateMasterCheckboxState();
 		});
 
-		document.getElementById(`hdr-${genreKey}`)!.addEventListener("click", () => {
+		const elHdr = document.getElementById(`hdr-${genreKey}`)!;
+		elHdr.addEventListener("keydown", (e) => {
+			if (e.key === "Enter" || e.key === " ") {
+				if (e.target === chkGenre) return; // Prevent double toggling if checking the checkbox directly
+				e.preventDefault();
+				elHdr.click();
+			}
+		});
+
+		elHdr.addEventListener("click", () => {
 			const isOpenNow = state.expandedGroups.has(genreKey);
 			const newOpenState = !isOpenNow;
 			if (newOpenState) state.expandedGroups.add(genreKey);

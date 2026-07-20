@@ -225,15 +225,6 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 		}
 	});
 
-	return {
-		loadSettings(delimiters: string[], exceptions: string[]) {
-			activeDelims = [...delimiters];
-			activeExceptions = [...exceptions];
-			renderDelimsInputs();
-			renderExceptionsInputs();
-		},
-	};
-
 	// Sync count confirm modal
 	elBtnSyncConfirmCancel.addEventListener("click", () => {
 		elModalSyncConfirmCount.classList.add("hidden");
@@ -506,6 +497,15 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			cb.startSyncExecution();
 		}
 	}
+
+	return {
+		loadSettings(delimiters: string[], exceptions: string[]) {
+			activeDelims = [...delimiters];
+			activeExceptions = [...exceptions];
+			renderDelimsInputs();
+			renderExceptionsInputs();
+		},
+	};
 }
 
 export function updateDynamicColors(settings: any) {

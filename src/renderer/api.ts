@@ -1,3 +1,4 @@
+import { DEFAULT_DELIMITERS } from "../shared/constants";
 import { WindowAPI } from "./types";
 
 export type { WindowAPI };
@@ -47,7 +48,7 @@ if (!window.api) {
 						colorUpdated: "#f59e0b",
 						colorSynced: "#94a3b8",
 						colorPhoneOnly: "#ef4444",
-						delimiters: [",", "|", "feat.", ";", "、", "／"],
+						delimiters: DEFAULT_DELIMITERS,
 						exceptions: [],
 					};
 		},

@@ -7,6 +7,7 @@ import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
 import { compareTracks, getSafeId, isTrackChecked, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
+import { DEFAULT_DELIMITERS } from "./shared/constants";
 
 // DOM Elements
 const elBtnProfileDropdown = document.getElementById("btn-profile-dropdown")!;
@@ -94,7 +95,7 @@ const vsContent = document.getElementById("virtual-scroll-content")!;
 
 async function init() {
 	state.currentSettings = await api.getSettings();
-	if (!state.currentSettings.delimiters) state.currentSettings.delimiters = [",", "|", "feat.", ";", "、", "／"];
+	if (!state.currentSettings.delimiters) state.currentSettings.delimiters = DEFAULT_DELIMITERS;
 	if (!state.currentSettings.exceptions) state.currentSettings.exceptions = [];
 	updateDynamicColors(state.currentSettings);
 
@@ -1077,14 +1078,34 @@ function startSyncExecution() {
 		moveTrackIds,
 		deleteTrackIds,
 	})
-		.then(() => {
-			// ==========================================
-			// 【デバッグ・開発環境用フォールバック / DEBUG FALLBACK】
-			// ==========================================
-			if (isMock) {
+		.then((result: any) => {
+			const failedTrackIds = result?.failedTrackIds || [];
+			if (failedTrackIds.length > 0) {
+				// Show a confirmation dialog to retry the failed files only
 				setTimeout(() => {
+					if (confirm(`整合性チェックを通過できなかったファイルが ${failedTrackIds.length} 件あります。失敗したファイルのみ再試行しますか？`)) {
+						// Filter checked sets to only include the failed track IDs
+						state.checkedCopyTrackIds = new Set(copyTrackIds.filter((id) => failedTrackIds.includes(id)));
+						state.checkedMoveTrackIds = new Set(moveTrackIds.filter((id) => failedTrackIds.includes(id)));
+						// Clear delete checks as they aren't retried
+						state.checkedDeleteTrackIds.clear();
+						state.checkedDeleteItunesTrackIds.clear();
+
+						// Close progress modal and re-run sync execution
+						elModalProgress.classList.add("hidden");
+						startSyncExecution();
+					} else {
+						elBtnProgressClose.disabled = false;
+					}
+				}, 500);
+			} else {
+				if (isMock) {
+					setTimeout(() => {
+						elBtnProgressClose.disabled = false;
+					}, 600);
+				} else {
 					elBtnProgressClose.disabled = false;
-				}, 600);
+				}
 			}
 		})
 		.catch((e: any) => {

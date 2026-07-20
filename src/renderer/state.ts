@@ -19,9 +19,9 @@ export const state = {
 	filteredTracks: [] as ScanResultItem[],
 	activeStatusFilters: new Set<string>(["missing", "updated", "synced", "phone_only", "path_warning"]),
 	sortRules: [
+		{ field: "track", direction: "asc" },
 		{ field: "artist", direction: "asc" },
 		{ field: "album", direction: "asc" },
-		{ field: "track", direction: "asc" },
 	] as { field: string; direction: "asc" | "desc" }[],
 
 	// Selection sets

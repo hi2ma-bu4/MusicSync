@@ -24,6 +24,9 @@ import Store from "electron-store";
 import fs4 from "node:fs";
 import path5 from "node:path";
 
+// src/shared/constants.ts
+var DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "\u3001", "\uFF0F"];
+
 // src/main/scanner.ts
 import { app, dialog } from "electron";
 import fs2 from "node:fs";
@@ -503,10 +506,45 @@ async function cleanEmptyDirsRecursive(dir, rootDir) {
     console.warn(`Failed to clean empty directories recursively in ${dir}:`, e);
   }
 }
+async function copyFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await fs3.promises.copyFile(source, target);
+      return;
+    } catch (e) {
+      if (i === retries - 1) {
+        throw e;
+      }
+      console.warn(`Copy failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+async function moveFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      try {
+        await fs3.promises.rename(source, target);
+      } catch (e) {
+        console.warn(`Rename failed, falling back to copy/unlink: ${source} -> ${target}`, e);
+        await fs3.promises.copyFile(source, target);
+        await fs3.promises.unlink(source);
+      }
+      return;
+    } catch (e) {
+      if (i === retries - 1) {
+        throw e;
+      }
+      console.warn(`Move failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
 async function runSync(profile, options, event) {
   const profileId = profile.id;
   const { copyTrackIds, moveTrackIds, deleteTrackIds } = options;
   const scanItems = lastScanResults[profileId] || [];
+  const failedTracksSet = /* @__PURE__ */ new Set();
   const sendProgress = (status, message, progress, logs2) => {
     event.sender.send("sync-progress", { status, message, progress, logs: logs2 });
   };
@@ -522,9 +560,15 @@ async function runSync(profile, options, event) {
     return Math.round(completed / totalOperations * 100);
   };
   try {
+    if (!fs3.existsSync(profile.phonePath)) {
+      throw new Error(`\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u300C${profile.phonePath}\u300D\u306B\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u307E\u305B\u3093\u3002\u63A5\u7D9A\u72B6\u6CC1\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    }
     if (deleteTrackIds.length > 0) {
       logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u4F59\u5206\u306A\u66F2\u306E\u524A\u9664\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${deleteTrackIds.length}\u66F2)`, getPct());
       for (const id of deleteTrackIds) {
+        if (!fs3.existsSync(profile.phonePath)) {
+          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.phoneTrack) {
           try {
@@ -543,6 +587,9 @@ async function runSync(profile, options, event) {
     if (moveTrackIds.length > 0) {
       logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u914D\u7F6E\u518D\u6574\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${moveTrackIds.length}\u66F2)`, getPct());
       for (const id of moveTrackIds) {
+        if (!fs3.existsSync(profile.phonePath)) {
+          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack && item.phoneTrack) {
           const oldPath = item.phoneTrack.filePath;
@@ -552,23 +599,19 @@ async function runSync(profile, options, event) {
             if (fs3.existsSync(oldPath)) {
               const targetDir = path4.dirname(newPath);
               await fs3.promises.mkdir(targetDir, { recursive: true });
-              try {
-                await fs3.promises.rename(oldPath, newPath);
-              } catch (e) {
-                console.warn(`Rename failed, falling back to copy/unlink: ${oldPath} -> ${newPath}`, e);
-                await fs3.promises.copyFile(oldPath, newPath);
-                await fs3.promises.unlink(oldPath);
-              }
+              await moveFileWithRetry(oldPath, newPath, 3, 1e3);
               logAndSend(`\u79FB\u52D5\u6210\u529F: ${item.phoneTrack.relativePath} -> ${newRelative}`, getPct());
               item.phoneTrack.filePath = newPath;
               item.phoneTrack.relativePath = newRelative;
               item.pathMismatch = false;
             } else {
               logAndSend(`\u8B66\u544A: \u79FB\u52D5\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${item.phoneTrack.relativePath}`, getPct());
+              failedTracksSet.add(id);
             }
           } catch (e) {
             console.error(`Failed to move file: ${item.phoneTrack.relativePath}`, e);
-            logAndSend(`\u79FB\u52D5\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
+            logAndSend(`\u79FB\u52D5\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
+            failedTracksSet.add(id);
           }
         }
         completed++;
@@ -577,6 +620,9 @@ async function runSync(profile, options, event) {
     if (copyTrackIds.length > 0) {
       logAndSend(`iTunes\u304B\u3089\u6BD4\u8F03\u5148\u3078\u306E\u66F2\u306E\u30B3\u30D4\u30FC\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${copyTrackIds.length}\u66F2)`, getPct());
       for (const id of copyTrackIds) {
+        if (!fs3.existsSync(profile.phonePath)) {
+          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack) {
           const sourcePath = item.itunesTrack.filePath;
@@ -586,14 +632,16 @@ async function runSync(profile, options, event) {
             if (fs3.existsSync(sourcePath)) {
               const targetDir = path4.dirname(targetPath);
               await fs3.promises.mkdir(targetDir, { recursive: true });
-              await fs3.promises.copyFile(sourcePath, targetPath);
+              await copyFileWithRetry(sourcePath, targetPath, 3, 1e3);
               logAndSend(`\u30B3\u30D4\u30FC\u6210\u529F: ${relative}`, getPct());
             } else {
               logAndSend(`\u30A8\u30E9\u30FC: \u30B3\u30D4\u30FC\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
+              failedTracksSet.add(id);
             }
           } catch (e) {
             console.error(`Failed to copy file: ${relative}`, e);
-            logAndSend(`\u30B3\u30D4\u30FC\u5931\u6557: ${relative} - ${e.message}`, getPct());
+            logAndSend(`\u30B3\u30D4\u30FC\u5931\u6557: ${relative} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
+            failedTracksSet.add(id);
           }
         }
         completed++;
@@ -601,11 +649,50 @@ async function runSync(profile, options, event) {
     }
     logAndSend("\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u7A7A\u30D5\u30A9\u30EB\u30C0\u3092\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u4E2D...", getPct());
     await cleanEmptyDirsRecursive(profile.phonePath, profile.phonePath);
-    logAndSend("\u7A7A\u30D5\u30A9\u30EB\u30C0\u306E\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002", 100);
+    logAndSend("\u7A7A\u30D5\u30A9\u30EB\u30C0\u306E\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002", getPct());
+    logAndSend("\u6700\u7D42\u6574\u5408\u6027\u30C1\u30A7\u30C3\u30AF\u3092\u5B9F\u884C\u4E2D...", getPct());
+    let failedCheckCount = 0;
+    let successCheckCount = 0;
+    const verifyList = [...copyTrackIds.map((id) => ({ id, op: "\u30B3\u30D4\u30FC" })), ...moveTrackIds.map((id) => ({ id, op: "\u79FB\u52D5" }))];
+    for (const task of verifyList) {
+      const item = scanItems.find((x) => x.id === task.id);
+      if (item && item.itunesTrack) {
+        const relative = item.itunesTrack.relativePath;
+        const targetPath = path4.join(profile.phonePath, relative);
+        try {
+          if (!fs3.existsSync(targetPath)) {
+            logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u30A8\u30E9\u30FC: \u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
+            failedCheckCount++;
+            failedTracksSet.add(task.id);
+          } else {
+            const sourceStats = await fs3.promises.stat(item.itunesTrack.filePath);
+            const targetStats = await fs3.promises.stat(targetPath);
+            if (sourceStats.size !== targetStats.size) {
+              logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u30A8\u30E9\u30FC: \u30D5\u30A1\u30A4\u30EB\u30B5\u30A4\u30BA\u4E0D\u4E00\u81F4: ${relative} (\u30BD\u30FC\u30B9: ${sourceStats.size}B, \u6BD4\u8F03\u5148: ${targetStats.size}B)`, getPct());
+              failedCheckCount++;
+              failedTracksSet.add(task.id);
+            } else {
+              successCheckCount++;
+            }
+          }
+        } catch (err) {
+          logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u78BA\u8A8D\u5931\u6557: ${relative} - ${err.message}`, getPct());
+          failedCheckCount++;
+          failedTracksSet.add(task.id);
+        }
+      }
+    }
+    if (failedCheckCount === 0) {
+      logAndSend(`\u6574\u5408\u6027\u30C1\u30A7\u30C3\u30AF\u6210\u529F: \u5168\u3066\u306E\u540C\u671F\u5BFE\u8C61 (${successCheckCount}\u4EF6) \u304C\u6B63\u5E38\u306B\u78BA\u8A8D\u3055\u308C\u307E\u3057\u305F\u3002`, 100);
+    } else {
+      logAndSend(`\u26A0\uFE0F \u8B66\u544A: \u6574\u5408\u6027\u30C1\u30A7\u30C3\u30AF\u3092\u901A\u904E\u3067\u304D\u306A\u304B\u3063\u305F\u30D5\u30A1\u30A4\u30EB\u304C ${failedCheckCount} \u4EF6\u3042\u308A\u307E\u3059\u3002\u63A5\u7D9A\u306E\u5B89\u5B9A\u6027\u7B49\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`, 100);
+    }
     sendProgress("done", "\u540C\u671F\u5B8C\u4E86", 100, logs);
+    return { failedTrackIds: Array.from(failedTracksSet) };
   } catch (e) {
     logs.push(`\u81F4\u547D\u7684\u306A\u30A8\u30E9\u30FC\u304C\u767A\u751F\u3057\u307E\u3057\u305F: ${e.message}`);
     sendProgress("error", "\u30A8\u30E9\u30FC\u7D42\u4E86", getPct(), logs);
+    return { failedTrackIds: Array.from(failedTracksSet) };
   }
 }
 
@@ -645,7 +732,7 @@ function registerIpcHandlers() {
       colorUpdated: "#f59e0b",
       colorSynced: "#94a3b8",
       colorPhoneOnly: "#ef4444",
-      delimiters: [",", "|", "feat.", ";", "\u3001", "\uFF0F"],
+      delimiters: DEFAULT_DELIMITERS,
       exceptions: []
     });
   });
@@ -676,7 +763,8 @@ function registerIpcHandlers() {
       if (params.artist) {
         if (params.artists && params.artists.length > 1) {
           const submenu = new Menu();
-          params.artists.forEach((art) => {
+          const sortedArtists = [...params.artists].sort((a, b) => a.localeCompare(b, "ja"));
+          sortedArtists.forEach((art) => {
             submenu.append(
               new MenuItem({
                 label: `\u300C${art}\u300D\u306E\u66F2\u3092\u8868\u793A`,
@@ -778,7 +866,7 @@ function registerIpcHandlers() {
     if (!profile) {
       throw new Error("Profile not found");
     }
-    await runSync(profile, options, event);
+    return await runSync(profile, options, event);
   });
   ipcMain.handle("get-thumbnail", async (_event, profileId, albumName) => {
     try {
