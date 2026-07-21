@@ -3,6 +3,10 @@ export interface Profile {
 	name: string;
 	itunesPath: string;
 	phonePath: string;
+	storageType?: "local" | "mtp";
+	usbVendorId?: number;
+	usbProductId?: number;
+	mtpSubPath?: string;
 	searchHistory?: string[];
 }
 
@@ -68,6 +72,7 @@ export interface WindowAPI {
 	saveSettings: (settings: Settings) => Promise<void>;
 	resetCache: () => Promise<void>;
 	showContextMenu: (params: any) => void;
+	getUsbDevices: () => Promise<{ vendorId: number; productId: number; name: string }[]>;
 	onContextMenuCommand: (callback: (command: string, arg: string) => void) => () => void;
 	startScan: (profileId: string) => Promise<void>;
 	getScanResult: (profileId: string) => Promise<ScanResultItem[]>;

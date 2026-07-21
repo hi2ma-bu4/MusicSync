@@ -1,6 +1,7 @@
 import { app, dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { getStorageWrapper } from "./storageWrapper";
 import { ScanResultItem, TrackMetadata } from "./types";
 import { findMusicFiles, getTrackMetadata, normText, normTrack } from "./utils";
 
@@ -73,11 +74,16 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		event.sender.send("scan-progress", { step, message, progress, ...details });
 	};
 
+	const storage = getStorageWrapper(profile);
+	if (!(await storage.isConnected())) {
+		throw new Error(`比較先「${profile.name}」にアクセスできません。接続状況を確認してください。`);
+	}
+
 	sendProgress("itunes_list", "iTunesフォルダ内のファイルを検索中...", 5);
 	const itunesFiles = await findMusicFiles(profile.itunesPath);
 
 	sendProgress("phone_list", "比較先フォルダ内のファイルを検索中...", 15);
-	const phoneFiles = await findMusicFiles(profile.phonePath);
+	const phoneFiles = await storage.findMusicFiles();
 
 	// Load caches
 	const itunesCache = loadCache(profileId, "itunes");
@@ -158,15 +164,21 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		}
 
 		try {
-			const stats = await fs.promises.stat(file.filePath);
+			let size = file.size;
+			let mtimeMs = file.mtimeMs;
+			if (size === undefined || mtimeMs === undefined) {
+				const stats = await fs.promises.stat(file.filePath);
+				size = stats.size;
+				mtimeMs = stats.mtimeMs;
+			}
 			let meta: TrackMetadata | undefined = phoneCache[file.relativePath];
 
-			if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
+			if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
 				// Cache hit
 				newPhoneCache[file.relativePath] = meta;
 			} else {
 				// Try secondary index lookup by size + mtimeMs
-				const key = `${stats.size}_${stats.mtimeMs}`;
+				const key = `${size}_${mtimeMs}`;
 				const cachedMeta = phoneSecondaryIndex.get(key);
 				if (cachedMeta) {
 					// Cache hit via size + mtimeMs (path reorganized)
@@ -178,7 +190,7 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 					newPhoneCache[file.relativePath] = meta;
 				} else {
 					// Parse
-					meta = await getTrackMetadata(file.filePath, file.relativePath);
+					meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
 					newPhoneCache[file.relativePath] = meta;
 				}
 			}

@@ -10,6 +10,7 @@ contextBridge.exposeInMainWorld("api", {
 	saveSettings: (settings: any) => ipcRenderer.invoke("save-settings", settings),
 	resetCache: () => ipcRenderer.invoke("reset-cache"),
 	showContextMenu: (params: any) => ipcRenderer.send("show-context-menu", params),
+	getUsbDevices: () => ipcRenderer.invoke("get-usb-devices"),
 	onContextMenuCommand: (callback: (command: string, arg: string) => void) => {
 		const listener = (_event: any, payload: { command: string; arg: string }) => callback(payload.command, payload.arg);
 		ipcRenderer.on("context-menu-command", listener);

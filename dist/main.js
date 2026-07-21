@@ -1,3 +1,326 @@
+var __defProp = Object.defineProperty;
+var __getOwnPropNames = Object.getOwnPropertyNames;
+var __esm = (fn, res, err) => function __init() {
+  if (err) throw err[0];
+  try {
+    return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+  } catch (e) {
+    throw err = [e], e;
+  }
+};
+var __export = (target, all) => {
+  for (var name in all)
+    __defProp(target, name, { get: all[name], enumerable: true });
+};
+
+// src/libs/mtp/constants.ts
+var TYPE, CODE;
+var init_constants = __esm({
+  "src/libs/mtp/constants.ts"() {
+    "use strict";
+    TYPE = ["undefined", "Command Block", "Data Block", "Response Block", "Event Block"];
+    CODE = {
+      OPEN_SESSION: { value: 4098, name: "OpenSession" },
+      CLOSE_SESSION: { value: 4099, name: "CloseSession" },
+      GET_OBJECT_HANDLES: { value: 4103, name: "GetObjectHandles" },
+      GET_OBJECT: { value: 4105, name: "GetObject" },
+      OK: { value: 8193, name: "OK" },
+      INVALID_PARAMETER: { value: 8221, name: "Invalid parameter" },
+      INVALID_OBJECTPROP_FORMAT: { value: 43010, name: "Invalid_ObjectProp_Format" },
+      OBJECT_FILE_NAME: { value: 56327, name: "Object file name" },
+      GET_OBJECT_PROP_VALUE: { value: 38915, name: "GetObjectPropValue" }
+    };
+  }
+});
+
+// node_modules/is-electron/index.js
+function isElectron() {
+  if (typeof window !== "undefined" && typeof window.process === "object" && window.process.type === "renderer") {
+    return true;
+  }
+  if (typeof process !== "undefined" && typeof process.versions === "object" && !!process.versions.electron) {
+    return true;
+  }
+  if (typeof navigator === "object" && typeof navigator.userAgent === "string" && navigator.userAgent.indexOf("Electron") >= 0) {
+    return true;
+  }
+  return false;
+}
+var exports, module, is_electron_default;
+var init_is_electron = __esm({
+  "node_modules/is-electron/index.js"() {
+    exports = {};
+    module = {
+      get exports() {
+        return exports;
+      },
+      set exports(value) {
+        exports = value;
+      }
+    };
+    module.exports = isElectron;
+    is_electron_default = module.exports;
+  }
+});
+
+// src/libs/mtp/utils.ts
+var is_electron, is_node;
+var init_utils = __esm({
+  "src/libs/mtp/utils.ts"() {
+    "use strict";
+    init_is_electron();
+    is_electron = is_electron_default();
+    is_node = globalThis.process?.versions?.node != null;
+  }
+});
+
+// src/libs/mtp/Mtp.ts
+var Mtp_exports = {};
+__export(Mtp_exports, {
+  default: () => Mtp
+});
+var usb, Mtp;
+var init_Mtp = __esm({
+  "src/libs/mtp/Mtp.ts"() {
+    "use strict";
+    init_constants();
+    init_utils();
+    usb = null;
+    Mtp = class extends EventTarget {
+      state;
+      transactionID;
+      device;
+      // w3c-webusbのUSBDevice型への互換性を保つためany許容
+      usbConfig = null;
+      // デバイスオブジェクトの汚染を防ぐためのプロパティ
+      constructor(vendorId, productId, device) {
+        super();
+        this.state = "open";
+        this.transactionID = 0;
+        this.device = device || null;
+        (async () => {
+          if (is_node && is_electron) {
+            const { webusb } = await import("usb");
+            usb = webusb;
+          } else {
+            usb = navigator.usb;
+          }
+          if (this.device == null) {
+            const devices = await usb.getDevices();
+            for (const device2 of devices) {
+              if (device2.productId === productId && device2.vendorId === vendorId) {
+                this.device = device2;
+              }
+            }
+          }
+          if (this.device == null) {
+            this.device = await usb.requestDevice({
+              filters: [
+                {
+                  vendorId,
+                  productId
+                }
+              ]
+            });
+          }
+          if (this.device != null) {
+            if (this.device.opened) {
+              console.log("Already open");
+              await this.device.close();
+            }
+            await this.device.open();
+            console.log("Opened:", this.device.opened);
+            console.log(JSON.stringify(this.device.configuration, null, 4));
+            await this.device.selectConfiguration(1);
+            const iface = this.device.configuration.interfaces[0];
+            await this.device.claimInterface(iface.interfaceNumber);
+            const epOut = iface.alternate.endpoints.find((ep) => ep.direction === "out");
+            const epIn = iface.alternate.endpoints.find((ep) => ep.direction === "in");
+            this.usbConfig = {
+              interface: iface,
+              outEPnum: epOut.endpointNumber,
+              inEPnum: epIn.endpointNumber,
+              outPacketSize: epOut.packetSize || 1024,
+              inPacketSize: epIn.packetSize || 1024
+            };
+            this.dispatchEvent(new Event("ready"));
+          } else {
+            throw new Error("No device available.");
+          }
+        })().catch((error) => {
+          console.log("Error during MTP setup:", error);
+          this.dispatchEvent(new Event("error"));
+        });
+      }
+      getName(list, idx) {
+        for (const key in list) {
+          if (list[key].value === idx) {
+            return list[key].name;
+          }
+        }
+        return "unknown";
+      }
+      buildContainerPacket(container) {
+        const packetLength = 12 + container.payload.length * 4;
+        const buf = new ArrayBuffer(packetLength);
+        const bytes = new DataView(buf);
+        bytes.setUint32(0, packetLength, true);
+        bytes.setUint16(4, container.type, true);
+        bytes.setUint16(6, container.code, true);
+        bytes.setUint32(8, this.transactionID, true);
+        container.payload.forEach((element, index) => {
+          bytes.setUint32(12 + index * 4, element, true);
+        });
+        this.transactionID += 1;
+        console.log("Sending", buf);
+        return buf;
+      }
+      parseContainerPacket(bytes, length) {
+        const fields = {
+          type: TYPE[bytes.getUint16(4, true)] || "unknown",
+          code: this.getName(CODE, bytes.getUint16(6, true)),
+          transactionID: bytes.getUint32(8, true),
+          payload: bytes.buffer.slice(12),
+          parameters: []
+        };
+        for (let i = 12; i < length; i += 4) {
+          if (i <= length - 4) {
+            fields.parameters.push(bytes.getUint32(i, true));
+          }
+        }
+        console.log(fields);
+        return fields;
+      }
+      async read() {
+        if (!this.usbConfig) throw new Error("USB configuration is missing");
+        try {
+          let result = await this.device.transferIn(this.usbConfig.inEPnum, this.usbConfig.inPacketSize);
+          if (result && result.data && result.data.byteLength && result.data.byteLength > 0) {
+            let raw = new Uint8Array(result.data.buffer);
+            const bytes = new DataView(result.data.buffer);
+            const containerLength = bytes.getUint32(0, true);
+            console.log("Container Length:", containerLength);
+            console.log("Length:", raw.byteLength);
+            while (raw.byteLength !== containerLength) {
+              result = await this.device.transferIn(this.usbConfig.inEPnum, this.usbConfig.inPacketSize);
+              console.log(`Adding ${result.data.byteLength} bytes`);
+              const uint8array = raw.slice();
+              raw = new Uint8Array(uint8array.byteLength + result.data.byteLength);
+              raw.set(uint8array);
+              raw.set(new Uint8Array(result.data.buffer), uint8array.byteLength);
+            }
+            return this.parseContainerPacket(new DataView(raw.buffer), containerLength);
+          }
+          return result;
+        } catch (error) {
+          if (error instanceof Error && error.message.includes("LIBUSB_TRANSFER_NO_DEVICE")) {
+            console.log("Device disconnected");
+          } else {
+            console.log("Error reading data:", error);
+            throw error;
+          }
+        }
+      }
+      async readData() {
+        let type = null;
+        let result = null;
+        while (type !== "Data Block") {
+          result = await this.read();
+          if (result) {
+            if (result.status === "babble") {
+              result = await this.read();
+            }
+            type = result.type;
+          } else {
+            throw new Error("No data returned");
+          }
+        }
+        return result;
+      }
+      async write(buffer) {
+        if (!this.usbConfig) throw new Error("USB configuration is missing");
+        return await this.device.transferOut(this.usbConfig.outEPnum, buffer);
+      }
+      async close() {
+        try {
+          console.log("Closing session..");
+          const closeSession = {
+            type: 1,
+            // command block
+            code: CODE.CLOSE_SESSION.value,
+            payload: [1]
+            // session ID
+          };
+          await this.write(this.buildContainerPacket(closeSession));
+          await this.device.releaseInterface(0);
+          await this.device.close();
+          console.log("Closed device");
+        } catch (err) {
+          console.log("Error:", err);
+        }
+      }
+      async openSession() {
+        console.log("Opening session..");
+        const openSession = {
+          type: 1,
+          // command block
+          code: CODE.OPEN_SESSION.value,
+          payload: [1]
+          // session ID
+        };
+        const data = this.buildContainerPacket(openSession);
+        const result = await this.write(data);
+        console.log("Result:", result);
+        console.log(await this.read());
+      }
+      async getObjectHandles() {
+        console.log("Getting object handles..");
+        const getObjectHandles = {
+          type: 1,
+          // command block
+          code: CODE.GET_OBJECT_HANDLES.value,
+          payload: [4294967295, 0, 4294967295]
+          // get all
+        };
+        await this.write(this.buildContainerPacket(getObjectHandles));
+        const data = await this.readData();
+        data.parameters.shift();
+        data.parameters.forEach((element) => {
+          console.log("Object handle", element);
+        });
+        return data.parameters;
+      }
+      async getFileName(objectHandle) {
+        console.log("Getting file name with object handle", objectHandle);
+        const getFilename = {
+          type: 1,
+          code: CODE.GET_OBJECT_PROP_VALUE.value,
+          payload: [objectHandle, CODE.OBJECT_FILE_NAME.value]
+          // objectHandle and objectPropCode
+        };
+        await this.write(this.buildContainerPacket(getFilename));
+        const data = await this.readData();
+        const array = new Uint8Array(data.payload);
+        const decoder = new TextDecoder("utf-16le");
+        const filename = decoder.decode(array.subarray(1, array.byteLength - 2));
+        console.log("Filename:", filename);
+        return filename;
+      }
+      async getFile(objectHandle, filename) {
+        console.log(`Getting file with object handle ${objectHandle} as ${filename}`);
+        const getFile = {
+          type: 1,
+          code: CODE.GET_OBJECT.value,
+          payload: [objectHandle]
+        };
+        await this.write(this.buildContainerPacket(getFile));
+        const data = await this.readData();
+        return new Uint8Array(data.payload);
+      }
+    };
+  }
+});
+
 // src/main.ts
 import { app as app3, protocol as protocol2 } from "electron";
 
@@ -32,8 +355,8 @@ function createWindow() {
 // src/main/ipc.ts
 import { app as app2, dialog as dialog2, ipcMain, Menu, MenuItem, net, protocol, shell } from "electron";
 import Store2 from "electron-store";
-import fs4 from "node:fs";
-import path5 from "node:path";
+import fs5 from "node:fs";
+import path6 from "node:path";
 import { pathToFileURL } from "node:url";
 
 // src/shared/constants.ts
@@ -41,7 +364,12 @@ var DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "\u3001", "\uFF0F"];
 
 // src/main/scanner.ts
 import { app, dialog } from "electron";
+import fs3 from "node:fs";
+import path4 from "node:path";
+
+// src/main/storageWrapper.ts
 import fs2 from "node:fs";
+import os from "node:os";
 import path3 from "node:path";
 
 // src/main/utils.ts
@@ -171,20 +499,422 @@ async function getTrackMetadata(filePath, relativePath) {
   }
 }
 
+// src/main/storageWrapper.ts
+async function copyFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      await fs2.promises.copyFile(source, target);
+      return;
+    } catch (e) {
+      if (i === retries - 1) {
+        throw e;
+      }
+      console.warn(`Copy failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+async function moveFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      try {
+        await fs2.promises.rename(source, target);
+      } catch (e) {
+        console.warn(`Rename failed, falling back to copy/unlink: ${source} -> ${target}`, e);
+        await fs2.promises.copyFile(source, target);
+        await fs2.promises.unlink(source);
+      }
+      return;
+    } catch (e) {
+      if (i === retries - 1) {
+        throw e;
+      }
+      console.warn(`Move failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
+      await new Promise((resolve) => setTimeout(resolve, delayMs));
+    }
+  }
+}
+var LocalStorageWrapper = class {
+  phonePath;
+  constructor(phonePath) {
+    this.phonePath = phonePath;
+  }
+  async isConnected() {
+    return fs2.existsSync(this.phonePath);
+  }
+  async exists(relativePath) {
+    const targetPath = path3.join(this.phonePath, relativePath);
+    return fs2.existsSync(targetPath);
+  }
+  async findMusicFiles() {
+    return findMusicFiles(this.phonePath, this.phonePath);
+  }
+  async getTrackMetadata(filePath, relativePath) {
+    return getTrackMetadata(filePath, relativePath);
+  }
+  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+    const targetPath = path3.join(this.phonePath, remoteDestRelativePath);
+    const targetDir = path3.dirname(targetPath);
+    await fs2.promises.mkdir(targetDir, { recursive: true });
+    await copyFileWithRetry(localSrc, targetPath);
+  }
+  async moveFile(oldRelativePath, newRelativePath) {
+    const oldPath = path3.join(this.phonePath, oldRelativePath);
+    const newPath = path3.join(this.phonePath, newRelativePath);
+    const targetDir = path3.dirname(newPath);
+    await fs2.promises.mkdir(targetDir, { recursive: true });
+    await moveFileWithRetry(oldPath, newPath);
+  }
+  async deleteFile(relativePath) {
+    const targetPath = path3.join(this.phonePath, relativePath);
+    if (fs2.existsSync(targetPath)) {
+      await fs2.promises.unlink(targetPath);
+    }
+  }
+  async cleanEmptyDirs() {
+    const clean = async (dir) => {
+      try {
+        const list = await fs2.promises.readdir(dir, { withFileTypes: true });
+        for (const item of list) {
+          if (item.isDirectory()) {
+            const sub = path3.join(dir, item.name);
+            await clean(sub);
+          }
+        }
+        if (dir !== this.phonePath) {
+          const files = await fs2.promises.readdir(dir);
+          if (files.length === 0) {
+            await fs2.promises.rmdir(dir);
+          }
+        }
+      } catch (e) {
+        console.warn(`Failed to clean empty directory recursively in ${dir}:`, e);
+      }
+    };
+    await clean(this.phonePath);
+  }
+};
+var MockMtpStorageWrapper = class {
+  mockFiles = /* @__PURE__ */ new Map();
+  subPath;
+  constructor(subPath) {
+    this.subPath = subPath || "Music";
+    this.mockFiles.set(`${this.subPath}/The Weeknd/After Hours/03 Blinding Lights.mp3`, {
+      size: 45e5,
+      mtimeMs: Date.now() - 36e5,
+      metadata: {
+        title: "Blinding Lights",
+        artist: "The Weeknd",
+        album: "After Hours",
+        track: "3",
+        genre: "R&B",
+        disc: "1",
+        hasCoverArt: true,
+        coverArtSize: 5e4
+      }
+    });
+    this.mockFiles.set(`${this.subPath}/Lil Nas X/Old Town Road.mp3`, {
+      size: 3e6,
+      mtimeMs: Date.now() - 72e5,
+      metadata: {
+        title: "Old Town Road",
+        artist: "Lil Nas X",
+        album: "7 EP",
+        track: "1",
+        genre: "Country",
+        disc: "1",
+        hasCoverArt: false,
+        coverArtSize: 0
+      }
+    });
+  }
+  async isConnected() {
+    return true;
+  }
+  async exists(relativePath) {
+    return this.mockFiles.has(relativePath);
+  }
+  async findMusicFiles() {
+    const results = [];
+    for (const [key, val] of this.mockFiles.entries()) {
+      results.push({
+        filePath: `mock_mtp://${key}`,
+        relativePath: key,
+        size: val.size,
+        mtimeMs: val.mtimeMs
+      });
+    }
+    return results;
+  }
+  async getTrackMetadata(filePath, relativePath) {
+    const file = this.mockFiles.get(relativePath);
+    if (file) {
+      return {
+        id: `phone_${relativePath}`,
+        filePath,
+        relativePath,
+        title: file.metadata.title || "Unknown Title",
+        artist: file.metadata.artist || "Unknown Artist",
+        album: file.metadata.album || "Unknown Album",
+        track: file.metadata.track || "",
+        genre: file.metadata.genre || "Unknown Genre",
+        size: file.size,
+        mtimeMs: file.mtimeMs,
+        hasCoverArt: file.metadata.hasCoverArt || false,
+        coverArtSize: file.metadata.coverArtSize || 0,
+        disc: file.metadata.disc || "1",
+        albumartist: file.metadata.albumartist || "",
+        composer: file.metadata.composer || "",
+        year: file.metadata.year || "",
+        comment: file.metadata.comment || ""
+      };
+    }
+    return {
+      id: `phone_${relativePath}`,
+      filePath,
+      relativePath,
+      title: path3.basename(relativePath, path3.extname(relativePath)),
+      artist: "Unknown Artist",
+      album: "Unknown Album",
+      track: "",
+      genre: "Unknown Genre",
+      size: 0,
+      mtimeMs: Date.now(),
+      hasCoverArt: false,
+      coverArtSize: 0
+    };
+  }
+  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+    try {
+      const meta = await getTrackMetadata(localSrc, remoteDestRelativePath);
+      const stats = await fs2.promises.stat(localSrc);
+      this.mockFiles.set(remoteDestRelativePath, {
+        size: stats.size,
+        mtimeMs: stats.mtimeMs,
+        metadata: meta
+      });
+    } catch (e) {
+      this.mockFiles.set(remoteDestRelativePath, {
+        size: 1e5,
+        mtimeMs: Date.now(),
+        metadata: {
+          title: path3.basename(remoteDestRelativePath, path3.extname(remoteDestRelativePath))
+        }
+      });
+    }
+  }
+  async moveFile(oldRelativePath, newRelativePath) {
+    const file = this.mockFiles.get(oldRelativePath);
+    if (file) {
+      this.mockFiles.delete(oldRelativePath);
+      this.mockFiles.set(newRelativePath, file);
+    }
+  }
+  async deleteFile(relativePath) {
+    this.mockFiles.delete(relativePath);
+  }
+  async cleanEmptyDirs() {
+  }
+};
+var MtpStorageWrapper = class {
+  vendorId;
+  productId;
+  subPath;
+  mtpInstance = null;
+  deviceObjectHandles = [];
+  fileMap = /* @__PURE__ */ new Map();
+  // relativePath -> objectHandle
+  constructor(vendorId, productId, subPath) {
+    this.vendorId = vendorId;
+    this.productId = productId;
+    this.subPath = subPath || "Music";
+  }
+  async connectMtp() {
+    if (this.mtpInstance) return this.mtpInstance;
+    const MtpClass = (await Promise.resolve().then(() => (init_Mtp(), Mtp_exports))).default;
+    const mtp = new MtpClass(this.vendorId, this.productId);
+    return new Promise((resolve, reject) => {
+      const onReady = async () => {
+        try {
+          await mtp.openSession();
+          this.mtpInstance = mtp;
+          resolve(mtp);
+        } catch (e) {
+          reject(e);
+        }
+      };
+      const onError = (err) => {
+        reject(new Error(`MTP connection error: ${err?.message || "Unknown error"}`));
+      };
+      mtp.addEventListener("ready", onReady);
+      mtp.addEventListener("error", onError);
+      setTimeout(() => {
+        reject(new Error("MTP connection timed out."));
+      }, 1e4);
+    });
+  }
+  async isConnected() {
+    try {
+      const mtp = await this.connectMtp();
+      return !!mtp;
+    } catch (e) {
+      return false;
+    }
+  }
+  async exists(relativePath) {
+    await this.findMusicFiles();
+    return this.fileMap.has(relativePath);
+  }
+  async findMusicFiles() {
+    const mtp = await this.connectMtp();
+    const handles = await mtp.getObjectHandles();
+    this.deviceObjectHandles = handles;
+    const results = [];
+    this.fileMap.clear();
+    const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
+    for (const handle of handles) {
+      try {
+        const fileName = await mtp.getFileName(handle);
+        const ext = path3.extname(fileName).toLowerCase();
+        if (validExtensions.has(ext)) {
+          const relativePath = path3.join(this.subPath, fileName).replace(/\\/g, "/");
+          this.fileMap.set(relativePath, handle);
+          results.push({
+            filePath: `mtp://${this.vendorId}/${this.productId}/${handle}`,
+            relativePath,
+            size: 1e6,
+            // Default fallback size for remote files if query not supported
+            mtimeMs: Date.now()
+            // Default fallback mtime for remote files if query not supported
+          });
+        }
+      } catch (e) {
+        console.warn(`Failed to read file info for object handle ${handle}`, e);
+      }
+    }
+    return results;
+  }
+  async getTrackMetadata(filePath, relativePath) {
+    const handle = this.fileMap.get(relativePath);
+    if (handle === void 0) {
+      throw new Error(`File not found on MTP device: ${relativePath}`);
+    }
+    const mtp = await this.connectMtp();
+    const fileName = await mtp.getFileName(handle);
+    const tempDir = path3.join(os.tmpdir(), "musicsync-mtp-temp");
+    if (!fs2.existsSync(tempDir)) {
+      fs2.mkdirSync(tempDir, { recursive: true });
+    }
+    const tempFilePath = path3.join(tempDir, `${handle}_${fileName}`);
+    try {
+      const fileData = await mtp.getFile(handle, fileName);
+      await fs2.promises.writeFile(tempFilePath, Buffer.from(fileData));
+      const meta = await getTrackMetadata(tempFilePath, relativePath);
+      meta.filePath = filePath;
+      return meta;
+    } finally {
+      if (fs2.existsSync(tempFilePath)) {
+        try {
+          await fs2.promises.unlink(tempFilePath);
+        } catch (e) {
+        }
+      }
+    }
+  }
+  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+    const mtp = await this.connectMtp();
+    const fileData = await fs2.promises.readFile(localSrc);
+    const fileName = path3.basename(remoteDestRelativePath);
+    if (typeof mtp.sendFile === "function") {
+      await mtp.sendFile(fileData, fileName);
+    } else {
+      console.log(`Writing file ${fileName} to MTP device via bulk transfer packets...`);
+      const sendObjectCmd = {
+        type: 1,
+        // Command Block
+        code: 4109,
+        // SendObject
+        payload: []
+      };
+      const container = mtp.buildContainerPacket(sendObjectCmd);
+      await mtp.write(container);
+      await mtp.write(fileData.buffer);
+      const response = await mtp.read();
+      console.log("SendObject MTP response:", response);
+    }
+  }
+  async moveFile(oldRelativePath, newRelativePath) {
+    const handle = this.fileMap.get(oldRelativePath);
+    if (handle === void 0) return;
+    const mtp = await this.connectMtp();
+    const fileName = await mtp.getFileName(handle);
+    const fileData = await mtp.getFile(handle, fileName);
+    if (typeof mtp.sendFile === "function") {
+      await mtp.sendFile(fileData, path3.basename(newRelativePath));
+    } else {
+      const sendObjectCmd = {
+        type: 1,
+        code: 4109,
+        payload: []
+      };
+      await mtp.write(mtp.buildContainerPacket(sendObjectCmd));
+      await mtp.write(fileData.buffer);
+      await mtp.read();
+    }
+    await this.deleteFile(oldRelativePath);
+  }
+  async deleteFile(relativePath) {
+    const handle = this.fileMap.get(relativePath);
+    if (handle === void 0) return;
+    const mtp = await this.connectMtp();
+    const deleteObjectCmd = {
+      type: 1,
+      // Command Block
+      code: 4107,
+      // DeleteObject
+      payload: [handle]
+    };
+    await mtp.write(mtp.buildContainerPacket(deleteObjectCmd));
+    const response = await mtp.read();
+    console.log("DeleteObject response:", response);
+    this.fileMap.delete(relativePath);
+  }
+  async cleanEmptyDirs() {
+  }
+};
+function getStorageWrapper(profile) {
+  if (!profile) {
+    throw new Error("No active profile provided");
+  }
+  const storageType = profile.storageType || "local";
+  if (storageType === "mtp") {
+    if (profile.id.startsWith("mock") || profile.phonePath === "mock_mtp" || profile.usbVendorId === 0 && profile.usbProductId === 0) {
+      console.log("[StorageWrapper] Initializing simulated Debug/Mock MTP Wrapper...");
+      return new MockMtpStorageWrapper(profile.mtpSubPath);
+    }
+    const vendorId = parseInt(profile.usbVendorId, 10) || 0;
+    const productId = parseInt(profile.usbProductId, 10) || 0;
+    console.log(`[StorageWrapper] Initializing physical MTP Wrapper for Device (VID: ${vendorId}, PID: ${productId})...`);
+    return new MtpStorageWrapper(vendorId, productId, profile.mtpSubPath);
+  }
+  console.log(`[StorageWrapper] Initializing Local File Storage Wrapper for Path: ${profile.phonePath}`);
+  return new LocalStorageWrapper(profile.phonePath);
+}
+
 // src/main/scanner.ts
 var lastScanResults = {};
-var cachesDir = path3.join(app.getPath("userData"), "caches");
-if (!fs2.existsSync(cachesDir)) {
-  fs2.mkdirSync(cachesDir, { recursive: true });
+var cachesDir = path4.join(app.getPath("userData"), "caches");
+if (!fs3.existsSync(cachesDir)) {
+  fs3.mkdirSync(cachesDir, { recursive: true });
 }
 function getCachePath(profileId, suffix) {
-  return path3.join(cachesDir, `${profileId}_${suffix}.json`);
+  return path4.join(cachesDir, `${profileId}_${suffix}.json`);
 }
 function loadCache(profileId, suffix) {
   const cachePath = getCachePath(profileId, suffix);
-  if (fs2.existsSync(cachePath)) {
+  if (fs3.existsSync(cachePath)) {
     try {
-      const cache = JSON.parse(fs2.readFileSync(cachePath, "utf-8"));
+      const cache = JSON.parse(fs3.readFileSync(cachePath, "utf-8"));
       let hasFormatMismatch = false;
       const keys = Object.keys(cache);
       if (keys.length > 0) {
@@ -202,7 +932,7 @@ function loadCache(profileId, suffix) {
         });
         if (choice === 0) {
           try {
-            fs2.unlinkSync(cachePath);
+            fs3.unlinkSync(cachePath);
           } catch (e) {
           }
           return {};
@@ -224,7 +954,7 @@ function loadCache(profileId, suffix) {
 function saveCache(profileId, suffix, cache) {
   const cachePath = getCachePath(profileId, suffix);
   try {
-    fs2.writeFileSync(cachePath, JSON.stringify(cache), "utf-8");
+    fs3.writeFileSync(cachePath, JSON.stringify(cache), "utf-8");
   } catch (e) {
     console.error("Failed to save cache", e);
   }
@@ -234,10 +964,14 @@ async function runScan(profile, event) {
   const sendProgress = (step, message, progress, details) => {
     event.sender.send("scan-progress", { step, message, progress, ...details });
   };
+  const storage = getStorageWrapper(profile);
+  if (!await storage.isConnected()) {
+    throw new Error(`\u6BD4\u8F03\u5148\u300C${profile.name}\u300D\u306B\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u307E\u305B\u3093\u3002\u63A5\u7D9A\u72B6\u6CC1\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+  }
   sendProgress("itunes_list", "iTunes\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 5);
   const itunesFiles = await findMusicFiles(profile.itunesPath);
   sendProgress("phone_list", "\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 15);
-  const phoneFiles = await findMusicFiles(profile.phonePath);
+  const phoneFiles = await storage.findMusicFiles();
   const itunesCache = loadCache(profileId, "itunes");
   const phoneCache = loadCache(profileId, "phone");
   const buildSecondaryIndex = (cache) => {
@@ -265,7 +999,7 @@ async function runScan(profile, event) {
       sendProgress("itunes_parse", `iTunes\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
     }
     try {
-      const stats = await fs2.promises.stat(file.filePath);
+      const stats = await fs3.promises.stat(file.filePath);
       let meta = itunesCache[file.relativePath];
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
         newItunesCache[file.relativePath] = meta;
@@ -300,12 +1034,18 @@ async function runScan(profile, event) {
       sendProgress("phone_parse", `\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
     }
     try {
-      const stats = await fs2.promises.stat(file.filePath);
+      let size = file.size;
+      let mtimeMs = file.mtimeMs;
+      if (size === void 0 || mtimeMs === void 0) {
+        const stats = await fs3.promises.stat(file.filePath);
+        size = stats.size;
+        mtimeMs = stats.mtimeMs;
+      }
       let meta = phoneCache[file.relativePath];
-      if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
+      if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
         newPhoneCache[file.relativePath] = meta;
       } else {
-        const key = `${stats.size}_${stats.mtimeMs}`;
+        const key = `${size}_${mtimeMs}`;
         const cachedMeta = phoneSecondaryIndex.get(key);
         if (cachedMeta) {
           meta = {
@@ -315,7 +1055,7 @@ async function runScan(profile, event) {
           };
           newPhoneCache[file.relativePath] = meta;
         } else {
-          meta = await getTrackMetadata(file.filePath, file.relativePath);
+          meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
           newPhoneCache[file.relativePath] = meta;
         }
       }
@@ -497,61 +1237,8 @@ async function runScan(profile, event) {
 }
 
 // src/main/sync.ts
-import fs3 from "node:fs";
-import path4 from "node:path";
-async function cleanEmptyDirsRecursive(dir, rootDir) {
-  try {
-    const list = await fs3.promises.readdir(dir, { withFileTypes: true });
-    for (const item of list) {
-      if (item.isDirectory()) {
-        const sub = path4.join(dir, item.name);
-        await cleanEmptyDirsRecursive(sub, rootDir);
-      }
-    }
-    if (dir !== rootDir) {
-      const files = await fs3.promises.readdir(dir);
-      if (files.length === 0) {
-        await fs3.promises.rmdir(dir);
-      }
-    }
-  } catch (e) {
-    console.warn(`Failed to clean empty directories recursively in ${dir}:`, e);
-  }
-}
-async function copyFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      await fs3.promises.copyFile(source, target);
-      return;
-    } catch (e) {
-      if (i === retries - 1) {
-        throw e;
-      }
-      console.warn(`Copy failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-}
-async function moveFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
-  for (let i = 0; i < retries; i++) {
-    try {
-      try {
-        await fs3.promises.rename(source, target);
-      } catch (e) {
-        console.warn(`Rename failed, falling back to copy/unlink: ${source} -> ${target}`, e);
-        await fs3.promises.copyFile(source, target);
-        await fs3.promises.unlink(source);
-      }
-      return;
-    } catch (e) {
-      if (i === retries - 1) {
-        throw e;
-      }
-      console.warn(`Move failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
-      await new Promise((resolve) => setTimeout(resolve, delayMs));
-    }
-  }
-}
+import fs4 from "node:fs";
+import path5 from "node:path";
 async function runSync(profile, options, event) {
   const profileId = profile.id;
   const { copyTrackIds, moveTrackIds, deleteTrackIds } = options;
@@ -571,21 +1258,22 @@ async function runSync(profile, options, event) {
     if (totalOperations === 0) return 100;
     return Math.round(completed / totalOperations * 100);
   };
+  const storage = getStorageWrapper(profile);
   try {
-    if (!fs3.existsSync(profile.phonePath)) {
-      throw new Error(`\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u300C${profile.phonePath}\u300D\u306B\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u307E\u305B\u3093\u3002\u63A5\u7D9A\u72B6\u6CC1\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+    if (!await storage.isConnected()) {
+      throw new Error(`\u6BD4\u8F03\u5148\u300C${profile.name}\u300D\u306B\u30A2\u30AF\u30BB\u30B9\u3067\u304D\u307E\u305B\u3093\u3002\u63A5\u7D9A\u72B6\u6CC1\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
     }
     if (deleteTrackIds.length > 0) {
       logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u4F59\u5206\u306A\u66F2\u306E\u524A\u9664\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${deleteTrackIds.length}\u66F2)`, getPct());
       for (const id of deleteTrackIds) {
-        if (!fs3.existsSync(profile.phonePath)) {
-          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        if (!await storage.isConnected()) {
+          throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
         }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.phoneTrack) {
           try {
-            if (fs3.existsSync(item.phoneTrack.filePath)) {
-              await fs3.promises.unlink(item.phoneTrack.filePath);
+            if (await storage.exists(item.phoneTrack.relativePath)) {
+              await storage.deleteFile(item.phoneTrack.relativePath);
             }
             logAndSend(`\u524A\u9664\u6210\u529F: ${item.phoneTrack.relativePath}`, getPct());
           } catch (e) {
@@ -599,30 +1287,31 @@ async function runSync(profile, options, event) {
     if (moveTrackIds.length > 0) {
       logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u914D\u7F6E\u518D\u6574\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${moveTrackIds.length}\u66F2)`, getPct());
       for (const id of moveTrackIds) {
-        if (!fs3.existsSync(profile.phonePath)) {
-          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        if (!await storage.isConnected()) {
+          throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
         }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack && item.phoneTrack) {
-          const oldPath = item.phoneTrack.filePath;
+          const oldRelative = item.phoneTrack.relativePath;
           const newRelative = item.itunesTrack.relativePath;
-          const newPath = path4.join(profile.phonePath, newRelative);
           try {
-            if (fs3.existsSync(oldPath)) {
-              const targetDir = path4.dirname(newPath);
-              await fs3.promises.mkdir(targetDir, { recursive: true });
-              await moveFileWithRetry(oldPath, newPath, 3, 1e3);
-              logAndSend(`\u79FB\u52D5\u6210\u529F: ${item.phoneTrack.relativePath} -> ${newRelative}`, getPct());
-              item.phoneTrack.filePath = newPath;
+            if (await storage.exists(oldRelative)) {
+              await storage.moveFile(oldRelative, newRelative);
+              logAndSend(`\u79FB\u52D5\u6210\u529F: ${oldRelative} -> ${newRelative}`, getPct());
+              if (profile.storageType === "mtp") {
+                item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
+              } else {
+                item.phoneTrack.filePath = path5.join(profile.phonePath, newRelative);
+              }
               item.phoneTrack.relativePath = newRelative;
               item.pathMismatch = false;
             } else {
-              logAndSend(`\u8B66\u544A: \u79FB\u52D5\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${item.phoneTrack.relativePath}`, getPct());
+              logAndSend(`\u8B66\u544A: \u79FB\u52D5\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${oldRelative}`, getPct());
               failedTracksSet.add(id);
             }
           } catch (e) {
-            console.error(`Failed to move file: ${item.phoneTrack.relativePath}`, e);
-            logAndSend(`\u79FB\u52D5\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
+            console.error(`Failed to move file: ${oldRelative}`, e);
+            logAndSend(`\u79FB\u52D5\u5931\u6557: ${oldRelative} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
             failedTracksSet.add(id);
           }
         }
@@ -632,19 +1321,16 @@ async function runSync(profile, options, event) {
     if (copyTrackIds.length > 0) {
       logAndSend(`iTunes\u304B\u3089\u6BD4\u8F03\u5148\u3078\u306E\u66F2\u306E\u30B3\u30D4\u30FC\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${copyTrackIds.length}\u66F2)`, getPct());
       for (const id of copyTrackIds) {
-        if (!fs3.existsSync(profile.phonePath)) {
-          throw new Error(`\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F: ${profile.phonePath}`);
+        if (!await storage.isConnected()) {
+          throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
         }
         const item = scanItems.find((x) => x.id === id);
         if (item && item.itunesTrack) {
           const sourcePath = item.itunesTrack.filePath;
           const relative = item.itunesTrack.relativePath;
-          const targetPath = path4.join(profile.phonePath, relative);
           try {
-            if (fs3.existsSync(sourcePath)) {
-              const targetDir = path4.dirname(targetPath);
-              await fs3.promises.mkdir(targetDir, { recursive: true });
-              await copyFileWithRetry(sourcePath, targetPath, 3, 1e3);
+            if (fs4.existsSync(sourcePath)) {
+              await storage.copyFileFromLocal(sourcePath, relative);
               logAndSend(`\u30B3\u30D4\u30FC\u6210\u529F: ${relative}`, getPct());
             } else {
               logAndSend(`\u30A8\u30E9\u30FC: \u30B3\u30D4\u30FC\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
@@ -660,7 +1346,7 @@ async function runSync(profile, options, event) {
       }
     }
     logAndSend("\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u7A7A\u30D5\u30A9\u30EB\u30C0\u3092\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u4E2D...", getPct());
-    await cleanEmptyDirsRecursive(profile.phonePath, profile.phonePath);
+    await storage.cleanEmptyDirs();
     logAndSend("\u7A7A\u30D5\u30A9\u30EB\u30C0\u306E\u30AF\u30EA\u30FC\u30F3\u30A2\u30C3\u30D7\u304C\u5B8C\u4E86\u3057\u307E\u3057\u305F\u3002", getPct());
     logAndSend("\u6700\u7D42\u6574\u5408\u6027\u30C1\u30A7\u30C3\u30AF\u3092\u5B9F\u884C\u4E2D...", getPct());
     let failedCheckCount = 0;
@@ -670,17 +1356,22 @@ async function runSync(profile, options, event) {
       const item = scanItems.find((x) => x.id === task.id);
       if (item && item.itunesTrack) {
         const relative = item.itunesTrack.relativePath;
-        const targetPath = path4.join(profile.phonePath, relative);
         try {
-          if (!fs3.existsSync(targetPath)) {
+          if (!await storage.exists(relative)) {
             logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u30A8\u30E9\u30FC: \u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
             failedCheckCount++;
             failedTracksSet.add(task.id);
           } else {
-            const sourceStats = await fs3.promises.stat(item.itunesTrack.filePath);
-            const targetStats = await fs3.promises.stat(targetPath);
-            if (sourceStats.size !== targetStats.size) {
-              logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u30A8\u30E9\u30FC: \u30D5\u30A1\u30A4\u30EB\u30B5\u30A4\u30BA\u4E0D\u4E00\u81F4: ${relative} (\u30BD\u30FC\u30B9: ${sourceStats.size}B, \u6BD4\u8F03\u5148: ${targetStats.size}B)`, getPct());
+            const sourceStats = await fs4.promises.stat(item.itunesTrack.filePath);
+            let remotePath = "";
+            if (profile.storageType === "mtp") {
+              remotePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${relative}`;
+            } else {
+              remotePath = path5.join(profile.phonePath, relative);
+            }
+            const remoteMeta = await storage.getTrackMetadata(remotePath, relative);
+            if (sourceStats.size !== remoteMeta.size) {
+              logAndSend(`\u26A0\uFE0F \u6574\u5408\u6027\u30A8\u30E9\u30FC: \u30D5\u30A1\u30A4\u30EB\u30B5\u30A4\u30BA\u4E0D\u4E00\u81F4: ${relative} (\u30BD\u30FC\u30B9: ${sourceStats.size}B, \u6BD4\u8F03\u5148: ${remoteMeta.size}B)`, getPct());
               failedCheckCount++;
               failedTracksSet.add(task.id);
             } else {
@@ -716,7 +1407,7 @@ function registerIpcHandlers() {
       const url = new URL(request.url);
       const hexStr = url.pathname.slice(1);
       const decodedPath = Buffer.from(hexStr, "hex").toString("utf-8");
-      if (!fs4.existsSync(decodedPath)) {
+      if (!fs5.existsSync(decodedPath)) {
         console.error(`[media protocol] File not found on disk: "${decodedPath}"`);
         return new Response("Not Found", { status: 404 });
       }
@@ -727,7 +1418,7 @@ function registerIpcHandlers() {
     }
   });
   ipcMain.handle("show-item-in-folder", (_event, filePath) => {
-    if (fs4.existsSync(filePath)) {
+    if (fs5.existsSync(filePath)) {
       shell.showItemInFolder(filePath);
       return true;
     }
@@ -768,15 +1459,15 @@ function registerIpcHandlers() {
     store.set("settings", settings);
   });
   ipcMain.handle("reset-cache", async () => {
-    const cachesDir2 = path5.join(app2.getPath("userData"), "caches");
-    if (fs4.existsSync(cachesDir2)) {
+    const cachesDir2 = path6.join(app2.getPath("userData"), "caches");
+    if (fs5.existsSync(cachesDir2)) {
       try {
-        fs4.rmSync(cachesDir2, { recursive: true, force: true });
+        fs5.rmSync(cachesDir2, { recursive: true, force: true });
       } catch (e) {
         console.error("Failed to delete caches directory", e);
       }
     }
-    fs4.mkdirSync(cachesDir2, { recursive: true });
+    fs5.mkdirSync(cachesDir2, { recursive: true });
     for (const key of Object.keys(lastScanResults)) {
       delete lastScanResults[key];
     }
@@ -841,7 +1532,7 @@ function registerIpcHandlers() {
         );
       }
       let hasSeparator = false;
-      if (params.itunesFilePath && fs4.existsSync(params.itunesFilePath)) {
+      if (params.itunesFilePath && fs5.existsSync(params.itunesFilePath)) {
         if (!hasSeparator) {
           menu.append(new MenuItem({ type: "separator" }));
           hasSeparator = true;
@@ -855,7 +1546,7 @@ function registerIpcHandlers() {
           })
         );
       }
-      if (params.phoneFilePath && fs4.existsSync(params.phoneFilePath)) {
+      if (params.phoneFilePath && fs5.existsSync(params.phoneFilePath)) {
         if (!hasSeparator) {
           menu.append(new MenuItem({ type: "separator" }));
           hasSeparator = true;
@@ -886,6 +1577,34 @@ function registerIpcHandlers() {
     }
     return result.filePaths[0];
   });
+  ipcMain.handle("get-usb-devices", async () => {
+    const list = [];
+    try {
+      const usb2 = (await import("usb")).default;
+      if (usb2 && usb2.usb) {
+        if (typeof usb2.usb.getDevices === "function") {
+          const devices = await usb2.usb.getDevices();
+          for (const d of devices) {
+            try {
+              const mName = d.manufacturerName || "";
+              const pName = d.productName || "";
+              const displayName = mName || pName ? `${mName} ${pName}`.trim() : `USB Device (VID: 0x${d.vendorId.toString(16).padStart(4, "0")}, PID: 0x${d.productId.toString(16).padStart(4, "0")})`;
+              list.push({
+                vendorId: d.vendorId,
+                productId: d.productId,
+                name: displayName
+              });
+            } catch (e) {
+              console.error("[get-usb-devices] Error processing USB device:", e);
+            }
+          }
+        }
+      }
+    } catch (e) {
+      console.error("[get-usb-devices] Error listing physical USB devices:", e);
+    }
+    return list;
+  });
   ipcMain.handle("start-scan", async (event, profileId) => {
     const profiles = store.get("profiles", []);
     const profile = profiles.find((p) => p.id === profileId);
@@ -909,12 +1628,12 @@ function registerIpcHandlers() {
     try {
       if (!profileId || !albumName) return null;
       const albumHex = Buffer.from(albumName).toString("hex");
-      const thumbnailsDir = path5.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
-      if (!fs4.existsSync(thumbnailsDir)) {
-        fs4.mkdirSync(thumbnailsDir, { recursive: true });
+      const thumbnailsDir = path6.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
+      if (!fs5.existsSync(thumbnailsDir)) {
+        fs5.mkdirSync(thumbnailsDir, { recursive: true });
       }
-      const pngPath = path5.join(thumbnailsDir, `${albumHex}.png`);
-      const metaPath = path5.join(thumbnailsDir, `${albumHex}.meta.json`);
+      const pngPath = path6.join(thumbnailsDir, `${albumHex}.png`);
+      const metaPath = path6.join(thumbnailsDir, `${albumHex}.meta.json`);
       const results = lastScanResults[profileId] || [];
       const trackItem = results.find((t) => {
         const meta = t.itunesTrack || t.phoneTrack;
@@ -926,9 +1645,9 @@ function registerIpcHandlers() {
       const track = trackItem.itunesTrack || trackItem.phoneTrack;
       if (!track) return null;
       let needRegenerate = true;
-      if (fs4.existsSync(pngPath) && fs4.existsSync(metaPath)) {
+      if (fs5.existsSync(pngPath) && fs5.existsSync(metaPath)) {
         try {
-          const meta = JSON.parse(fs4.readFileSync(metaPath, "utf-8"));
+          const meta = JSON.parse(fs5.readFileSync(metaPath, "utf-8"));
           if (meta.size === track.coverArtSize) {
             needRegenerate = false;
           }
@@ -938,7 +1657,7 @@ function registerIpcHandlers() {
       if (needRegenerate) {
         const { parseFile: parseFile2 } = await import("music-metadata");
         const { nativeImage } = await import("electron");
-        if (!fs4.existsSync(track.filePath)) {
+        if (!fs5.existsSync(track.filePath)) {
           return null;
         }
         const metadata = await parseFile2(track.filePath, { skipCovers: false });
@@ -949,10 +1668,10 @@ function registerIpcHandlers() {
         const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
         const resized = img.resize({ width: 150, height: 150, quality: "better" });
         const pngBuf = resized.toPNG();
-        fs4.writeFileSync(pngPath, Buffer.from(pngBuf));
-        fs4.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
+        fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
+        fs5.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
       }
-      const cachedBuf = fs4.readFileSync(pngPath);
+      const cachedBuf = fs5.readFileSync(pngPath);
       return `data:image/png;base64,${cachedBuf.toString("base64")}`;
     } catch (e) {
       console.error("Failed to get or generate thumbnail", e);

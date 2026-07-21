@@ -219,6 +219,39 @@ export function registerIpcHandlers() {
 		return result.filePaths[0];
 	});
 
+	ipcMain.handle("get-usb-devices", async () => {
+		const list: { vendorId: number; productId: number; name: string }[] = [];
+		try {
+			const usb = (await import("usb")).default;
+			if (usb && usb.usb) {
+				// if (typeof usb.usb.loadDevices === "function") {
+				// 	await usb.usb.loadDevices();
+				// }
+				if (typeof usb.usb.getDevices === "function") {
+					const devices = await usb.usb.getDevices();
+					for (const d of devices) {
+						try {
+							const mName = d.manufacturerName || "";
+							const pName = d.productName || "";
+							const displayName = mName || pName ? `${mName} ${pName}`.trim() : `USB Device (VID: 0x${d.vendorId.toString(16).padStart(4, "0")}, PID: 0x${d.productId.toString(16).padStart(4, "0")})`;
+							list.push({
+								vendorId: d.vendorId,
+								productId: d.productId,
+								name: displayName,
+							});
+						} catch (e) {
+							console.error("[get-usb-devices] Error processing USB device:", e);
+						}
+					}
+				}
+			}
+		} catch (e: any) {
+			console.error("[get-usb-devices] Error listing physical USB devices:", e);
+		}
+
+		return list;
+	});
+
 	ipcMain.handle("start-scan", async (event, profileId: string) => {
 		const profiles: any[] = store.get("profiles", []) as any[];
 		const profile = profiles.find((p) => p.id === profileId);

@@ -6,7 +6,7 @@ const common = {
 	bundle: true,
 	platform: "node",
 	sourcemap: true,
-	external: ["electron", "electron-store", "music-metadata"],
+	external: ["electron", "electron-store", "music-metadata", "usb"],
 };
 
 await build({

@@ -334,6 +334,14 @@
 				</div>
 
 				<div>
+					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">接続方法 (Storage Type)</label>
+					<select id="sel-profile-storage-type" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white">
+						<option value="local">ローカルフォルダ</option>
+						<option value="mtp">USB / MTP デバイス (スマートフォンなど)</option>
+					</select>
+				</div>
+
+				<div>
 					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">iTunes Music フォルダ (ReadOnly)</label>
 					<div class="flex space-x-1.5">
 						<input type="text" id="txt-profile-itunes" required placeholder="例: C:\Users\Username\Music\iTunes\iTunes Media\Music" class="flex-1 bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
@@ -341,11 +349,24 @@
 					</div>
 				</div>
 
-				<div>
+				<div id="container-profile-local-dest">
 					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">比較先 Music フォルダ (書き込み対象)</label>
 					<div class="flex space-x-1.5">
-						<input type="text" id="txt-profile-phone" required placeholder="例: M:\Music" class="flex-1 bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
+						<input type="text" id="txt-profile-phone" placeholder="例: M:\Music" class="flex-1 bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
 						<button type="button" id="btn-choose-phone" class="bg-gray-600 hover:bg-gray-550 px-2 rounded text-xxs transition">参照...</button>
+					</div>
+				</div>
+
+				<div id="container-profile-mtp-dest" class="space-y-3.5 hidden">
+					<div>
+						<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">接続するUSB / MTPデバイス</label>
+						<select id="sel-profile-usb-device" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
+							<!-- Populated dynamically -->
+						</select>
+					</div>
+					<div>
+						<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">同期先サブフォルダ (MTP内フォルダー)</label>
+						<input type="text" id="txt-profile-mtp-subpath" placeholder="例: Music" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs" value="Music">
 					</div>
 				</div>
 

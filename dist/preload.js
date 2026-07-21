@@ -12,6 +12,7 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   saveSettings: (settings) => import_electron.ipcRenderer.invoke("save-settings", settings),
   resetCache: () => import_electron.ipcRenderer.invoke("reset-cache"),
   showContextMenu: (params) => import_electron.ipcRenderer.send("show-context-menu", params),
+  getUsbDevices: () => import_electron.ipcRenderer.invoke("get-usb-devices"),
   onContextMenuCommand: (callback) => {
     const listener = (_event, payload) => callback(payload.command, payload.arg);
     import_electron.ipcRenderer.on("context-menu-command", listener);

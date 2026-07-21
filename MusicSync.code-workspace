@@ -10,6 +10,9 @@
 			"**/node_modules": true,
 			"**/cache/**": true,
 			"**/dist/**": true
-		}
+		},
+		"cSpell.words": [
+			"webusb"
+		]
 	}
 }

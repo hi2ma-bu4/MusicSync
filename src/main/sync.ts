@@ -1,66 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { lastScanResults } from "./scanner";
+import { getStorageWrapper } from "./storageWrapper";
 import { SyncOptions } from "./types";
-
-async function cleanEmptyDirsRecursive(dir: string, rootDir: string) {
-	try {
-		const list = await fs.promises.readdir(dir, { withFileTypes: true });
-		for (const item of list) {
-			if (item.isDirectory()) {
-				const sub = path.join(dir, item.name);
-				await cleanEmptyDirsRecursive(sub, rootDir);
-			}
-		}
-
-		if (dir !== rootDir) {
-			const files = await fs.promises.readdir(dir);
-			if (files.length === 0) {
-				await fs.promises.rmdir(dir);
-			}
-		}
-	} catch (e) {
-		console.warn(`Failed to clean empty directories recursively in ${dir}:`, e);
-	}
-}
-
-// Highly resilient file-copy with retries
-async function copyFileWithRetry(source: string, target: string, retries = 3, delayMs = 1000): Promise<void> {
-	for (let i = 0; i < retries; i++) {
-		try {
-			await fs.promises.copyFile(source, target);
-			return;
-		} catch (e: any) {
-			if (i === retries - 1) {
-				throw e;
-			}
-			console.warn(`Copy failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
-			await new Promise((resolve) => setTimeout(resolve, delayMs));
-		}
-	}
-}
-
-// Highly resilient file-move with retries
-async function moveFileWithRetry(source: string, target: string, retries = 3, delayMs = 1000): Promise<void> {
-	for (let i = 0; i < retries; i++) {
-		try {
-			try {
-				await fs.promises.rename(source, target);
-			} catch (e) {
-				console.warn(`Rename failed, falling back to copy/unlink: ${source} -> ${target}`, e);
-				await fs.promises.copyFile(source, target);
-				await fs.promises.unlink(source);
-			}
-			return;
-		} catch (e: any) {
-			if (i === retries - 1) {
-				throw e;
-			}
-			console.warn(`Move failed, retrying (${i + 2}/${retries + 1}) after ${delayMs}ms. Error: ${e.message}`);
-			await new Promise((resolve) => setTimeout(resolve, delayMs));
-		}
-	}
-}
 
 export async function runSync(profile: any, options: SyncOptions, event: Electron.IpcMainInvokeEvent): Promise<{ failedTrackIds: string[] }> {
 	const profileId = profile.id;
@@ -86,10 +28,12 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 		return Math.round((completed / totalOperations) * 100);
 	};
 
+	const storage = getStorageWrapper(profile);
+
 	try {
 		// Connection Check: Ensure phonePath is accessible initially
-		if (!fs.existsSync(profile.phonePath)) {
-			throw new Error(`比較先フォルダ「${profile.phonePath}」にアクセスできません。接続状況を確認してください。`);
+		if (!(await storage.isConnected())) {
+			throw new Error(`比較先「${profile.name}」にアクセスできません。接続状況を確認してください。`);
 		}
 
 		// 1. DELETE OPERATIONS
@@ -97,15 +41,15 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			logAndSend(`比較先側の余分な曲の削除を開始します... (対象: ${deleteTrackIds.length}曲)`, getPct());
 			for (const id of deleteTrackIds) {
 				// Periodically check connection
-				if (!fs.existsSync(profile.phonePath)) {
-					throw new Error(`処理中に比較先との接続が切断されました: ${profile.phonePath}`);
+				if (!(await storage.isConnected())) {
+					throw new Error("処理中に比較先との接続が切断されました。");
 				}
 
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.phoneTrack) {
 					try {
-						if (fs.existsSync(item.phoneTrack.filePath)) {
-							await fs.promises.unlink(item.phoneTrack.filePath);
+						if (await storage.exists(item.phoneTrack.relativePath)) {
+							await storage.deleteFile(item.phoneTrack.relativePath);
 						}
 						logAndSend(`削除成功: ${item.phoneTrack.relativePath}`, getPct());
 					} catch (e: any) {
@@ -122,36 +66,36 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			logAndSend(`比較先側のファイルの配置再整理を開始します... (対象: ${moveTrackIds.length}曲)`, getPct());
 			for (const id of moveTrackIds) {
 				// Periodically check connection
-				if (!fs.existsSync(profile.phonePath)) {
-					throw new Error(`処理中に比較先との接続が切断されました: ${profile.phonePath}`);
+				if (!(await storage.isConnected())) {
+					throw new Error("処理中に比較先との接続が切断されました。");
 				}
 
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.itunesTrack && item.phoneTrack) {
-					const oldPath = item.phoneTrack.filePath;
+					const oldRelative = item.phoneTrack.relativePath;
 					const newRelative = item.itunesTrack.relativePath;
-					const newPath = path.join(profile.phonePath, newRelative);
 
 					try {
-						if (fs.existsSync(oldPath)) {
-							const targetDir = path.dirname(newPath);
-							await fs.promises.mkdir(targetDir, { recursive: true });
+						if (await storage.exists(oldRelative)) {
+							// Move file using storage wrapper
+							await storage.moveFile(oldRelative, newRelative);
 
-							// Move with robust retries
-							await moveFileWithRetry(oldPath, newPath, 3, 1000);
-
-							logAndSend(`移動成功: ${item.phoneTrack.relativePath} -> ${newRelative}`, getPct());
+							logAndSend(`移動成功: ${oldRelative} -> ${newRelative}`, getPct());
 							// Update phone track info in our results
-							item.phoneTrack.filePath = newPath;
+							if (profile.storageType === "mtp") {
+								item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
+							} else {
+								item.phoneTrack.filePath = path.join(profile.phonePath, newRelative);
+							}
 							item.phoneTrack.relativePath = newRelative;
 							item.pathMismatch = false;
 						} else {
-							logAndSend(`警告: 移動元ファイルが存在しません: ${item.phoneTrack.relativePath}`, getPct());
+							logAndSend(`警告: 移動元ファイルが存在しません: ${oldRelative}`, getPct());
 							failedTracksSet.add(id);
 						}
 					} catch (e: any) {
-						console.error(`Failed to move file: ${item.phoneTrack.relativePath}`, e);
-						logAndSend(`移動失敗: ${item.phoneTrack.relativePath} - ${e.message} (リカバリー処理のためスキップします)`, getPct());
+						console.error(`Failed to move file: ${oldRelative}`, e);
+						logAndSend(`移動失敗: ${oldRelative} - ${e.message} (リカバリー処理のためスキップします)`, getPct());
 						failedTracksSet.add(id);
 					}
 				}
@@ -164,23 +108,19 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			logAndSend(`iTunesから比較先への曲のコピーを開始します... (対象: ${copyTrackIds.length}曲)`, getPct());
 			for (const id of copyTrackIds) {
 				// Periodically check connection
-				if (!fs.existsSync(profile.phonePath)) {
-					throw new Error(`処理中に比較先との接続が切断されました: ${profile.phonePath}`);
+				if (!(await storage.isConnected())) {
+					throw new Error("処理中に比較先との接続が切断されました。");
 				}
 
 				const item = scanItems.find((x) => x.id === id);
 				if (item && item.itunesTrack) {
 					const sourcePath = item.itunesTrack.filePath;
 					const relative = item.itunesTrack.relativePath;
-					const targetPath = path.join(profile.phonePath, relative);
 
 					try {
 						if (fs.existsSync(sourcePath)) {
-							const targetDir = path.dirname(targetPath);
-							await fs.promises.mkdir(targetDir, { recursive: true });
-
-							// Copy with robust retries
-							await copyFileWithRetry(sourcePath, targetPath, 3, 1000);
+							// Copy file from local to storage using storage wrapper
+							await storage.copyFileFromLocal(sourcePath, relative);
 
 							logAndSend(`コピー成功: ${relative}`, getPct());
 						} else {
@@ -199,7 +139,7 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 
 		// 4. CLEAN UP EMPTY DIRECTORIES
 		logAndSend("比較先フォルダ内の空フォルダをクリーンアップ中...", getPct());
-		await cleanEmptyDirsRecursive(profile.phonePath, profile.phonePath);
+		await storage.cleanEmptyDirs();
 		logAndSend("空フォルダのクリーンアップが完了しました。", getPct());
 
 		// 5. POST-SYNC INTEGRITY CHECK / FINAL VERIFICATION
@@ -213,19 +153,25 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			const item = scanItems.find((x) => x.id === task.id);
 			if (item && item.itunesTrack) {
 				const relative = item.itunesTrack.relativePath;
-				const targetPath = path.join(profile.phonePath, relative);
 
 				try {
-					if (!fs.existsSync(targetPath)) {
+					if (!(await storage.exists(relative))) {
 						logAndSend(`⚠️ 整合性エラー: 比較先ファイルが存在しません: ${relative}`, getPct());
 						failedCheckCount++;
 						failedTracksSet.add(task.id);
 					} else {
 						const sourceStats = await fs.promises.stat(item.itunesTrack.filePath);
-						const targetStats = await fs.promises.stat(targetPath);
 
-						if (sourceStats.size !== targetStats.size) {
-							logAndSend(`⚠️ 整合性エラー: ファイルサイズ不一致: ${relative} (ソース: ${sourceStats.size}B, 比較先: ${targetStats.size}B)`, getPct());
+						let remotePath = "";
+						if (profile.storageType === "mtp") {
+							remotePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${relative}`;
+						} else {
+							remotePath = path.join(profile.phonePath, relative);
+						}
+						const remoteMeta = await storage.getTrackMetadata(remotePath, relative);
+
+						if (sourceStats.size !== remoteMeta.size) {
+							logAndSend(`⚠️ 整合性エラー: ファイルサイズ不一致: ${relative} (ソース: ${sourceStats.size}B, 比較先: ${remoteMeta.size}B)`, getPct());
 							failedCheckCount++;
 							failedTracksSet.add(task.id);
 						} else {

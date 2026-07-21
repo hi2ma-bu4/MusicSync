@@ -61,6 +61,25 @@ if (!window.api) {
 		showContextMenu: (params: any) => {
 			console.log("Mock showContextMenu:", params);
 		},
+		getUsbDevices: async () => {
+			return [
+				{
+					vendorId: 0x0000,
+					productId: 0x0000,
+					name: "模擬MTPデバイス (Mock MTP Device - デバッグ用)",
+				},
+				{
+					vendorId: 0x04e8,
+					productId: 0x6860,
+					name: "Samsung Galaxy S Series (VID: 0x04e8, PID: 0x6860)",
+				},
+				{
+					vendorId: 0x0f1c,
+					productId: 0x4f1a,
+					name: "Google Pixel Phone (VID: 0x0f1c, PID: 0x4f1a)",
+				},
+			];
+		},
 		onContextMenuCommand: (callback: any) => {
 			return () => {};
 		},

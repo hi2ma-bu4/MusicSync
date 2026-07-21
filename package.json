@@ -8,6 +8,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
+    "postinstall": "patch-package",
     "check-types": "npx tsc --noEmit",
     "build:main": "node dev/build.mjs",
     "build:renderer": "vite build --config vite.config.mjs",
@@ -19,9 +20,11 @@
     "@tailwindcss/vite": "^4.3.3",
     "electron": "^43.1.1",
     "electron-store": "^11.0.2",
+    "is-electron": "^2.2.2",
     "lucide-static": "^1.25.0",
     "music-metadata": "^11.14.0",
-    "tailwindcss": "^4.3.3"
+    "tailwindcss": "^4.3.3",
+    "usb": "^3.0.1"
   },
   "devDependencies": {
     "@chialab/esbuild-plugin-commonjs": "^0.19.1",
@@ -31,7 +34,8 @@
     "vite": "^8.1.5"
   },
   "allowScripts": {
-    "esbuild": true
+    "esbuild": true,
+    "usb": true
   },
   "volta": {
     "node": "24.18.0",

@@ -24,6 +24,23 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	const elBtnChoosePhone = document.getElementById("btn-choose-phone")!;
 	const elBtnProfileCancel = document.getElementById("btn-profile-cancel")!;
 
+	const elSelProfileStorageType = document.getElementById("sel-profile-storage-type") as HTMLSelectElement;
+	const elContainerProfileLocalDest = document.getElementById("container-profile-local-dest")!;
+	const elContainerProfileMtpDest = document.getElementById("container-profile-mtp-dest")!;
+	const elSelProfileUsbDevice = document.getElementById("sel-profile-usb-device") as HTMLSelectElement;
+	const elTxtProfileMtpSubpath = document.getElementById("txt-profile-mtp-subpath") as HTMLInputElement;
+
+	elSelProfileStorageType.addEventListener("change", () => {
+		const val = elSelProfileStorageType.value;
+		if (val === "mtp") {
+			elContainerProfileLocalDest.classList.add("hidden");
+			elContainerProfileMtpDest.classList.remove("hidden");
+		} else {
+			elContainerProfileLocalDest.classList.remove("hidden");
+			elContainerProfileMtpDest.classList.add("hidden");
+		}
+	});
+
 	const elModalSettings = document.getElementById("modal-settings")!;
 	const elColorMissing = document.getElementById("color-missing") as HTMLInputElement;
 	const elColorUpdated = document.getElementById("color-updated") as HTMLInputElement;
@@ -171,11 +188,37 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	elFormProfile.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const id = elTxtProfileId.value || "profile_" + Date.now();
+		const storageType = elSelProfileStorageType.value as "local" | "mtp";
+
+		let usbVendorId = 0;
+		let usbProductId = 0;
+		let mtpSubPath = "";
+		let phonePath = elTxtProfilePhone.value.trim();
+
+		if (storageType === "mtp") {
+			const devVal = elSelProfileUsbDevice.value;
+			if (devVal) {
+				const parts = devVal.split("_");
+				usbVendorId = parseInt(parts[0], 10);
+				usbProductId = parseInt(parts[1], 10);
+			}
+			mtpSubPath = elTxtProfileMtpSubpath.value.trim();
+			if (usbVendorId === 0 && usbProductId === 0) {
+				phonePath = "mock_mtp";
+			} else {
+				phonePath = `mtp://${usbVendorId}/${usbProductId}/${mtpSubPath}`;
+			}
+		}
+
 		const profile = {
 			id,
 			name: elTxtProfileName.value.trim(),
 			itunesPath: elTxtProfileItunes.value.trim(),
-			phonePath: elTxtProfilePhone.value.trim(),
+			phonePath,
+			storageType,
+			usbVendorId,
+			usbProductId,
+			mtpSubPath,
 		};
 
 		state.profiles = await api.saveProfile(profile);
@@ -509,6 +552,34 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			}
 			renderDelimsInputs();
 			renderExceptionsInputs();
+		},
+		async setupProfileFields(profile?: any) {
+			elSelProfileUsbDevice.innerHTML = '<option value="">デバイスをスキャン中...</option>';
+			try {
+				const devices = await api.getUsbDevices();
+				elSelProfileUsbDevice.innerHTML = "";
+				devices.forEach((d) => {
+					const opt = document.createElement("option");
+					opt.value = `${d.vendorId}_${d.productId}`;
+					opt.textContent = d.name;
+					elSelProfileUsbDevice.appendChild(opt);
+				});
+			} catch (e) {
+				elSelProfileUsbDevice.innerHTML = '<option value="0_0">模擬MTPデバイス (Mock MTP Device - デバッグ用)</option>';
+			}
+
+			if (profile) {
+				elSelProfileStorageType.value = profile.storageType || "local";
+				elTxtProfileMtpSubpath.value = profile.mtpSubPath || "Music";
+				if (profile.usbVendorId !== undefined && profile.usbProductId !== undefined) {
+					elSelProfileUsbDevice.value = `${profile.usbVendorId}_${profile.usbProductId}`;
+				}
+			} else {
+				elSelProfileStorageType.value = "local";
+				elTxtProfileMtpSubpath.value = "Music";
+			}
+
+			elSelProfileStorageType.dispatchEvent(new Event("change"));
 		},
 	};
 }
