@@ -54,12 +54,28 @@ export default class Mtp extends EventTarget {
 				await this.device.open();
 				console.log("Opened:", this.device.opened);
 
-				console.log(JSON.stringify(this.device.configuration, null, 4));
+				//console.log(JSON.stringify(this.device.configuration, null, 4));
 
 				await this.device.selectConfiguration(1);
 
 				const iface = this.device.configuration.interfaces[0];
-				await this.device.claimInterface(iface.interfaceNumber);
+				try {
+					await this.device.claimInterface(iface.interfaceNumber);
+				} catch (claimErr: any) {
+					// Check for "failed to open device (error 5)" or busy/access denied errors
+					console.warn(`Initial claimInterface failed: ${claimErr.message}. Attempting device reset to reclaim...`);
+					try {
+						await this.device.reset();
+						console.log("Device reset completed. Re-opening device and reclaiming interface...");
+						await this.device.open();
+						await this.device.selectConfiguration(1);
+						await this.device.claimInterface(iface.interfaceNumber);
+						console.log("Successfully reclaimed interface after device reset.");
+					} catch (resetErr: any) {
+						console.error("Reclaiming interface failed after device reset:", resetErr);
+						throw claimErr; // Throw original claim interface error if reset reclamation failed
+					}
+				}
 
 				const epOut = iface.alternate.endpoints.find((ep: any) => ep.direction === "out");
 				const epIn = iface.alternate.endpoints.find((ep: any) => ep.direction === "in");
@@ -76,8 +92,17 @@ export default class Mtp extends EventTarget {
 			} else {
 				throw new Error("No device available.");
 			}
-		})().catch((error) => {
+		})().catch(async (error) => {
 			console.log("Error during MTP setup:", error);
+			if (this.device) {
+				try {
+					const ifaceNumber = this.usbConfig?.interface?.interfaceNumber ?? 0;
+					await this.device.releaseInterface(ifaceNumber);
+				} catch (e) {}
+				try {
+					await this.device.close();
+				} catch (e) {}
+			}
 			this.dispatchEvent(new Event("error"));
 		});
 	}
@@ -203,13 +228,27 @@ export default class Mtp extends EventTarget {
 				code: CODE.CLOSE_SESSION.value,
 				payload: [1], // session ID
 			};
-			await this.write(this.buildContainerPacket(closeSession));
+			try {
+				await this.write(this.buildContainerPacket(closeSession));
+			} catch (e) {
+				console.log("Error closing MTP session:", e);
+			}
 
-			await this.device.releaseInterface(0);
-			await this.device.close();
+			const ifaceNumber = this.usbConfig?.interface?.interfaceNumber ?? 0;
+			try {
+				await this.device.releaseInterface(ifaceNumber);
+			} catch (e) {
+				console.log("Error releasing interface:", e);
+			}
+
+			try {
+				await this.device.close();
+			} catch (e) {
+				console.log("Error closing device:", e);
+			}
 			console.log("Closed device");
 		} catch (err) {
-			console.log("Error:", err);
+			console.log("Error during close:", err);
 		}
 	}
 

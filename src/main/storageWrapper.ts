@@ -1,8 +1,121 @@
+import { dialog } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { TrackMetadata } from "./types";
 import { findMusicFiles as findLocalMusicFiles, getTrackMetadata as getLocalTrackMetadata } from "./utils";
+
+export const activeMtpWrappers = new Set<MtpStorageWrapper>();
+
+export class MtpUserCancelledError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "MtpUserCancelledError";
+	}
+}
+
+export async function closeAllActiveMtpWrappers(): Promise<void> {
+	console.log(`[StorageWrapper] Closing all ${activeMtpWrappers.size} active MTP wrappers...`);
+	for (const wrapper of activeMtpWrappers) {
+		try {
+			await wrapper.disconnect();
+		} catch (e) {
+			console.error("[StorageWrapper] Error closing MTP wrapper:", e);
+		}
+	}
+	activeMtpWrappers.clear();
+}
+
+async function promptDeviceSelection(currentVendorId: number, currentProductId: number, profileId?: string): Promise<{ vendorId: number; productId: number } | null> {
+	try {
+		const usb = (await import("usb")).default;
+		if (!usb || !usb.usb || typeof usb.usb.getDevices !== "function") {
+			return null;
+		}
+
+		const devices = await usb.usb.getDevices();
+
+		// Check if the current device is still connected to simplify selection
+		const currentDevice = devices.find((d) => d.vendorId === currentVendorId && d.productId === currentProductId);
+		if (currentDevice) {
+			const mName = currentDevice.manufacturerName || "";
+			const pName = currentDevice.productName || "";
+			const displayName = mName || pName ? `${mName} ${pName}`.trim() : `MTP Device (VID: 0x${currentVendorId.toString(16).padStart(4, "0")}, PID: 0x${currentProductId.toString(16).padStart(4, "0")})`;
+
+			const choice = dialog.showMessageBoxSync({
+				type: "question",
+				buttons: ["再試行 (Retry)", "キャンセル (Cancel)"],
+				title: "MTPデバイスの接続再試行",
+				message: `デバイス「${displayName}」への接続に失敗しました。再接続しますか？`,
+				cancelId: 1,
+			});
+
+			if (choice === 0) {
+				return { vendorId: currentVendorId, productId: currentProductId };
+			} else {
+				console.log("[promptDeviceSelection] User selected Cancel in retry dialog.");
+				return null; // User cancelled
+			}
+		}
+
+		const list: { vendorId: number; productId: number; name: string }[] = [];
+		for (const d of devices) {
+			try {
+				const mName = d.manufacturerName || "";
+				const pName = d.productName || "";
+				const displayName = mName || pName ? `${mName} ${pName}`.trim() : `USB Device (VID: 0x${d.vendorId.toString(16).padStart(4, "0")}, PID: 0x${d.productId.toString(16).padStart(4, "0")})`;
+				list.push({
+					vendorId: d.vendorId,
+					productId: d.productId,
+					name: displayName,
+				});
+			} catch (e) {
+				// Ignore
+			}
+		}
+
+		if (list.length === 0) {
+			dialog.showMessageBoxSync({
+				type: "warning",
+				buttons: ["了解"],
+				title: "デバイスが見つかりません",
+				message: "接続可能なUSBデバイスが見つかりませんでした。接続状況を確認してください。",
+			});
+			return null;
+		}
+
+		const buttons = list.map((d) => d.name).concat(["キャンセル"]);
+		const choice = dialog.showMessageBoxSync({
+			type: "question",
+			buttons,
+			title: "MTPデバイスの選択",
+			message: "接続するMTPデバイスを選択してください：",
+			cancelId: buttons.length - 1,
+		});
+
+		if (choice >= 0 && choice < list.length) {
+			const selected = list[choice];
+			if (profileId) {
+				const Store = (await import("electron-store")).default;
+				const store = new Store();
+				const profiles = store.get("profiles", []) as any[];
+				const index = profiles.findIndex((p) => p.id === profileId);
+				if (index > -1) {
+					profiles[index].usbVendorId = selected.vendorId;
+					profiles[index].usbProductId = selected.productId;
+					const subPath = profiles[index].mtpSubPath || "Music";
+					profiles[index].phonePath = `mtp://${selected.vendorId}/${selected.productId}/${subPath}`;
+					store.set("profiles", profiles);
+					console.log(`Saved updated VID/PID for profile ${profileId}: VID: ${selected.vendorId}, PID: ${selected.productId}`);
+				}
+			}
+			return { vendorId: selected.vendorId, productId: selected.productId };
+		}
+	} catch (e) {
+		console.error("Error prompting device selection:", e);
+	}
+	return null;
+}
 
 // Highly resilient file-copy with retries
 async function copyFileWithRetry(source: string, target: string, retries = 3, delayMs = 1000): Promise<void> {
@@ -275,42 +388,100 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 	private mtpInstance: any = null;
 	private deviceObjectHandles: number[] = [];
 	private fileMap: Map<string, number> = new Map(); // relativePath -> objectHandle
+	private profileId?: string;
 
-	constructor(vendorId: number, productId: number, subPath: string) {
+	// Dynamic, adaptive delay parameters
+	private currentDelayMs = 20;
+	private readonly minDelayMs = 5;
+	private readonly maxDelayMs = 200;
+
+	constructor(vendorId: number, productId: number, subPath: string, profileId?: string) {
 		this.vendorId = vendorId;
 		this.productId = productId;
 		this.subPath = subPath || "Music";
+		this.profileId = profileId;
+		activeMtpWrappers.add(this);
 	}
 
-	private async connectMtp(): Promise<any> {
+	async disconnect(): Promise<void> {
+		if (this.mtpInstance) {
+			console.log(`[StorageWrapper] Disconnecting MTP Instance for VID: ${this.vendorId}, PID: ${this.productId}`);
+			try {
+				await this.mtpInstance.close();
+			} catch (e) {
+				console.error("[StorageWrapper] Error closing MTP Instance:", e);
+			} finally {
+				this.mtpInstance = null;
+			}
+		}
+	}
+
+	private async connectMtp(attemptReconnect = false): Promise<any> {
+		if (attemptReconnect) {
+			await this.disconnect();
+		}
 		if (this.mtpInstance) return this.mtpInstance;
 
-		const MtpClass = (await import("../libs/mtp/Mtp")).default;
-		const mtp = new MtpClass(this.vendorId, this.productId);
+		let vId = this.vendorId;
+		let pId = this.productId;
 
-		return new Promise((resolve, reject) => {
-			const onReady = async () => {
-				try {
-					await mtp.openSession();
-					this.mtpInstance = mtp;
-					resolve(mtp);
-				} catch (e) {
-					reject(e);
+		const connectWithSpecificDevice = async (v: number, p: number): Promise<any> => {
+			const MtpClass = (await import("../libs/mtp/Mtp")).default;
+			const mtp = new MtpClass(v, p);
+
+			return new Promise((resolve, reject) => {
+				const onReady = async () => {
+					try {
+						await mtp.openSession();
+						this.mtpInstance = mtp;
+						resolve(mtp);
+					} catch (e) {
+						reject(e);
+					}
+				};
+
+				const onError = (err: any) => {
+					reject(new Error(`MTP connection error: ${err?.message || "Unknown error"}`));
+				};
+
+				mtp.addEventListener("ready", onReady);
+				mtp.addEventListener("error", onError);
+
+				// Safeguard timeout
+				setTimeout(() => {
+					reject(new Error("MTP connection timed out."));
+				}, 10000);
+			});
+		};
+
+		// 1. Attempt initial automatic connection (up to 3 automatic retries if busy/claimed)
+		let lastError: any = null;
+		for (let attempt = 1; attempt <= 3; attempt++) {
+			try {
+				return await connectWithSpecificDevice(vId, pId);
+			} catch (e: any) {
+				lastError = e;
+				console.warn(`[StorageWrapper] Connection attempt ${attempt}/3 failed: ${e.message}`);
+				if (attempt < 3) {
+					await new Promise((r) => setTimeout(r, 1000));
 				}
-			};
+			}
+		}
 
-			const onError = (err: any) => {
-				reject(new Error(`MTP connection error: ${err?.message || "Unknown error"}`));
-			};
-
-			mtp.addEventListener("ready", onReady);
-			mtp.addEventListener("error", onError);
-
-			// Safeguard timeout
-			setTimeout(() => {
-				reject(new Error("MTP connection timed out."));
-			}, 10000);
-		});
+		// 2. Prompt user for retry or alternative device
+		console.error(`[StorageWrapper] All 3 automatic connection attempts failed. Prompting user...`);
+		const selected = await promptDeviceSelection(vId, pId, this.profileId);
+		if (selected) {
+			this.vendorId = selected.vendorId;
+			this.productId = selected.productId;
+			try {
+				return await connectWithSpecificDevice(selected.vendorId, selected.productId);
+			} catch (e: any) {
+				throw new MtpUserCancelledError(`MTP接続に失敗しました。再試行エラー: ${e.message}`);
+			}
+		} else {
+			throw new MtpUserCancelledError(`MTP接続に失敗しました。ユーザーにより選択または再試行がキャンセルされました。`);
+		}
 	}
 
 	async isConnected(): Promise<boolean> {
@@ -327,6 +498,19 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 		return this.fileMap.has(relativePath);
 	}
 
+	private async applyAdaptiveDelay(success: boolean): Promise<void> {
+		if (success) {
+			// Decay delay slightly down to minDelayMs
+			this.currentDelayMs = Math.max(this.minDelayMs, this.currentDelayMs - 2);
+		} else {
+			// Back-off delay on error up to maxDelayMs
+			this.currentDelayMs = Math.min(this.maxDelayMs, this.currentDelayMs + 30);
+		}
+		if (this.currentDelayMs > 0) {
+			await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+		}
+	}
+
 	async findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		const mtp = await this.connectMtp();
 		const handles = await mtp.getObjectHandles();
@@ -337,28 +521,110 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 
 		const validExtensions = new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
 
-		for (const handle of handles) {
-			try {
-				const fileName = await mtp.getFileName(handle);
-				const ext = path.extname(fileName).toLowerCase();
-				if (validExtensions.has(ext)) {
-					// In webmtp, files might be in root or we construct subPaths if supported.
-					// We construct path using fileName and subPath
-					const relativePath = path.join(this.subPath, fileName).replace(/\\/g, "/");
-					this.fileMap.set(relativePath, handle);
-					results.push({
-						filePath: `mtp://${this.vendorId}/${this.productId}/${handle}`,
-						relativePath,
-						size: 1000000, // Default fallback size for remote files if query not supported
-						mtimeMs: Date.now(), // Default fallback mtime for remote files if query not supported
-					});
+		let failureCount = 0;
+		let lastFailedIndex = -1;
+
+		for (let i = 0; i < handles.length; i++) {
+			const handle = handles[i];
+			let success = false;
+			let attempts = 0;
+
+			while (!success && attempts < 3) {
+				attempts++;
+				try {
+					if (this.currentDelayMs > 0) {
+						await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+					}
+
+					const fileName = await mtp.getFileName(handle);
+					const ext = path.extname(fileName).toLowerCase();
+					if (validExtensions.has(ext)) {
+						const relativePath = path.join(this.subPath, fileName).replace(/\\/g, "/");
+						this.fileMap.set(relativePath, handle);
+						results.push({
+							filePath: `mtp://${this.vendorId}/${this.productId}/${handle}`,
+							relativePath,
+							size: 1000000, // Default fallback size
+							mtimeMs: Date.now(), // Default fallback mtime
+						});
+					}
+					success = true;
+					await this.applyAdaptiveDelay(true);
+
+					// If we successfully processed a file, reset consecutive failures at single index
+					if (lastFailedIndex !== i) {
+						failureCount = 0;
+					}
+				} catch (e: any) {
+					if (e instanceof MtpUserCancelledError) {
+						throw e; // Propagate user cancellation immediately
+					}
+					console.warn(`[findMusicFiles] Error for object handle ${handle} (attempt ${attempts}): ${e.message}`);
+					await this.applyAdaptiveDelay(false);
+
+					// Force reconnect if cancelled or USB device issue
+					if (e.message.includes("Cancelled") || e.message.includes("transfer") || e.message.includes("device")) {
+						console.log("[findMusicFiles] Connection problem detected. Reconnecting MTP...");
+						try {
+							await this.connectMtp(true);
+						} catch (reconnectErr) {
+							if (reconnectErr instanceof MtpUserCancelledError) {
+								throw reconnectErr;
+							}
+							console.error("[findMusicFiles] Reconnection failed:", reconnectErr);
+						}
+					}
 				}
-			} catch (e) {
-				console.warn(`Failed to read file info for object handle ${handle}`, e);
+			}
+
+			if (!success) {
+				if (lastFailedIndex === i - 1) {
+					failureCount++;
+				} else {
+					failureCount = 1;
+				}
+				lastFailedIndex = i;
+
+				console.error(`[findMusicFiles] Failed to read file info for object handle ${handle} after 3 attempts. Consecutive failed indices: ${failureCount}`);
+
+				if (failureCount >= 3) {
+					await this.disconnect();
+					throw new Error(`連続して3個のファイルの読み込みに失敗したため、処理を中断します。接続を確認してください。`);
+				}
 			}
 		}
 
 		return results;
+	}
+
+	private async runWithRetryAndReconnect<T>(operation: (mtp: any) => Promise<T>): Promise<T> {
+		let attempts = 0;
+		while (attempts < 3) {
+			attempts++;
+			try {
+				const mtp = await this.connectMtp(attempts > 1);
+				if (this.currentDelayMs > 0) {
+					await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+				}
+				const result = await operation(mtp);
+				await this.applyAdaptiveDelay(true);
+				return result;
+			} catch (e: any) {
+				if (e instanceof MtpUserCancelledError) {
+					throw e; // Intercept and abort immediately on user cancellation
+				}
+				console.error(`[MtpStorageWrapper] Operation failed on attempt ${attempts}/3: ${e.message}`);
+				await this.applyAdaptiveDelay(false);
+
+				if (attempts === 3) {
+					await this.disconnect();
+					throw e;
+				}
+				// Force reconnect on next attempt
+				await this.disconnect();
+			}
+		}
+		throw new Error("MTP operation failed after retries.");
 	}
 
 	async getTrackMetadata(filePath: string, relativePath: string): Promise<TrackMetadata> {
@@ -367,86 +633,84 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 			throw new Error(`File not found on MTP device: ${relativePath}`);
 		}
 
-		const mtp = await this.connectMtp();
-		const fileName = await mtp.getFileName(handle);
+		return this.runWithRetryAndReconnect(async (mtp) => {
+			const fileName = await mtp.getFileName(handle);
 
-		// Speed-oriented solution: Download to a temp file, read metadata, and delete temp file
-		const tempDir = path.join(os.tmpdir(), "musicsync-mtp-temp");
-		if (!fs.existsSync(tempDir)) {
-			fs.mkdirSync(tempDir, { recursive: true });
-		}
-		const tempFilePath = path.join(tempDir, `${handle}_${fileName}`);
-
-		try {
-			const fileData = await mtp.getFile(handle, fileName);
-			await fs.promises.writeFile(tempFilePath, Buffer.from(fileData));
-
-			const meta = await getLocalTrackMetadata(tempFilePath, relativePath);
-			// Override filePath to refer to mtp protocol
-			meta.filePath = filePath;
-			return meta;
-		} finally {
-			if (fs.existsSync(tempFilePath)) {
-				try {
-					await fs.promises.unlink(tempFilePath);
-				} catch (e) {}
+			// Download to a temp file, read metadata, and delete temp file
+			const tempDir = path.join(os.tmpdir(), "musicsync-mtp-temp");
+			if (!fs.existsSync(tempDir)) {
+				fs.mkdirSync(tempDir, { recursive: true });
 			}
-		}
+			const tempFilePath = path.join(tempDir, `${handle}_${fileName}`);
+
+			try {
+				const fileData = await mtp.getFile(handle, fileName);
+				await fs.promises.writeFile(tempFilePath, Buffer.from(fileData));
+
+				const meta = await getLocalTrackMetadata(tempFilePath, relativePath);
+				meta.filePath = filePath;
+				return meta;
+			} finally {
+				if (fs.existsSync(tempFilePath)) {
+					try {
+						await fs.promises.unlink(tempFilePath);
+					} catch (e) {}
+				}
+			}
+		});
 	}
 
 	async copyFileFromLocal(localSrc: string, remoteDestRelativePath: string): Promise<void> {
-		const mtp = await this.connectMtp();
 		const fileData = await fs.promises.readFile(localSrc);
 		const fileName = path.basename(remoteDestRelativePath);
 
-		// WebMTP has built-in limitations around direct custom uploading,
-		// but standard protocol-level fallback is using sendObject/sendObjectInfo if available,
-		// or writing to transferOut if mtp class supports it.
-		// Since delay in speed is acceptable ("速度の遅延は許容し、動く事が重要です"),
-		// we emulate/call the upload protocol transaction.
-		if (typeof (mtp as any).sendFile === "function") {
-			await (mtp as any).sendFile(fileData, fileName);
-		} else {
-			// fallback/simulated MTP transfer using standard USB transport packets
-			console.log(`Writing file ${fileName} to MTP device via bulk transfer packets...`);
-			// Standard MTP SendObject operation (0x100D)
-			const sendObjectCmd = {
-				type: 1, // Command Block
-				code: 0x100d, // SendObject
-				payload: [] as number[],
-			};
-			const container = mtp.buildContainerPacket(sendObjectCmd);
-			await mtp.write(container);
-			await mtp.write(fileData.buffer);
-			const response = await mtp.read();
-			console.log("SendObject MTP response:", response);
-		}
+		await this.runWithRetryAndReconnect(async (mtp) => {
+			if (typeof (mtp as any).sendFile === "function") {
+				await (mtp as any).sendFile(fileData, fileName);
+			} else {
+				console.log(`Writing file ${fileName} to MTP device via bulk transfer packets...`);
+				const sendObjectCmd = {
+					type: 1, // Command Block
+					code: 0x100d, // SendObject
+					payload: [] as number[],
+				};
+				const container = mtp.buildContainerPacket(sendObjectCmd);
+				await mtp.write(container);
+				await mtp.write(fileData.buffer);
+				const response = await mtp.read();
+				console.log("SendObject MTP response:", response);
+			}
+		});
 	}
 
 	async moveFile(oldRelativePath: string, newRelativePath: string): Promise<void> {
-		// MTP renaming can be performed via SendObjectPropValue (0x9803) or object update.
-		// Since webmtp has "Renaming files not supported" as a known limitation,
-		// we perform copy-then-delete as a safe, highly-compatible fallback to reorganize files.
 		const handle = this.fileMap.get(oldRelativePath);
 		if (handle === undefined) return;
 
-		const mtp = await this.connectMtp();
-		const fileName = await mtp.getFileName(handle);
-		const fileData = await mtp.getFile(handle, fileName);
+		const fileData = await this.runWithRetryAndReconnect(async (mtp) => {
+			const fileName = await mtp.getFileName(handle);
+			return await mtp.getFile(handle, fileName);
+		});
 
-		// 1. Send / Upload to new location
-		if (typeof (mtp as any).sendFile === "function") {
-			await (mtp as any).sendFile(fileData, path.basename(newRelativePath));
-		} else {
-			const sendObjectCmd = {
-				type: 1,
-				code: 0x100d,
-				payload: [] as number[],
-			};
-			await mtp.write(mtp.buildContainerPacket(sendObjectCmd));
-			await mtp.write(fileData.buffer);
-			await mtp.read();
-		}
+		// 1. Send / Upload file buffer to new location inside MTP device
+		const fileName = path.basename(newRelativePath);
+		await this.runWithRetryAndReconnect(async (mtp) => {
+			if (typeof (mtp as any).sendFile === "function") {
+				await (mtp as any).sendFile(fileData, fileName);
+			} else {
+				console.log(`Writing moved file ${fileName} to MTP device via bulk transfer packets...`);
+				const sendObjectCmd = {
+					type: 1,
+					code: 0x100d,
+					payload: [] as number[],
+				};
+				const container = mtp.buildContainerPacket(sendObjectCmd);
+				await mtp.write(container);
+				await mtp.write(fileData.buffer);
+				const response = await mtp.read();
+				console.log("SendObject (moved) MTP response:", response);
+			}
+		});
 
 		// 2. Delete old file
 		await this.deleteFile(oldRelativePath);
@@ -456,16 +720,17 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 		const handle = this.fileMap.get(relativePath);
 		if (handle === undefined) return;
 
-		const mtp = await this.connectMtp();
-		// MTP DeleteObject operation code: 0x100B
-		const deleteObjectCmd = {
-			type: 1, // Command Block
-			code: 0x100b, // DeleteObject
-			payload: [handle],
-		};
-		await mtp.write(mtp.buildContainerPacket(deleteObjectCmd));
-		const response = await mtp.read();
-		console.log("DeleteObject response:", response);
+		await this.runWithRetryAndReconnect(async (mtp) => {
+			const deleteObjectCmd = {
+				type: 1,
+				code: 0x100b, // DeleteObject
+				payload: [handle],
+			};
+			await mtp.write(mtp.buildContainerPacket(deleteObjectCmd));
+			const response = await mtp.read();
+			console.log("DeleteObject response:", response);
+		});
+
 		this.fileMap.delete(relativePath);
 	}
 
@@ -493,7 +758,7 @@ export function getStorageWrapper(profile: any): TargetStorageWrapper {
 		const vendorId = parseInt(profile.usbVendorId, 10) || 0;
 		const productId = parseInt(profile.usbProductId, 10) || 0;
 		console.log(`[StorageWrapper] Initializing physical MTP Wrapper for Device (VID: ${vendorId}, PID: ${productId})...`);
-		return new MtpStorageWrapper(vendorId, productId, profile.mtpSubPath);
+		return new MtpStorageWrapper(vendorId, productId, profile.mtpSubPath, profile.id);
 	}
 
 	console.log(`[StorageWrapper] Initializing Local File Storage Wrapper for Path: ${profile.phonePath}`);

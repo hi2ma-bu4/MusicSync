@@ -15,6 +15,20 @@ protocol.registerSchemesAsPrivileged([
 	},
 ]);
 
+import { closeAllActiveMtpWrappers } from "./main/storageWrapper";
+
+app.on("before-quit", (event) => {
+	console.log("[App] before-quit triggered. Cleaning up MTP wrappers...");
+	event.preventDefault();
+	closeAllActiveMtpWrappers()
+		.catch((err) => {
+			console.error("[App] Error cleaning up MTP wrappers on exit:", err);
+		})
+		.finally(() => {
+			app.exit();
+		});
+});
+
 app.whenReady().then(() => {
 	registerIpcHandlers();
 	createWindow();

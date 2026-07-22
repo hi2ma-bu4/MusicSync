@@ -357,7 +357,9 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		if (bestMatch) {
 			matchedPhoneIds.add(bestMatch.id);
 
-			const pathMismatch = I.relativePath !== bestMatch.relativePath;
+			// In MTP mode, files are stored flat or directly matching.
+			// Path mismatch checks are disabled/set to false to prevent endless reorganizations.
+			const pathMismatch = profile.storageType === "mtp" ? false : I.relativePath !== bestMatch.relativePath;
 
 			// Determine if metadata changed (any mismatching field out of the 4, or cover art difference)
 			let metadataMismatch = false;
