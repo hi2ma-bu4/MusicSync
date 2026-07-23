@@ -1203,7 +1203,7 @@ async function runPowerShellWithParams(scriptText, params) {
 				# 1. Try to find if the folder already exists
 				$items = $current.GetFolder.Items()
 				foreach ($item in $items) {
-					if ($item.GetFolder -and $item.Name -eq $seg) {
+					if ($item.IsFolder -and $item.Name -eq $seg) {
 						$found = $item
 						break
 					}
@@ -1215,7 +1215,7 @@ async function runPowerShellWithParams(scriptText, params) {
 						$volFolder = $vol.GetFolder
 						if ($volFolder) {
 							foreach ($subItem in $volFolder.Items()) {
-								if ($subItem.GetFolder -and $subItem.Name -eq $seg) {
+								if ($subItem.IsFolder -and $subItem.Name -eq $seg) {
 									$found = $subItem
 									break
 								}
@@ -1229,7 +1229,7 @@ async function runPowerShellWithParams(scriptText, params) {
 				if ($found -eq $null) {
 					$targetFolderToCreateIn = $current.GetFolder
 					if ($isTop) {
-						$primaryVol = $items | Where-Object { $_.GetFolder -ne $null } | Select-Object -First 1
+						$primaryVol = $items | Where-Object { $_.IsFolder } | Select-Object -First 1
 						if ($primaryVol) {
 							$targetFolderToCreateIn = $primaryVol.GetFolder
 						}
@@ -1241,7 +1241,7 @@ async function runPowerShellWithParams(scriptText, params) {
 						for ($try = 0; $try -lt 30; $try++) {
 							# Re-query items
 							foreach ($item in $targetFolderToCreateIn.Items()) {
-								if ($item.GetFolder -and $item.Name -eq $seg) {
+								if ($item.IsFolder -and $item.Name -eq $seg) {
 									$found = $item
 									break
 								}
@@ -1306,7 +1306,10 @@ var PowerShellMtpStorageWrapper = class {
     try {
       const script = `
 				$shell = New-Object -ComObject Shell.Application
-				$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName }
+				$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+				if (-not $phone) {
+					$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+				}
 				if ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }
 			`;
       const res = await runPowerShellWithParams(script, { deviceName: this.deviceName });
@@ -1360,8 +1363,7 @@ var PowerShellMtpStorageWrapper = class {
 					$name = $item.Name
 					$subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
 					
-					$subFolder = $item.GetFolder
-					if ($subFolder) {
+					if ($item.IsFolder) {
 						Scan-Folder $item $subRelPath
 					} else {
 						$ext = ""
@@ -1369,14 +1371,36 @@ var PowerShellMtpStorageWrapper = class {
 							$ext = "." + $Matches[1].ToLower()
 						}
 						if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
-							$size = $item.Size
+							# Retrieve size and modification date using GetDetailsOf as direct properties are empty/0
+							$sizeStr = $folder.GetDetailsOf($item, 2)
+							$size = 0
+							if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+								$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+								$unit = $Matches[2]
+								if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+								elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+								elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+								else { $size = [int64]$val }
+							} else {
+								$size = $item.Size
+							}
+
 							$mtimeMs = 0
-							if ($item.ModifyDate) {
+							$dateStr = $folder.GetDetailsOf($item, 3)
+							if ($dateStr) {
+								try {
+									$date = Get-Date $dateStr
+									$mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+								} catch {
+									Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
+								}
+							}
+							if ($mtimeMs -eq 0 -and $item.ModifyDate) {
 								try {
 									$date = Get-Date $item.ModifyDate
 									$mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
 								} catch {
-									Write-Warning "Failed to parse date for $name : $_"
+									Write-Warning "Failed to parse direct ModifyDate for $name : $_"
 								}
 							}
 							[PSCustomObject]@{
@@ -1393,26 +1417,45 @@ var PowerShellMtpStorageWrapper = class {
 			if ($results -eq $null) {
 				Write-Output "[]"
 			} else {
-				,@($results) | ConvertTo-Json -Compress
+				$arr = @($results)
+				if ($arr.Count -eq 1) {
+					"[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
+				} else {
+					$arr | ConvertTo-Json -Compress
+				}
 			}
 		`;
     try {
       const resStr = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath });
       const parsed = JSON.parse(resStr.trim() || "[]");
-      const rawList = Array.isArray(parsed) ? parsed : [parsed];
+      let rawList = [];
+      if (Array.isArray(parsed)) {
+        rawList = parsed;
+      } else if (parsed && parsed.value !== void 0 && Array.isArray(parsed.value)) {
+        rawList = parsed.value;
+      } else if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+        if (parsed.relativePath !== void 0) {
+          rawList = [parsed];
+        }
+      }
       this.fileMap.clear();
-      return rawList.map((item) => {
+      const results = [];
+      for (const item of rawList) {
+        if (!item || !item.relativePath) {
+          continue;
+        }
         const relativePath = `${this.subPath}/${item.relativePath}`.replace(/\\/g, "/");
         const size = parseInt(item.size, 10) || 0;
         const mtimeMs = parseInt(item.mtimeMs, 10) || Date.now();
         this.fileMap.set(relativePath, { size, mtimeMs });
-        return {
+        results.push({
           filePath: `mtp_powershell://${encodeURIComponent(this.deviceName)}/${relativePath}`,
           relativePath,
           size,
           mtimeMs
-        };
-      });
+        });
+      }
+      return results;
     } catch (e) {
       console.error("[PowerShellMtp] findMusicFiles error:", e);
       throw e;
@@ -1422,16 +1465,18 @@ var PowerShellMtpStorageWrapper = class {
     if (process.platform !== "win32") {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
-    const tempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp");
-    if (!fs2.existsSync(tempDir)) {
-      fs2.mkdirSync(tempDir, { recursive: true });
+    const randSuffix = Math.random().toString(36).substring(2, 10);
+    const trackTempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp", randSuffix);
+    if (!fs2.existsSync(trackTempDir)) {
+      fs2.mkdirSync(trackTempDir, { recursive: true });
     }
-    const randomName = `${Math.random().toString(36).substring(2, 10)}_${path2.basename(relativePath)}`;
-    const tempFilePath = path2.join(tempDir, randomName);
     const relPathInsideSub = this.getRelPathInsideSub(relativePath);
     const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
 			if (-not $phoneItem) { exit 1 }
 
 			$fullPath = "$subPath/$relativePath"
@@ -1441,14 +1486,16 @@ var PowerShellMtpStorageWrapper = class {
 				exit 1
 			}
 
-			$localDir = [System.IO.Path]::GetDirectoryName($tempFilePath)
-			$localFolder = $shell.NameSpace($localDir)
-			$localFolder.CopyHere($fileItem, 16)
+			$localFolder = $shell.NameSpace($tempFilePath)
+			# 16: Respond with "Yes to All" to any dialogs, 1024: Disable dialog UI completely
+			$localFolder.CopyHere($fileItem, 16 + 1024)
 
-			$tempCreatedFile = [System.IO.Path]::Combine($localDir, $fileItem.Name)
+			$tempCreatedFile = [System.IO.Path]::Combine($tempFilePath, $fileItem.Name)
 			$success = $false
 			for ($i = 0; $i -lt 100; $i++) {
-				if (Test-Path $tempCreatedFile) {
+				if (Test-Path -LiteralPath $tempCreatedFile) {
+					# Short delay to ensure Windows is done writing to disk
+					Start-Sleep -Milliseconds 150
 					$success = $true
 					break
 				}
@@ -1456,9 +1503,6 @@ var PowerShellMtpStorageWrapper = class {
 			}
 
 			if ($success) {
-				if ($tempCreatedFile -ne $tempFilePath) {
-					Rename-Item -Path $tempCreatedFile -NewName [System.IO.Path]::GetFileName($tempFilePath) -Force
-				}
 				"SUCCESS"
 			} else {
 				"FAILED"
@@ -1469,20 +1513,30 @@ var PowerShellMtpStorageWrapper = class {
         deviceName: this.deviceName,
         subPath: this.subPath,
         relativePath: relPathInsideSub,
-        tempFilePath
+        tempFilePath: trackTempDir
       });
       if (res.trim() !== "SUCCESS") {
         throw new Error(`Failed to download file from MTP for metadata parsing: ${relativePath}`);
       }
-      const meta = await getTrackMetadata(tempFilePath, relativePath);
+      const filesInTemp = await fs2.promises.readdir(trackTempDir);
+      if (filesInTemp.length === 0) {
+        throw new Error(`Temp folder is empty. File was not downloaded: ${relativePath}`);
+      }
+      const downloadedFileName = filesInTemp[0];
+      const actualDownloadedFilePath = path2.join(trackTempDir, downloadedFileName);
+      const meta = await getTrackMetadata(actualDownloadedFilePath, relativePath);
       meta.filePath = filePath;
       return meta;
     } finally {
-      if (fs2.existsSync(tempFilePath)) {
+      if (fs2.existsSync(trackTempDir)) {
         try {
-          await fs2.promises.unlink(tempFilePath);
+          const files = await fs2.promises.readdir(trackTempDir);
+          for (const file of files) {
+            await fs2.promises.unlink(path2.join(trackTempDir, file));
+          }
+          await fs2.promises.rmdir(trackTempDir);
         } catch (e) {
-          console.error("[PowerShellMtp] Failed to delete temp file:", e);
+          console.error("[PowerShellMtp] Failed to delete trackTempDir:", e);
         }
       }
     }
@@ -1497,6 +1551,9 @@ var PowerShellMtpStorageWrapper = class {
     const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
 			if (-not $phoneItem) { throw "Phone not found" }
 
 			$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }
@@ -1514,6 +1571,9 @@ var PowerShellMtpStorageWrapper = class {
 			# Poll with refreshing and re-querying the target folder
 			for ($i = 0; $i -lt 50; $i++) {
 				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+				if (-not $phoneItem) {
+					$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+				}
 				$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
 				
 				if ($destFolderItem) {
@@ -1551,6 +1611,9 @@ var PowerShellMtpStorageWrapper = class {
     const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
 			if (-not $phoneItem) { throw "Phone not found" }
 
 			$fullOldPath = "$subPath/$relativePath"
@@ -1596,6 +1659,9 @@ var PowerShellMtpStorageWrapper = class {
     const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
 			if (-not $phoneItem) { exit 0 }
 
 			$fullPath = "$subPath/$relativePath"
@@ -1608,11 +1674,11 @@ var PowerShellMtpStorageWrapper = class {
 				$tempFolder.MoveHere($fileItem, 16 + 1024)
 
 				for ($i = 0; $i -lt 50; $i++) {
-					if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
+					if ((Get-ChildItem -LiteralPath $tempDir).Count -gt 0) { break }
 					Start-Sleep -Milliseconds 100
 				}
 
-				Remove-Item $tempDir -Recurse -Force
+				Remove-Item -LiteralPath $tempDir -Recurse -Force
 			}
 			"SUCCESS"
 		`;
@@ -1630,6 +1696,9 @@ var PowerShellMtpStorageWrapper = class {
     const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
 			if (-not $phoneItem) { exit 0 }
 
 			$targetRootItem = Get-MtpFolderItem $phoneItem $subPath
