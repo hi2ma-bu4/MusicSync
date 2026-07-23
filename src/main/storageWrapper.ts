@@ -157,7 +157,7 @@ async function moveFileWithRetry(source: string, target: string, retries = 3, de
 
 export interface TargetStorageWrapper {
 	exists(relativePath: string): Promise<boolean>;
-	findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]>;
+	findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]>;
 	getTrackMetadata(filePath: string, relativePath: string): Promise<TrackMetadata>;
 	copyFileFromLocal(localSrc: string, remoteDestRelativePath: string): Promise<void>;
 	moveFile(oldRelativePath: string, newRelativePath: string): Promise<void>;
@@ -185,7 +185,7 @@ export class LocalStorageWrapper implements TargetStorageWrapper {
 		return fs.existsSync(targetPath);
 	}
 
-	async findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		return findLocalMusicFiles(this.phonePath, this.phonePath);
 	}
 
@@ -288,7 +288,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 		return this.mockFiles.has(relativePath);
 	}
 
-	async findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		const results: { filePath: string; relativePath: string; size?: number; mtimeMs?: number }[] = [];
 		for (const [key, val] of this.mockFiles.entries()) {
 			results.push({
@@ -511,7 +511,7 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 		}
 	}
 
-	async findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		const mtp = await this.connectMtp();
 		const handles = await mtp.getObjectHandles();
 		this.deviceObjectHandles = handles;
@@ -528,6 +528,10 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 			const handle = handles[i];
 			let success = false;
 			let attempts = 0;
+
+			if (onProgress && i % 50 === 0) {
+				onProgress(`比較先ファイルをスキャン中... (${i}/${handles.length})`);
+			}
 
 			while (!success && attempts < 3) {
 				attempts++;
@@ -746,7 +750,7 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 // ============================================================================
 
 // Helper function to run PowerShell scripts with Base64 JSON parameters
-async function runPowerShellWithParams(scriptText: string, params: any): Promise<string> {
+async function runPowerShellWithParams(scriptText: string, params: any, onProgressLine?: (line: string) => void): Promise<string> {
 	if (process.platform !== "win32") {
 		return "[]";
 	}
@@ -885,22 +889,51 @@ async function runPowerShellWithParams(scriptText: string, params: any): Promise
 
 		${scriptText}
 	`;
-	return runPowerShellCommand(fullScript);
+	return runPowerShellCommand(fullScript, onProgressLine);
 }
 
 // Helper function to run PowerShell scripts encoded in Base64
-async function runPowerShellCommand(scriptText: string): Promise<string> {
+async function runPowerShellCommand(scriptText: string, onProgressLine?: (line: string) => void): Promise<string> {
 	if (process.platform !== "win32") {
 		return "[]";
 	}
-	const { execFile: execFilePromise } = await import("node:child_process");
+	const { spawn } = await import("node:child_process");
 	return new Promise<string>((resolve, reject) => {
 		const buffer = Buffer.from(scriptText, "utf16le");
 		const base64 = buffer.toString("base64");
-		execFilePromise("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64], { maxBuffer: 50 * 1024 * 1024, encoding: "utf8" }, (error, stdout, stderr) => {
-			if (error) {
-				console.error("[PowerShellMtp] Error:", stderr || error.message);
-				reject(new Error(stderr || error.message));
+
+		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64]);
+
+		let stdout = "";
+		let stderr = "";
+
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+
+		let bufferLine = "";
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+			bufferLine += chunk;
+			const lines = bufferLine.split(/\r?\n/);
+			bufferLine = lines.pop() || "";
+			for (const line of lines) {
+				if (onProgressLine) {
+					onProgressLine(line);
+				}
+			}
+		});
+
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+
+		child.on("close", (code) => {
+			if (bufferLine && onProgressLine) {
+				onProgressLine(bufferLine);
+			}
+			if (code !== 0) {
+				console.error("[PowerShellMtp] Error:", stderr);
+				reject(new Error(stderr));
 			} else {
 				resolve(stdout);
 			}
@@ -960,16 +993,20 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 		return this.fileMap.has(fullRel);
 	}
 
-	async findMusicFiles(): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		if (process.platform !== "win32") {
 			throw new Error("PowerShell MTP is only supported on Windows.");
 		}
 
+		// Since running full PowerShell commands sequentially for progress updates is extremely slow,
+		// we print stdout progress lines from PowerShell during its execution so the Node side gets real-time updates!
 		const script = `
 			$shell = New-Object -ComObject Shell.Application
 			$drives = $shell.NameSpace(17)
 			if (-not $drives) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
@@ -979,17 +1016,22 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 			}
 
 			if (-not $phoneItem) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
 			$targetItem = Get-MtpFolderItem $phoneItem $subPath
 			if (-not $targetItem) {
 				[Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
+			$global:scannedCount = 0
 			function Scan-Folder($folderItem, $relPath) {
 				$folder = $folderItem.GetFolder
 				if (-not $folder) { return }
@@ -1001,10 +1043,14 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 						Scan-Folder $item $subRelPath
 					} else {
 						$ext = ""
-						if ($name -match '\.([a-zA-Z0-9]+)$') {
+						if ($name -match '\\.([a-zA-Z0-9]+)$') {
 							$ext = "." + $Matches[1].ToLower()
 						}
 						if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
+							$global:scannedCount++
+							if ($global:scannedCount % 5 -eq 0) {
+								Write-Output "PROGRESS_UPDATE:比較先ファイルをスキャン中... (\${global:scannedCount}曲)"
+							}
 							# Retrieve size and modification date using GetDetailsOf as direct properties are empty/0
 							$sizeStr = $folder.GetDetailsOf($item, 2)
 							$size = 0
@@ -1049,20 +1095,42 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 
 			$results = Scan-Folder $targetItem ""
 			if ($results -eq $null) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 			} else {
+				Write-Output "JSON_RESULTS_START"
 				$arr = @($results)
 				if ($arr.Count -eq 1) {
 					"[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
 				} else {
 					$arr | ConvertTo-Json -Compress
 				}
+				Write-Output "JSON_RESULTS_END"
 			}
 		`;
 
 		try {
-			const resStr = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath });
-			const parsed = JSON.parse(resStr.trim() || "[]");
+			const progressHandler = (line: string) => {
+				const trimmed = line.trim();
+				if (trimmed.startsWith("PROGRESS_UPDATE:") && onProgress) {
+					onProgress(trimmed.substring("PROGRESS_UPDATE:".length));
+				}
+			};
+
+			const rawStdout = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
+
+			// Extract the JSON results between custom tags
+			let jsonPart = "[]";
+			const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+			const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+			if (startIndex !== -1 && endIndex !== -1) {
+				jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+			} else {
+				jsonPart = rawStdout.trim();
+			}
+
+			const parsed = JSON.parse(jsonPart || "[]");
 
 			let rawList: any[] = [];
 			if (Array.isArray(parsed)) {
@@ -1337,11 +1405,11 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 				$tempFolder.MoveHere($fileItem, 16 + 1024)
 
 				for ($i = 0; $i -lt 50; $i++) {
-					if ((Get-ChildItem -LiteralPath $tempDir).Count -gt 0) { break }
+					if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
 					Start-Sleep -Milliseconds 100
 				}
 
-				Remove-Item -LiteralPath $tempDir -Recurse -Force
+				Remove-Item $tempDir -Recurse -Force
 			}
 			"SUCCESS"
 		`;

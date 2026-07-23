@@ -83,7 +83,9 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	const itunesFiles = await findMusicFiles(profile.itunesPath);
 
 	sendProgress("phone_list", "比較先フォルダ内のファイルを検索中...", 15);
-	const phoneFiles = await storage.findMusicFiles();
+	const phoneFiles = await storage.findMusicFiles((msg) => {
+		sendProgress("phone_list", msg, 15);
+	});
 
 	// Load caches
 	const itunesCache = loadCache(profileId, "itunes");

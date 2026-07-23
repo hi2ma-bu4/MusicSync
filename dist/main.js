@@ -646,7 +646,7 @@ var LocalStorageWrapper = class {
     const targetPath = path2.join(this.phonePath, relativePath);
     return fs2.existsSync(targetPath);
   }
-  async findMusicFiles() {
+  async findMusicFiles(onProgress) {
     return findMusicFiles(this.phonePath, this.phonePath);
   }
   async getTrackMetadata(filePath, relativePath) {
@@ -734,7 +734,7 @@ var MockMtpStorageWrapper = class {
   async exists(relativePath) {
     return this.mockFiles.has(relativePath);
   }
-  async findMusicFiles() {
+  async findMusicFiles(onProgress) {
     const results = [];
     for (const [key, val] of this.mockFiles.entries()) {
       results.push({
@@ -926,7 +926,7 @@ var MtpStorageWrapper = class {
       await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
     }
   }
-  async findMusicFiles() {
+  async findMusicFiles(onProgress) {
     const mtp = await this.connectMtp();
     const handles = await mtp.getObjectHandles();
     this.deviceObjectHandles = handles;
@@ -939,6 +939,9 @@ var MtpStorageWrapper = class {
       const handle = handles[i];
       let success = false;
       let attempts = 0;
+      if (onProgress && i % 50 === 0) {
+        onProgress(`\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (${i}/${handles.length})`);
+      }
       while (!success && attempts < 3) {
         attempts++;
         try {
@@ -1124,7 +1127,7 @@ var MtpStorageWrapper = class {
   async cleanEmptyDirs() {
   }
 };
-async function runPowerShellWithParams(scriptText, params) {
+async function runPowerShellWithParams(scriptText, params, onProgressLine) {
   if (process.platform !== "win32") {
     return "[]";
   }
@@ -1263,20 +1266,43 @@ async function runPowerShellWithParams(scriptText, params) {
 
 		${scriptText}
 	`;
-  return runPowerShellCommand(fullScript);
+  return runPowerShellCommand(fullScript, onProgressLine);
 }
-async function runPowerShellCommand(scriptText) {
+async function runPowerShellCommand(scriptText, onProgressLine) {
   if (process.platform !== "win32") {
     return "[]";
   }
-  const { execFile: execFilePromise } = await import("node:child_process");
+  const { spawn } = await import("node:child_process");
   return new Promise((resolve, reject) => {
     const buffer = Buffer.from(scriptText, "utf16le");
     const base64 = buffer.toString("base64");
-    execFilePromise("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64], { maxBuffer: 50 * 1024 * 1024, encoding: "utf8" }, (error, stdout, stderr) => {
-      if (error) {
-        console.error("[PowerShellMtp] Error:", stderr || error.message);
-        reject(new Error(stderr || error.message));
+    const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64]);
+    let stdout = "";
+    let stderr = "";
+    child.stdout.setEncoding("utf8");
+    child.stderr.setEncoding("utf8");
+    let bufferLine = "";
+    child.stdout.on("data", (chunk) => {
+      stdout += chunk;
+      bufferLine += chunk;
+      const lines = bufferLine.split(/\r?\n/);
+      bufferLine = lines.pop() || "";
+      for (const line of lines) {
+        if (onProgressLine) {
+          onProgressLine(line);
+        }
+      }
+    });
+    child.stderr.on("data", (chunk) => {
+      stderr += chunk;
+    });
+    child.on("close", (code) => {
+      if (bufferLine && onProgressLine) {
+        onProgressLine(bufferLine);
+      }
+      if (code !== 0) {
+        console.error("[PowerShellMtp] Error:", stderr);
+        reject(new Error(stderr));
       } else {
         resolve(stdout);
       }
@@ -1327,7 +1353,7 @@ var PowerShellMtpStorageWrapper = class {
     const fullRel = `${this.subPath}/${rel}`.replace(/\\/g, "/");
     return this.fileMap.has(fullRel);
   }
-  async findMusicFiles() {
+  async findMusicFiles(onProgress) {
     if (process.platform !== "win32") {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
@@ -1335,7 +1361,9 @@ var PowerShellMtpStorageWrapper = class {
 			$shell = New-Object -ComObject Shell.Application
 			$drives = $shell.NameSpace(17)
 			if (-not $drives) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
@@ -1345,17 +1373,22 @@ var PowerShellMtpStorageWrapper = class {
 			}
 
 			if (-not $phoneItem) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
 			$targetItem = Get-MtpFolderItem $phoneItem $subPath
 			if (-not $targetItem) {
 				[Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 				exit 0
 			}
 
+			$global:scannedCount = 0
 			function Scan-Folder($folderItem, $relPath) {
 				$folder = $folderItem.GetFolder
 				if (-not $folder) { return }
@@ -1367,10 +1400,14 @@ var PowerShellMtpStorageWrapper = class {
 						Scan-Folder $item $subRelPath
 					} else {
 						$ext = ""
-						if ($name -match '.([a-zA-Z0-9]+)$') {
+						if ($name -match '\\.([a-zA-Z0-9]+)$') {
 							$ext = "." + $Matches[1].ToLower()
 						}
 						if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
+							$global:scannedCount++
+							if ($global:scannedCount % 5 -eq 0) {
+								Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
+							}
 							# Retrieve size and modification date using GetDetailsOf as direct properties are empty/0
 							$sizeStr = $folder.GetDetailsOf($item, 2)
 							$size = 0
@@ -1415,19 +1452,37 @@ var PowerShellMtpStorageWrapper = class {
 
 			$results = Scan-Folder $targetItem ""
 			if ($results -eq $null) {
+				Write-Output "JSON_RESULTS_START"
 				Write-Output "[]"
+				Write-Output "JSON_RESULTS_END"
 			} else {
+				Write-Output "JSON_RESULTS_START"
 				$arr = @($results)
 				if ($arr.Count -eq 1) {
 					"[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
 				} else {
 					$arr | ConvertTo-Json -Compress
 				}
+				Write-Output "JSON_RESULTS_END"
 			}
 		`;
     try {
-      const resStr = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath });
-      const parsed = JSON.parse(resStr.trim() || "[]");
+      const progressHandler = (line) => {
+        const trimmed = line.trim();
+        if (trimmed.startsWith("PROGRESS_UPDATE:") && onProgress) {
+          onProgress(trimmed.substring("PROGRESS_UPDATE:".length));
+        }
+      };
+      const rawStdout = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
+      let jsonPart = "[]";
+      const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+      const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+      if (startIndex !== -1 && endIndex !== -1) {
+        jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+      } else {
+        jsonPart = rawStdout.trim();
+      }
+      const parsed = JSON.parse(jsonPart || "[]");
       let rawList = [];
       if (Array.isArray(parsed)) {
         rawList = parsed;
@@ -1674,11 +1729,11 @@ var PowerShellMtpStorageWrapper = class {
 				$tempFolder.MoveHere($fileItem, 16 + 1024)
 
 				for ($i = 0; $i -lt 50; $i++) {
-					if ((Get-ChildItem -LiteralPath $tempDir).Count -gt 0) { break }
+					if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
 					Start-Sleep -Milliseconds 100
 				}
 
-				Remove-Item -LiteralPath $tempDir -Recurse -Force
+				Remove-Item $tempDir -Recurse -Force
 			}
 			"SUCCESS"
 		`;
@@ -1871,7 +1926,9 @@ async function runScan(profile, event) {
   sendProgress("itunes_list", "iTunes\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 5);
   const itunesFiles = await findMusicFiles(profile.itunesPath);
   sendProgress("phone_list", "\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 15);
-  const phoneFiles = await storage.findMusicFiles();
+  const phoneFiles = await storage.findMusicFiles((msg) => {
+    sendProgress("phone_list", msg, 15);
+  });
   const itunesCache = loadCache(profileId, "itunes");
   const phoneCache = loadCache(profileId, "phone");
   const buildSecondaryIndex = (cache) => {
