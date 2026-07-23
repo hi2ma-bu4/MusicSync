@@ -252,6 +252,67 @@ export function registerIpcHandlers() {
 		return list;
 	});
 
+	ipcMain.handle("get-mtp-device-names", async () => {
+		if (process.platform !== "win32") {
+			return [];
+		}
+		try {
+			const { execFile } = await import("node:child_process");
+			const scriptText = `
+				[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+				$shell = New-Object -ComObject Shell.Application
+				$drives = $shell.NameSpace(17)
+				if ($drives) {
+					$names = $drives.Items() | Where-Object { $_.Path -notmatch '^[A-Z]:\\\\$' } | ForEach-Object { [string]$_.Name }
+					if ($names) {
+						,@($names) | ConvertTo-Json -Compress
+					} else {
+						"[]"
+					}
+				} else {
+					"[]"
+				}
+			`;
+			const buffer = Buffer.from(scriptText, "utf16le");
+			const base64 = buffer.toString("base64");
+
+			return new Promise<string[]>((resolve) => {
+				execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64], { maxBuffer: 10 * 1024 * 1024, encoding: "utf8" }, (error, stdout, stderr) => {
+					if (error) {
+						console.error("[get-mtp-device-names] Error:", stderr || error.message);
+						resolve([]);
+					} else {
+						try {
+							const res = stdout.trim();
+							if (!res || res === "[]") {
+								resolve([]);
+							} else {
+								const parsed = JSON.parse(res);
+								const list = Array.isArray(parsed) ? parsed : [parsed];
+								const names = list.map((item: any) => {
+									if (typeof item === "string") {
+										return item;
+									}
+									if (item && typeof item === "object") {
+										return item.Name || item.name || item.value || JSON.stringify(item);
+									}
+									return String(item);
+								});
+								resolve(names);
+							}
+						} catch (e) {
+							console.error("[get-mtp-device-names] Parse error:", e);
+							resolve([]);
+						}
+					}
+				});
+			});
+		} catch (e) {
+			console.error("[get-mtp-device-names] Unexpected error:", e);
+			return [];
+		}
+	});
+
 	ipcMain.handle("start-scan", async (event, profileId: string) => {
 		const profiles: any[] = store.get("profiles", []) as any[];
 		const profile = profiles.find((p) => p.id === profileId);

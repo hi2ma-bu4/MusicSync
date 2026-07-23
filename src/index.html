@@ -337,7 +337,8 @@
 					<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">接続方法 (Storage Type)</label>
 					<select id="sel-profile-storage-type" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white">
 						<option value="local">ローカルフォルダ</option>
-						<option value="mtp">USB / MTP デバイス (スマートフォンなど)</option>
+						<option value="mtp_powershell">MTP デバイス (PowerShell)</option>
+						<option value="mtp">MTP デバイス (レガシー)</option>
 					</select>
 				</div>
 
@@ -367,6 +368,19 @@
 					<div>
 						<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">同期先サブフォルダ (MTP内フォルダー)</label>
 						<input type="text" id="txt-profile-mtp-subpath" placeholder="例: Music" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs" value="Music">
+					</div>
+				</div>
+
+				<div id="container-profile-powershell-mtp-dest" class="space-y-3.5 hidden">
+					<div>
+						<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">接続するMTPデバイス (PowerShell)</label>
+						<select id="sel-profile-powershell-device" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs">
+							<!-- Populated dynamically -->
+						</select>
+					</div>
+					<div>
+						<label class="block font-semibold text-gray-400 uppercase tracking-wider mb-1">同期先サブフォルダ (MTP内フォルダー)</label>
+						<input type="text" id="txt-profile-powershell-subpath" placeholder="例: Music" class="w-full bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 focus:outline-none focus:border-indigo-500 text-white font-mono text-xxs" value="Music">
 					</div>
 				</div>
 

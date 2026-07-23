@@ -629,7 +629,7 @@ function setupEventListeners() {
 		elTxtProfileId.value = p.id;
 		elTxtProfileName.value = p.name;
 		elTxtProfileItunes.value = p.itunesPath;
-		elTxtProfilePhone.value = p.storageType === "mtp" ? "" : p.phonePath;
+		elTxtProfilePhone.value = p.storageType === "mtp" || p.storageType === "mtp_powershell" ? "" : p.phonePath;
 		if (modalsController && typeof modalsController.setupProfileFields === "function") {
 			modalsController.setupProfileFields(p);
 		}

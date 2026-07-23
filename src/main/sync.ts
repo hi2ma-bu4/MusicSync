@@ -84,6 +84,8 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 							// Update phone track info in our results
 							if (profile.storageType === "mtp") {
 								item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
+							} else if (profile.storageType === "mtp_powershell") {
+								item.phoneTrack.filePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${newRelative}`;
 							} else {
 								item.phoneTrack.filePath = path.join(profile.phonePath, newRelative);
 							}
@@ -165,6 +167,8 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 						let remotePath = "";
 						if (profile.storageType === "mtp") {
 							remotePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${relative}`;
+						} else if (profile.storageType === "mtp_powershell") {
+							remotePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${relative}`;
 						} else {
 							remotePath = path.join(profile.phonePath, relative);
 						}

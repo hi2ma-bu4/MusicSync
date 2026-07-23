@@ -3,11 +3,12 @@ export interface Profile {
 	name: string;
 	itunesPath: string;
 	phonePath: string;
-	storageType?: "local" | "mtp";
+	storageType?: "local" | "mtp" | "mtp_powershell";
 	usbVendorId?: number;
 	usbProductId?: number;
 	mtpSubPath?: string;
 	searchHistory?: string[];
+	mtpDeviceName?: string;
 }
 
 export interface Settings {
@@ -73,6 +74,7 @@ export interface WindowAPI {
 	resetCache: () => Promise<void>;
 	showContextMenu: (params: any) => void;
 	getUsbDevices: () => Promise<{ vendorId: number; productId: number; name: string }[]>;
+	getMtpDeviceNames: () => Promise<string[]>;
 	onContextMenuCommand: (callback: (command: string, arg: string) => void) => () => void;
 	startScan: (profileId: string) => Promise<void>;
 	getScanResult: (profileId: string) => Promise<ScanResultItem[]>;

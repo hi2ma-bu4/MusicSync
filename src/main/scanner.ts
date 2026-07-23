@@ -359,7 +359,7 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 
 			// In MTP mode, files are stored flat or directly matching.
 			// Path mismatch checks are disabled/set to false to prevent endless reorganizations.
-			const pathMismatch = profile.storageType === "mtp" ? false : I.relativePath !== bestMatch.relativePath;
+			const pathMismatch = profile.storageType === "mtp" || profile.storageType === "mtp_powershell" ? false : I.relativePath !== bestMatch.relativePath;
 
 			// Determine if metadata changed (any mismatching field out of the 4, or cover art difference)
 			let metadataMismatch = false;

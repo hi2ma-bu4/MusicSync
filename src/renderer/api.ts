@@ -80,6 +80,9 @@ if (!window.api) {
 				},
 			];
 		},
+		getMtpDeviceNames: async () => {
+			return ["模擬MTPデバイス (Mock MTP Device - デバッグ用)", "Samsung Galaxy S21", "Google Pixel 6 Pro"];
+		},
 		onContextMenuCommand: (callback: any) => {
 			return () => {};
 		},

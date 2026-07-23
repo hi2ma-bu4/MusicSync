@@ -30,14 +30,24 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	const elSelProfileUsbDevice = document.getElementById("sel-profile-usb-device") as HTMLSelectElement;
 	const elTxtProfileMtpSubpath = document.getElementById("txt-profile-mtp-subpath") as HTMLInputElement;
 
+	const elContainerProfilePowershellMtpDest = document.getElementById("container-profile-powershell-mtp-dest")!;
+	const elSelProfilePowershellDevice = document.getElementById("sel-profile-powershell-device") as HTMLSelectElement;
+	const elTxtProfilePowershellSubpath = document.getElementById("txt-profile-powershell-subpath") as HTMLInputElement;
+
 	elSelProfileStorageType.addEventListener("change", () => {
 		const val = elSelProfileStorageType.value;
 		if (val === "mtp") {
 			elContainerProfileLocalDest.classList.add("hidden");
 			elContainerProfileMtpDest.classList.remove("hidden");
+			elContainerProfilePowershellMtpDest.classList.add("hidden");
+		} else if (val === "mtp_powershell") {
+			elContainerProfileLocalDest.classList.add("hidden");
+			elContainerProfileMtpDest.classList.add("hidden");
+			elContainerProfilePowershellMtpDest.classList.remove("hidden");
 		} else {
 			elContainerProfileLocalDest.classList.remove("hidden");
 			elContainerProfileMtpDest.classList.add("hidden");
+			elContainerProfilePowershellMtpDest.classList.add("hidden");
 		}
 	});
 
@@ -188,12 +198,13 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	elFormProfile.addEventListener("submit", async (e) => {
 		e.preventDefault();
 		const id = elTxtProfileId.value || "profile_" + Date.now();
-		const storageType = elSelProfileStorageType.value as "local" | "mtp";
+		const storageType = elSelProfileStorageType.value as "local" | "mtp" | "mtp_powershell";
 
 		let usbVendorId = 0;
 		let usbProductId = 0;
 		let mtpSubPath = "";
 		let phonePath = elTxtProfilePhone.value.trim();
+		let mtpDeviceName = "";
 
 		if (storageType === "mtp") {
 			const devVal = elSelProfileUsbDevice.value;
@@ -208,6 +219,10 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			} else {
 				phonePath = `mtp://${usbVendorId}/${usbProductId}/${mtpSubPath}`;
 			}
+		} else if (storageType === "mtp_powershell") {
+			mtpDeviceName = elSelProfilePowershellDevice.value;
+			mtpSubPath = elTxtProfilePowershellSubpath.value.trim();
+			phonePath = `mtp_powershell://${encodeURIComponent(mtpDeviceName)}/${mtpSubPath}`;
 		}
 
 		const profile = {
@@ -219,6 +234,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			usbVendorId,
 			usbProductId,
 			mtpSubPath,
+			mtpDeviceName,
 		};
 
 		state.profiles = await api.saveProfile(profile);
@@ -555,6 +571,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 		},
 		async setupProfileFields(profile?: any) {
 			elSelProfileUsbDevice.innerHTML = '<option value="">デバイスをスキャン中...</option>';
+			elSelProfilePowershellDevice.innerHTML = '<option value="">デバイスをスキャン中...</option>';
 			try {
 				const devices = await api.getUsbDevices();
 				elSelProfileUsbDevice.innerHTML = "";
@@ -568,15 +585,53 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 				elSelProfileUsbDevice.innerHTML = '<option value="0_0">模擬MTPデバイス (Mock MTP Device - デバッグ用)</option>';
 			}
 
+			try {
+				const deviceNames = await api.getMtpDeviceNames();
+				elSelProfilePowershellDevice.innerHTML = "";
+				if (deviceNames.length === 0) {
+					elSelProfilePowershellDevice.innerHTML = '<option value="">接続されたMTPデバイスが見つかりません</option>';
+				} else {
+					deviceNames.forEach((name) => {
+						const opt = document.createElement("option");
+						const anyName = name as any;
+						const strName = typeof name === "string" ? name : anyName && (anyName.Name || anyName.name || anyName.value) ? anyName.Name || anyName.name || anyName.value : String(name);
+						opt.value = strName;
+						opt.textContent = strName;
+						elSelProfilePowershellDevice.appendChild(opt);
+					});
+				}
+			} catch (e) {
+				elSelProfilePowershellDevice.innerHTML = '<option value="模擬MTPデバイス">模擬MTPデバイス (Mock MTP Device - デバッグ用)</option>';
+			}
+
 			if (profile) {
 				elSelProfileStorageType.value = profile.storageType || "local";
 				elTxtProfileMtpSubpath.value = profile.mtpSubPath || "Music";
+				elTxtProfilePowershellSubpath.value = profile.mtpSubPath || "Music";
 				if (profile.usbVendorId !== undefined && profile.usbProductId !== undefined) {
 					elSelProfileUsbDevice.value = `${profile.usbVendorId}_${profile.usbProductId}`;
+				}
+				if (profile.mtpDeviceName) {
+					// Ensure saved device name is in the dropdown option list
+					let exists = false;
+					for (let i = 0; i < elSelProfilePowershellDevice.options.length; i++) {
+						if (elSelProfilePowershellDevice.options[i].value === profile.mtpDeviceName) {
+							exists = true;
+							break;
+						}
+					}
+					if (!exists && profile.mtpDeviceName) {
+						const opt = document.createElement("option");
+						opt.value = profile.mtpDeviceName;
+						opt.textContent = profile.mtpDeviceName;
+						elSelProfilePowershellDevice.appendChild(opt);
+					}
+					elSelProfilePowershellDevice.value = profile.mtpDeviceName;
 				}
 			} else {
 				elSelProfileStorageType.value = "local";
 				elTxtProfileMtpSubpath.value = "Music";
+				elTxtProfilePowershellSubpath.value = "Music";
 			}
 
 			elSelProfileStorageType.dispatchEvent(new Event("change"));

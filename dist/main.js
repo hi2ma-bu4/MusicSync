@@ -130,7 +130,6 @@ var init_Mtp = __esm({
             }
             await this.device.open();
             console.log("Opened:", this.device.opened);
-            console.log(JSON.stringify(this.device.configuration, null, 4));
             await this.device.selectConfiguration(1);
             const iface = this.device.configuration.interfaces[0];
             try {
@@ -558,6 +557,7 @@ async function promptDeviceSelection(currentVendorId, currentProductId, profileI
           name: displayName
         });
       } catch (e) {
+        console.warn("[StorageWrapper] Error scanning single USB device:", e);
       }
     }
     if (list.length === 0) {
@@ -1049,6 +1049,7 @@ var MtpStorageWrapper = class {
           try {
             await fs2.promises.unlink(tempFilePath);
           } catch (e) {
+            console.error("[StorageWrapper] Failed to clean up temp file:", e);
           }
         }
       }
@@ -1123,11 +1124,556 @@ var MtpStorageWrapper = class {
   async cleanEmptyDirs() {
   }
 };
+async function runPowerShellWithParams(scriptText, params) {
+  if (process.platform !== "win32") {
+    return "[]";
+  }
+  const base64Params = Buffer.from(JSON.stringify(params), "utf8").toString("base64");
+  const fullScript = `
+		[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+		$paramsJsonBytes = [System.Convert]::FromBase64String("${base64Params}")
+		$paramsJson = [System.Text.Encoding]::UTF8.GetString($paramsJsonBytes)
+		$params = $paramsJson | ConvertFrom-Json
+		
+		$phoneName = $params.deviceName
+		$subPath = $params.subPath
+		$localSrc = $params.localSrc
+		$remoteDestRelativePath = $params.remoteDestRelativePath
+		$relativePath = $params.relativePath
+		$oldRelativePath = $params.oldRelativePath
+		$newRelativePath = $params.newRelativePath
+		$tempFilePath = $params.tempFilePath
+
+		# Shared helper to find a folder item on MTP device
+		function Get-MtpFolderItem($deviceItem, $subPath) {
+			$folder = $deviceItem.GetFolder
+			if ($folder -eq $null) {
+				[Console]::Error.WriteLine("[Get-MtpFolderItem] Error: Device item has no folder object.")
+				return $null
+			}
+			$segments = $subPath -split "/"
+			$current = $deviceItem
+			$isTop = $true
+			foreach ($seg in $segments) {
+				if ($seg -eq "") { continue }
+				$found = $null
+				
+				# 1. Search directly in the current folder's items
+				$items = $current.GetFolder.Items()
+				foreach ($item in $items) {
+					if ($item.Name -eq $seg) {
+						$found = $item
+						break
+					}
+				}
+				
+				# 2. If not found and we are at the top level, search inside all storage volumes
+				if ($found -eq $null -and $isTop) {
+					foreach ($vol in $items) {
+						$volFolder = $vol.GetFolder
+						if ($volFolder) {
+							foreach ($subItem in $volFolder.Items()) {
+								if ($subItem.Name -eq $seg) {
+									$found = $subItem
+									break
+								}
+							}
+						}
+						if ($found -ne $null) { break }
+					}
+				}
+				if ($found -eq $null) {
+					[Console]::Error.WriteLine("[Get-MtpFolderItem] Warning: Segment '$seg' not found inside parent: " + $current.Name)
+					return $null
+				}
+				$current = $found
+				$isTop = $false
+			}
+			return $current
+		}
+
+		# Shared helper to ensure folder structure exists on MTP device
+		function Ensure-MtpDirectory($parentItem, $relPath) {
+			$segments = $relPath -split "/"
+			$current = $parentItem
+			$isTop = $true
+			foreach ($seg in $segments) {
+				if ($seg -eq "") { continue }
+				$found = $null
+				# 1. Try to find if the folder already exists
+				$items = $current.GetFolder.Items()
+				foreach ($item in $items) {
+					if ($item.GetFolder -and $item.Name -eq $seg) {
+						$found = $item
+						break
+					}
+				}
+				
+				# 2. If at top-level (device root), search inside all volumes
+				if ($found -eq $null -and $isTop) {
+					foreach ($vol in $items) {
+						$volFolder = $vol.GetFolder
+						if ($volFolder) {
+							foreach ($subItem in $volFolder.Items()) {
+								if ($subItem.GetFolder -and $subItem.Name -eq $seg) {
+									$found = $subItem
+									break
+								}
+							}
+						}
+						if ($found -ne $null) { break }
+					}
+				}
+				
+				# 3. If not found, create it!
+				if ($found -eq $null) {
+					$targetFolderToCreateIn = $current.GetFolder
+					if ($isTop) {
+						$primaryVol = $items | Where-Object { $_.GetFolder -ne $null } | Select-Object -First 1
+						if ($primaryVol) {
+							$targetFolderToCreateIn = $primaryVol.GetFolder
+						}
+					}
+					
+					if ($targetFolderToCreateIn) {
+						$targetFolderToCreateIn.NewFolder($seg)
+						# Poll for the newly created folder (up to 3 seconds)
+						for ($try = 0; $try -lt 30; $try++) {
+							# Re-query items
+							foreach ($item in $targetFolderToCreateIn.Items()) {
+								if ($item.GetFolder -and $item.Name -eq $seg) {
+									$found = $item
+									break
+								}
+							}
+							if ($found) { break }
+							Start-Sleep -Milliseconds 100
+						}
+					}
+				}
+				
+				if ($found -eq $null) {
+					throw "Failed to create remote directory: $seg"
+				}
+				$current = $found
+				$isTop = $false
+			}
+			return $current
+		}
+
+		${scriptText}
+	`;
+  return runPowerShellCommand(fullScript);
+}
+async function runPowerShellCommand(scriptText) {
+  if (process.platform !== "win32") {
+    return "[]";
+  }
+  const { execFile: execFilePromise } = await import("node:child_process");
+  return new Promise((resolve, reject) => {
+    const buffer = Buffer.from(scriptText, "utf16le");
+    const base64 = buffer.toString("base64");
+    execFilePromise("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64], { maxBuffer: 50 * 1024 * 1024, encoding: "utf8" }, (error, stdout, stderr) => {
+      if (error) {
+        console.error("[PowerShellMtp] Error:", stderr || error.message);
+        reject(new Error(stderr || error.message));
+      } else {
+        resolve(stdout);
+      }
+    });
+  });
+}
+var PowerShellMtpStorageWrapper = class {
+  deviceName;
+  subPath;
+  fileMap = /* @__PURE__ */ new Map();
+  constructor(deviceName, subPath) {
+    this.deviceName = deviceName || "Mock Device";
+    this.subPath = subPath || "Music";
+  }
+  getRelPathInsideSub(p) {
+    const normalized = p.replace(/\\/g, "/");
+    const prefix = this.subPath + "/";
+    if (normalized.startsWith(prefix)) {
+      return normalized.substring(prefix.length);
+    }
+    return normalized;
+  }
+  async isConnected() {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    try {
+      const script = `
+				$shell = New-Object -ComObject Shell.Application
+				$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName }
+				if ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }
+			`;
+      const res = await runPowerShellWithParams(script, { deviceName: this.deviceName });
+      return res.trim() === "CONNECTED";
+    } catch (e) {
+      console.error("[PowerShellMtp] isConnected failed:", e);
+      return false;
+    }
+  }
+  async exists(relativePath) {
+    if (this.fileMap.size === 0) {
+      await this.findMusicFiles();
+    }
+    const rel = this.getRelPathInsideSub(relativePath);
+    const fullRel = `${this.subPath}/${rel}`.replace(/\\/g, "/");
+    return this.fileMap.has(fullRel);
+  }
+  async findMusicFiles() {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$drives = $shell.NameSpace(17)
+			if (-not $drives) {
+				Write-Output "[]"
+				exit 0
+			}
+
+			$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
+
+			if (-not $phoneItem) {
+				Write-Output "[]"
+				exit 0
+			}
+
+			$targetItem = Get-MtpFolderItem $phoneItem $subPath
+			if (-not $targetItem) {
+				[Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
+				Write-Output "[]"
+				exit 0
+			}
+
+			function Scan-Folder($folderItem, $relPath) {
+				$folder = $folderItem.GetFolder
+				if (-not $folder) { return }
+				foreach ($item in $folder.Items()) {
+					$name = $item.Name
+					$subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
+					
+					$subFolder = $item.GetFolder
+					if ($subFolder) {
+						Scan-Folder $item $subRelPath
+					} else {
+						$ext = ""
+						if ($name -match '.([a-zA-Z0-9]+)$') {
+							$ext = "." + $Matches[1].ToLower()
+						}
+						if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
+							$size = $item.Size
+							$mtimeMs = 0
+							if ($item.ModifyDate) {
+								try {
+									$date = Get-Date $item.ModifyDate
+									$mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+								} catch {
+									Write-Warning "Failed to parse date for $name : $_"
+								}
+							}
+							[PSCustomObject]@{
+								relativePath = $subRelPath
+								size = $size
+								mtimeMs = $mtimeMs
+							}
+						}
+					}
+				}
+			}
+
+			$results = Scan-Folder $targetItem ""
+			if ($results -eq $null) {
+				Write-Output "[]"
+			} else {
+				,@($results) | ConvertTo-Json -Compress
+			}
+		`;
+    try {
+      const resStr = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath });
+      const parsed = JSON.parse(resStr.trim() || "[]");
+      const rawList = Array.isArray(parsed) ? parsed : [parsed];
+      this.fileMap.clear();
+      return rawList.map((item) => {
+        const relativePath = `${this.subPath}/${item.relativePath}`.replace(/\\/g, "/");
+        const size = parseInt(item.size, 10) || 0;
+        const mtimeMs = parseInt(item.mtimeMs, 10) || Date.now();
+        this.fileMap.set(relativePath, { size, mtimeMs });
+        return {
+          filePath: `mtp_powershell://${encodeURIComponent(this.deviceName)}/${relativePath}`,
+          relativePath,
+          size,
+          mtimeMs
+        };
+      });
+    } catch (e) {
+      console.error("[PowerShellMtp] findMusicFiles error:", e);
+      throw e;
+    }
+  }
+  async getTrackMetadata(filePath, relativePath) {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const tempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp");
+    if (!fs2.existsSync(tempDir)) {
+      fs2.mkdirSync(tempDir, { recursive: true });
+    }
+    const randomName = `${Math.random().toString(36).substring(2, 10)}_${path2.basename(relativePath)}`;
+    const tempFilePath = path2.join(tempDir, randomName);
+    const relPathInsideSub = this.getRelPathInsideSub(relativePath);
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) { exit 1 }
+
+			$fullPath = "$subPath/$relativePath"
+			$fileItem = Get-MtpFolderItem $phoneItem $fullPath
+			if (-not $fileItem) {
+				[Console]::Error.WriteLine("[getTrackMetadata] File not found: " + $fullPath)
+				exit 1
+			}
+
+			$localDir = [System.IO.Path]::GetDirectoryName($tempFilePath)
+			$localFolder = $shell.NameSpace($localDir)
+			$localFolder.CopyHere($fileItem, 16)
+
+			$tempCreatedFile = [System.IO.Path]::Combine($localDir, $fileItem.Name)
+			$success = $false
+			for ($i = 0; $i -lt 100; $i++) {
+				if (Test-Path $tempCreatedFile) {
+					$success = $true
+					break
+				}
+				Start-Sleep -Milliseconds 100
+			}
+
+			if ($success) {
+				if ($tempCreatedFile -ne $tempFilePath) {
+					Rename-Item -Path $tempCreatedFile -NewName [System.IO.Path]::GetFileName($tempFilePath) -Force
+				}
+				"SUCCESS"
+			} else {
+				"FAILED"
+			}
+		`;
+    try {
+      const res = await runPowerShellWithParams(script, {
+        deviceName: this.deviceName,
+        subPath: this.subPath,
+        relativePath: relPathInsideSub,
+        tempFilePath
+      });
+      if (res.trim() !== "SUCCESS") {
+        throw new Error(`Failed to download file from MTP for metadata parsing: ${relativePath}`);
+      }
+      const meta = await getTrackMetadata(tempFilePath, relativePath);
+      meta.filePath = filePath;
+      return meta;
+    } finally {
+      if (fs2.existsSync(tempFilePath)) {
+        try {
+          await fs2.promises.unlink(tempFilePath);
+        } catch (e) {
+          console.error("[PowerShellMtp] Failed to delete temp file:", e);
+        }
+      }
+    }
+  }
+  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const relPathInsideSub = this.getRelPathInsideSub(remoteDestRelativePath);
+    const relativeDestDir = path2.dirname(relPathInsideSub).replace(/\\/g, "/");
+    const destDirInSub = relativeDestDir === "." ? "" : relativeDestDir;
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) { throw "Phone not found" }
+
+			$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }
+			$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
+			if (-not $destFolderItem) {
+				$destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath
+			}
+
+			$destFolder = $destFolderItem.GetFolder
+			$destFolder.CopyHere($localSrc, 16)
+
+			$fileName = [System.IO.Path]::GetFileName($localSrc)
+			$success = $false
+			
+			# Poll with refreshing and re-querying the target folder
+			for ($i = 0; $i -lt 50; $i++) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+				$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
+				
+				if ($destFolderItem) {
+					$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
+					if ($item) {
+						Start-Sleep -Milliseconds 500
+						$success = $true
+						break
+					}
+				}
+				Start-Sleep -Milliseconds 200
+			}
+
+			if ($success) { "SUCCESS" } else { "FAILED" }
+		`;
+    const res = await runPowerShellWithParams(script, {
+      deviceName: this.deviceName,
+      subPath: this.subPath,
+      localSrc,
+      relativePath: destDirInSub
+    });
+    if (res.trim() !== "SUCCESS") {
+      throw new Error(`Failed to copy file to MTP device: ${remoteDestRelativePath}`);
+    }
+  }
+  async moveFile(oldRelativePath, newRelativePath) {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const oldRelPathInsideSub = this.getRelPathInsideSub(oldRelativePath);
+    const newRelPathInsideSub = this.getRelPathInsideSub(newRelativePath);
+    const newRelDirInsideSub = path2.dirname(newRelPathInsideSub).replace(/\\/g, "/");
+    const newFileName = path2.basename(newRelPathInsideSub);
+    const oldFileName = path2.basename(oldRelPathInsideSub);
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) { throw "Phone not found" }
+
+			$fullOldPath = "$subPath/$relativePath"
+			$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath
+			if (-not $fileItem) { throw "Source file not found: $fullOldPath" }
+
+			$fullNewDir = if ($tempFilePath -eq "" -or $tempFilePath -eq ".") { $subPath } else { "$subPath/$tempFilePath" }
+			$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir
+			if (-not $destFolderItem) {
+				$destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir
+			}
+
+			if ($destFolderItem.Path -ne $fileItem.Parent.Path) {
+				$destFolderItem.GetFolder.MoveHere($fileItem, 16)
+				Start-Sleep -Milliseconds 250
+				$fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldRelativePath } | Select-Object -First 1
+			}
+
+			if ($fileItem -and $oldRelativePath -ne $newRelativePath) {
+				$fileItem.Name = $newRelativePath
+				Start-Sleep -Milliseconds 150
+			}
+
+			"SUCCESS"
+		`;
+    const res = await runPowerShellWithParams(script, {
+      deviceName: this.deviceName,
+      subPath: this.subPath,
+      oldRelativePath: oldFileName,
+      newRelativePath: newFileName,
+      relativePath: oldRelPathInsideSub,
+      tempFilePath: newRelDirInsideSub
+    });
+    if (res.trim() !== "SUCCESS") {
+      throw new Error(`Failed to move file: ${oldRelativePath} -> ${newRelativePath}`);
+    }
+  }
+  async deleteFile(relativePath) {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const relPathInsideSub = this.getRelPathInsideSub(relativePath);
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) { exit 0 }
+
+			$fullPath = "$subPath/$relativePath"
+			$fileItem = Get-MtpFolderItem $phoneItem $fullPath
+			if ($fileItem) {
+				$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
+				$null = New-Item -ItemType Directory -Path $tempDir -Force
+
+				$tempFolder = $shell.NameSpace($tempDir)
+				$tempFolder.MoveHere($fileItem, 16 + 1024)
+
+				for ($i = 0; $i -lt 50; $i++) {
+					if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
+					Start-Sleep -Milliseconds 100
+				}
+
+				Remove-Item $tempDir -Recurse -Force
+			}
+			"SUCCESS"
+		`;
+    await runPowerShellWithParams(script, {
+      deviceName: this.deviceName,
+      subPath: this.subPath,
+      relativePath: relPathInsideSub
+    });
+    this.fileMap.delete(relativePath);
+  }
+  async cleanEmptyDirs() {
+    if (process.platform !== "win32") {
+      throw new Error("PowerShell MTP is only supported on Windows.");
+    }
+    const script = `
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) { exit 0 }
+
+			$targetRootItem = Get-MtpFolderItem $phoneItem $subPath
+			if (-not $targetRootItem) { exit 0 }
+
+			function Clean-EmptyMtpFolders($folderItem) {
+				$folder = $folderItem.GetFolder
+				if (-not $folder) { return }
+
+				foreach ($item in $folder.Items()) {
+					if ($item.GetFolder) {
+						Clean-EmptyMtpFolders $item
+					}
+				}
+
+				if ($folderItem.Path -ne $targetRootItem.Path) {
+					if ($folder.Items().Count -eq 0) {
+						$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
+						$null = New-Item -ItemType Directory -Path $tempDir -Force
+						$shell.NameSpace($tempDir).MoveHere($folderItem, 16 + 1024)
+						Start-Sleep -Milliseconds 150
+						Remove-Item $tempDir -Recurse -Force
+					}
+				}
+			}
+
+			Clean-EmptyMtpFolders $targetRootItem
+			"SUCCESS"
+		`;
+    await runPowerShellWithParams(script, {
+      deviceName: this.deviceName,
+      subPath: this.subPath
+    });
+  }
+};
 function getStorageWrapper(profile) {
   if (!profile) {
     throw new Error("No active profile provided");
   }
   const storageType = profile.storageType || "local";
+  if (storageType === "mtp_powershell") {
+    console.log(`[StorageWrapper] Initializing PowerShell MTP Wrapper for Device: ${profile.mtpDeviceName}, Subpath: ${profile.mtpSubPath}...`);
+    return new PowerShellMtpStorageWrapper(profile.mtpDeviceName || "Mock Device", profile.mtpSubPath || "Music");
+  }
   if (storageType === "mtp") {
     if (profile.id.startsWith("mock") || profile.phonePath === "mock_mtp" || profile.usbVendorId === 0 && profile.usbProductId === 0) {
       console.log("[StorageWrapper] Initializing simulated Debug/Mock MTP Wrapper...");
@@ -1468,7 +2014,7 @@ async function runScan(profile, event) {
     }
     if (bestMatch) {
       matchedPhoneIds.add(bestMatch.id);
-      const pathMismatch = profile.storageType === "mtp" ? false : I.relativePath !== bestMatch.relativePath;
+      const pathMismatch = profile.storageType === "mtp" || profile.storageType === "mtp_powershell" ? false : I.relativePath !== bestMatch.relativePath;
       let metadataMismatch = false;
       if (bestScore < 4) {
         metadataMismatch = true;
@@ -1585,6 +2131,8 @@ async function runSync(profile, options, event) {
               logAndSend(`\u79FB\u52D5\u6210\u529F: ${oldRelative} -> ${newRelative}`, getPct());
               if (profile.storageType === "mtp") {
                 item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
+              } else if (profile.storageType === "mtp_powershell") {
+                item.phoneTrack.filePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${newRelative}`;
               } else {
                 item.phoneTrack.filePath = path5.join(profile.phonePath, newRelative);
               }
@@ -1651,6 +2199,8 @@ async function runSync(profile, options, event) {
             let remotePath = "";
             if (profile.storageType === "mtp") {
               remotePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${relative}`;
+            } else if (profile.storageType === "mtp_powershell") {
+              remotePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${relative}`;
             } else {
               remotePath = path5.join(profile.phonePath, relative);
             }
@@ -1889,6 +2439,65 @@ function registerIpcHandlers() {
       console.error("[get-usb-devices] Error listing physical USB devices:", e);
     }
     return list;
+  });
+  ipcMain.handle("get-mtp-device-names", async () => {
+    if (process.platform !== "win32") {
+      return [];
+    }
+    try {
+      const { execFile } = await import("node:child_process");
+      const scriptText = `
+				[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+				$shell = New-Object -ComObject Shell.Application
+				$drives = $shell.NameSpace(17)
+				if ($drives) {
+					$names = $drives.Items() | Where-Object { $_.Path -notmatch '^[A-Z]:\\\\$' } | ForEach-Object { [string]$_.Name }
+					if ($names) {
+						,@($names) | ConvertTo-Json -Compress
+					} else {
+						"[]"
+					}
+				} else {
+					"[]"
+				}
+			`;
+      const buffer = Buffer.from(scriptText, "utf16le");
+      const base64 = buffer.toString("base64");
+      return new Promise((resolve) => {
+        execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64], { maxBuffer: 10 * 1024 * 1024, encoding: "utf8" }, (error, stdout, stderr) => {
+          if (error) {
+            console.error("[get-mtp-device-names] Error:", stderr || error.message);
+            resolve([]);
+          } else {
+            try {
+              const res = stdout.trim();
+              if (!res || res === "[]") {
+                resolve([]);
+              } else {
+                const parsed = JSON.parse(res);
+                const list = Array.isArray(parsed) ? parsed : [parsed];
+                const names = list.map((item) => {
+                  if (typeof item === "string") {
+                    return item;
+                  }
+                  if (item && typeof item === "object") {
+                    return item.Name || item.name || item.value || JSON.stringify(item);
+                  }
+                  return String(item);
+                });
+                resolve(names);
+              }
+            } catch (e) {
+              console.error("[get-mtp-device-names] Parse error:", e);
+              resolve([]);
+            }
+          }
+        });
+      });
+    } catch (e) {
+      console.error("[get-mtp-device-names] Unexpected error:", e);
+      return [];
+    }
   });
   ipcMain.handle("start-scan", async (event, profileId) => {
     const profiles = store.get("profiles", []);
