@@ -764,7 +764,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 		[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
 		$paramsJson = [System.IO.File]::ReadAllText("${escapedParamsPath}", [System.Text.Encoding]::UTF8)
 		$params = $paramsJson | ConvertFrom-Json
-		
+
 		$phoneName = $params.deviceName
 		$subPath = $params.subPath
 		$localSrc = $params.localSrc
@@ -788,7 +788,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 			foreach ($seg in $segments) {
 				if ($seg -eq "") { continue }
 				$found = $null
-				
+
 				# 1. Search directly in the current folder's items
 				$items = $current.GetFolder.Items()
 				foreach ($item in $items) {
@@ -797,7 +797,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 						break
 					}
 				}
-				
+
 				# 2. If not found and we are at the top level, search inside all storage volumes
 				if ($found -eq $null -and $isTop) {
 					foreach ($vol in $items) {
@@ -839,7 +839,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 						break
 					}
 				}
-				
+
 				# 2. If at top-level (device root), search inside all volumes
 				if ($found -eq $null -and $isTop) {
 					foreach ($vol in $items) {
@@ -855,7 +855,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 						if ($found -ne $null) { break }
 					}
 				}
-				
+
 				# 3. If not found, create it!
 				if ($found -eq $null) {
 					$targetFolderToCreateIn = $current.GetFolder
@@ -865,7 +865,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 							$targetFolderToCreateIn = $primaryVol.GetFolder
 						}
 					}
-					
+
 					if ($targetFolderToCreateIn) {
 						$targetFolderToCreateIn.NewFolder($seg)
 						# Poll for the newly created folder (up to 3 seconds)
@@ -882,7 +882,7 @@ async function createTempPs1AndParams(scriptBody: string, params: any): Promise<
 						}
 					}
 				}
-				
+
 				if ($found -eq $null) {
 					throw "Failed to create remote directory: $seg"
 				}
@@ -1133,7 +1133,7 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 				foreach ($item in $folder.Items()) {
 					$name = $item.Name
 					$subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
-					
+
 					if ($item.IsFolder) {
 						Scan-Folder $item $subRelPath
 					} else {
@@ -1146,18 +1146,26 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 							if ($global:scannedCount % 5 -eq 0) {
 								Write-Output "PROGRESS_UPDATE:比較先ファイルをスキャン中... (\${global:scannedCount}曲)"
 							}
-							# Retrieve size and modification date using GetDetailsOf as direct properties are empty/0
-							$sizeStr = $folder.GetDetailsOf($item, 2)
+							# Retrieve size and modification date using direct properties or GetDetailsOf fallback
+							$rawSize = $item.ExtendedProperty("System.Size")
+							if ($rawSize -eq $null) { $rawSize = $item.Size }
+							if ($rawSize -eq $null) { $rawSize = $item.ExtendedProperty("Size") }
+
 							$size = 0
-							if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|バイト)?') {
-								$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-								$unit = $Matches[2]
-								if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-								elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-								elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-								else { $size = [int64]$val }
-							} else {
-								$size = $item.Size
+							if ($rawSize -ne $null -and $rawSize -ne "") {
+								try { $size = [int64]$rawSize } catch {}
+							}
+
+							if ($size -eq 0) {
+								$sizeStr = $folder.GetDetailsOf($item, 2)
+								if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|バイト)?') {
+									$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+									$unit = $Matches[2]
+									if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+									elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+									elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+									else { $size = [int64]$val }
+								}
 							}
 
 							$mtimeMs = 0
@@ -1384,7 +1392,7 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 
 			$fileName = [System.IO.Path]::GetFileName($localSrc)
 			$success = $false
-			
+
 			# Poll with refreshing and re-querying the target folder
 			for ($i = 0; $i -lt 50; $i++) {
 				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
@@ -1392,7 +1400,7 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 					$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
 				}
 				$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-				
+
 				if ($destFolderItem) {
 					$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
 					if ($item) {
@@ -1607,7 +1615,7 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 					if ($type -eq "delete") {
 						$remoteDest = $op.remoteDest
 						Write-Output "PROGRESS_UPDATE:STATUS:削除中 ($completed/$total): $remoteDest"
-						
+
 						$relPathInsideSub = $remoteDest
 						if ($relPathInsideSub -match "^$subPath/(.*)$") {
 							$relPathInsideSub = $Matches[1]
@@ -1633,7 +1641,7 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 						$oldRemoteSrc = $op.oldRemoteSrc
 						$remoteDest = $op.remoteDest
 						Write-Output "PROGRESS_UPDATE:STATUS:配置整理中 ($completed/$total): $oldRemoteSrc"
-						
+
 						$oldRelPath = $oldRemoteSrc
 						if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }
 						$newRelPath = $remoteDest
@@ -1691,14 +1699,14 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 
 						$fileName = [System.IO.Path]::GetFileName($localSrc)
 						$pollSuccess = $false
-						
+
 						for ($i = 0; $i -lt 50; $i++) {
 							$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
 							if (-not $phoneItem) {
 								$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
 							}
 							$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-							
+
 							if ($destFolderItem) {
 								$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
 								if ($item) {
@@ -1723,12 +1731,12 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 
 				if ($success) {
 					$consecutiveFailures = 0
-					Write-Output "PROGRESS_UPDATE:SUCCESS_OP:$trackId"
+					Write-Output "PROGRESS_UPDATE:SUCCESS_OP:$($trackId)"
 				} else {
 					$consecutiveFailures++
 					$failedTrackIds += $trackId
-					Write-Output "PROGRESS_UPDATE:FAILED_OP:\${trackId}:$errorMsg"
-					
+					Write-Output "PROGRESS_UPDATE:FAILED_OP:$($trackId):$($errorMsg)"
+
 					if ($consecutiveFailures -ge 3) {
 						Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"
 						# Wait for Node.js reply on stdin
@@ -1766,9 +1774,9 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 				}
 			} else if (trimmed.startsWith("PROGRESS_UPDATE:SUCCESS_OP:")) {
 				completed++;
-				if (onProgress) {
-					onProgress(`処理成功: ${completed}/${total}`, completed, total);
-				}
+				// if (onProgress) {
+				// 	onProgress(`処理成功: ${completed}/${total}`, completed, total);
+				// }
 			} else if (trimmed.startsWith("PROGRESS_UPDATE:FAILED_OP:")) {
 				completed++;
 				const parts = trimmed.substring("PROGRESS_UPDATE:FAILED_OP:".length).split(":");
@@ -1875,17 +1883,25 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 						$files = $grouped[$parent]
 						foreach ($item in $folder.Items()) {
 							if ($item.Name -in $files) {
-								$sizeStr = $folder.GetDetailsOf($item, 2)
+								$rawSize = $item.ExtendedProperty("System.Size")
+								if ($rawSize -eq $null) { $rawSize = $item.Size }
+								if ($rawSize -eq $null) { $rawSize = $item.ExtendedProperty("Size") }
+
 								$size = 0
-								if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|バイト)?') {
-									$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-									$unit = $Matches[2]
-									if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-									elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-									elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-									else { $size = [int64]$val }
-								} else {
-									$size = $item.Size
+								if ($rawSize -ne $null -and $rawSize -ne "") {
+									try { $size = [int64]$rawSize } catch {}
+								}
+
+								if ($size -eq 0) {
+									$sizeStr = $folder.GetDetailsOf($item, 2)
+									if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|バイト)?') {
+										$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+										$unit = $Matches[2]
+										if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+										elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+										elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+										else { $size = [int64]$val }
+									}
 								}
 								$fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/$($item.Name)" }
 								$results[$fullRelPath] = $size

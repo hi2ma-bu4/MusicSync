@@ -1071,7 +1071,7 @@ function startSyncExecution() {
 		if (progress.logs) {
 			progress.logs.forEach((log: string) => {
 				const logItem = document.createElement("div");
-				logItem.className = "py-0.5 border-b border-gray-800 text-gray-300 font-mono";
+				logItem.className = "py-0.5 border-b border-gray-800 text-gray-300 font-mono select-text";
 
 				if (log.includes("成功")) logItem.classList.add("text-green-400");
 				else if (log.includes("失敗") || log.includes("エラー")) logItem.classList.add("text-red-400");
