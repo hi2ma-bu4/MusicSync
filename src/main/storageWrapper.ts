@@ -164,6 +164,8 @@ export interface TargetStorageWrapper {
 	deleteFile(relativePath: string): Promise<void>;
 	cleanEmptyDirs(): Promise<void>;
 	isConnected(): Promise<boolean>;
+	executeBatchSync?(ops: { type: "copy" | "move" | "delete"; localSrc?: string; remoteDest?: string; oldRemoteSrc?: string; trackId: string }[], onProgress?: (msg: string, completed: number, total: number) => void, onConsecutiveFailures?: (failedCount: number) => Promise<boolean>): Promise<{ failedTrackIds: string[] }>;
+	getFileSizes?(relativePaths: string[]): Promise<Record<string, number>>;
 }
 
 // ============================================================================
@@ -749,16 +751,18 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 // Factory Function
 // ============================================================================
 
-// Helper function to run PowerShell scripts with Base64 JSON parameters
-async function runPowerShellWithParams(scriptText: string, params: any, onProgressLine?: (line: string) => void): Promise<string> {
-	if (process.platform !== "win32") {
-		return "[]";
-	}
-	const base64Params = Buffer.from(JSON.stringify(params), "utf8").toString("base64");
-	const fullScript = `
+// Helper function to create temporary .ps1 and .json parameter files
+async function createTempPs1AndParams(scriptBody: string, params: any): Promise<{ scriptPath: string; paramsPath: string }> {
+	const rand = Math.random().toString(36).substring(2, 10);
+	const paramsPath = path.join(os.tmpdir(), `musicsync_params_${rand}.json`);
+	const scriptPath = path.join(os.tmpdir(), `musicsync_script_${rand}.ps1`);
+
+	await fs.promises.writeFile(paramsPath, JSON.stringify(params), "utf8");
+
+	const escapedParamsPath = paramsPath.replace(/\\/g, "\\\\");
+	const wrapperScript = `
 		[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
-		$paramsJsonBytes = [System.Convert]::FromBase64String("${base64Params}")
-		$paramsJson = [System.Text.Encoding]::UTF8.GetString($paramsJsonBytes)
+		$paramsJson = [System.IO.File]::ReadAllText("${escapedParamsPath}", [System.Text.Encoding]::UTF8)
 		$params = $paramsJson | ConvertFrom-Json
 		
 		$phoneName = $params.deviceName
@@ -769,6 +773,7 @@ async function runPowerShellWithParams(scriptText: string, params: any, onProgre
 		$oldRelativePath = $params.oldRelativePath
 		$newRelativePath = $params.newRelativePath
 		$tempFilePath = $params.tempFilePath
+		$relativePaths = $params.relativePaths
 
 		# Shared helper to find a folder item on MTP device
 		function Get-MtpFolderItem($deviceItem, $subPath) {
@@ -887,22 +892,62 @@ async function runPowerShellWithParams(scriptText: string, params: any, onProgre
 			return $current
 		}
 
-		${scriptText}
+		${scriptBody}
 	`;
-	return runPowerShellCommand(fullScript, onProgressLine);
+
+	const bom = Buffer.from([0xef, 0xbb, 0xbf]);
+	const scriptBuffer = Buffer.concat([bom, Buffer.from(wrapperScript, "utf8")]);
+	await fs.promises.writeFile(scriptPath, scriptBuffer);
+
+	return { scriptPath, paramsPath };
 }
 
-// Helper function to run PowerShell scripts encoded in Base64
-async function runPowerShellCommand(scriptText: string, onProgressLine?: (line: string) => void): Promise<string> {
+// Helper function to run PowerShell scripts with JSON parameters using file arguments
+async function runPowerShellWithParams(scriptText: string, params: any, onProgressLine?: (line: string) => void): Promise<string> {
+	if (process.platform !== "win32") {
+		return "[]";
+	}
+	const { scriptPath, paramsPath } = await createTempPs1AndParams(scriptText, params);
+
+	try {
+		return await runPowerShellFileCommand(scriptPath, onProgressLine);
+	} finally {
+		try {
+			if (fs.existsSync(scriptPath)) await fs.promises.unlink(scriptPath);
+			if (fs.existsSync(paramsPath)) await fs.promises.unlink(paramsPath);
+		} catch (e) {
+			console.error("[PowerShellMtp] Cleanup temp files failed:", e);
+		}
+	}
+}
+
+// Helper function to run PowerShell scripts interactively using file arguments
+async function runPowerShellInteractive(scriptText: string, params: any, onProgressLine?: (line: string, writeStdin: (str: string) => void) => void): Promise<string> {
+	if (process.platform !== "win32") {
+		return "[]";
+	}
+	const { scriptPath, paramsPath } = await createTempPs1AndParams(scriptText, params);
+
+	try {
+		return await runPowerShellFileInteractive(scriptPath, onProgressLine);
+	} finally {
+		try {
+			if (fs.existsSync(scriptPath)) await fs.promises.unlink(scriptPath);
+			if (fs.existsSync(paramsPath)) await fs.promises.unlink(paramsPath);
+		} catch (e) {
+			console.error("[PowerShellMtp] Cleanup temp files failed:", e);
+		}
+	}
+}
+
+// Helper function to execute PowerShell from a temporary script file
+async function runPowerShellFileCommand(scriptPath: string, onProgressLine?: (line: string) => void): Promise<string> {
 	if (process.platform !== "win32") {
 		return "[]";
 	}
 	const { spawn } = await import("node:child_process");
 	return new Promise<string>((resolve, reject) => {
-		const buffer = Buffer.from(scriptText, "utf16le");
-		const base64 = buffer.toString("base64");
-
-		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64]);
+		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
 
 		let stdout = "";
 		let stderr = "";
@@ -933,6 +978,56 @@ async function runPowerShellCommand(scriptText: string, onProgressLine?: (line: 
 			}
 			if (code !== 0) {
 				console.error("[PowerShellMtp] Error:", stderr);
+				reject(new Error(stderr));
+			} else {
+				resolve(stdout);
+			}
+		});
+	});
+}
+
+// Helper function to run PowerShell scripts interactively from a temporary script file
+async function runPowerShellFileInteractive(scriptPath: string, onProgressLine?: (line: string, writeStdin: (str: string) => void) => void): Promise<string> {
+	if (process.platform !== "win32") {
+		return "[]";
+	}
+	const { spawn } = await import("node:child_process");
+	return new Promise<string>((resolve, reject) => {
+		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+
+		let stdout = "";
+		let stderr = "";
+
+		child.stdout.setEncoding("utf8");
+		child.stderr.setEncoding("utf8");
+
+		const writeStdin = (str: string) => {
+			child.stdin.write(str);
+		};
+
+		let bufferLine = "";
+		child.stdout.on("data", (chunk) => {
+			stdout += chunk;
+			bufferLine += chunk;
+			const lines = bufferLine.split(/\r?\n/);
+			bufferLine = lines.pop() || "";
+			for (const line of lines) {
+				if (onProgressLine) {
+					onProgressLine(line, writeStdin);
+				}
+			}
+		});
+
+		child.stderr.on("data", (chunk) => {
+			stderr += chunk;
+		});
+
+		child.on("close", (code) => {
+			if (bufferLine && onProgressLine) {
+				onProgressLine(bufferLine, writeStdin);
+			}
+			if (code !== 0) {
+				console.error("[PowerShellMtp] Interactive Error:", stderr);
 				reject(new Error(stderr));
 			} else {
 				resolve(stdout);
@@ -1467,6 +1562,366 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 			deviceName: this.deviceName,
 			subPath: this.subPath,
 		});
+	}
+
+	async executeBatchSync(ops: { type: "copy" | "move" | "delete"; localSrc?: string; remoteDest?: string; oldRemoteSrc?: string; trackId: string }[], onProgress?: (msg: string, completed: number, total: number) => void, onConsecutiveFailures?: (failedCount: number) => Promise<boolean>): Promise<{ failedTrackIds: string[] }> {
+		if (process.platform !== "win32") {
+			console.log("[PowerShellMtp] executeBatchSync: simulated fallback mode on macOS/Linux.");
+			const failedTrackIds: string[] = [];
+			const total = ops.length;
+			for (let i = 0; i < total; i++) {
+				const op = ops[i];
+				if (onProgress) {
+					onProgress(`[Mock] Processing ${op.type} for ${op.trackId}`, i + 1, total);
+				}
+				await new Promise((resolve) => setTimeout(resolve, 50));
+			}
+			return { failedTrackIds };
+		}
+
+		const script = `
+			$ops = $params.operations
+
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
+			if (-not $phoneItem) {
+				throw "Phone not found: $phoneName"
+			}
+
+			$consecutiveFailures = 0
+			$failedTrackIds = @()
+			$total = $ops.Count
+			$completed = 0
+
+			foreach ($op in $ops) {
+				$completed++
+				$type = $op.type
+				$trackId = $op.trackId
+				$success = $false
+				$errorMsg = ""
+
+				try {
+					if ($type -eq "delete") {
+						$remoteDest = $op.remoteDest
+						Write-Output "PROGRESS_UPDATE:STATUS:削除中 ($completed/$total): $remoteDest"
+						
+						$relPathInsideSub = $remoteDest
+						if ($relPathInsideSub -match "^$subPath/(.*)$") {
+							$relPathInsideSub = $Matches[1]
+						}
+						$fullPath = "$subPath/$relPathInsideSub"
+						$fileItem = Get-MtpFolderItem $phoneItem $fullPath
+						if ($fileItem) {
+							$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
+							$null = New-Item -ItemType Directory -Path $tempDir -Force
+
+							$tempFolder = $shell.NameSpace($tempDir)
+							$tempFolder.MoveHere($fileItem, 16 + 1024)
+
+							for ($i = 0; $i -lt 50; $i++) {
+								if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
+								Start-Sleep -Milliseconds 50
+							}
+							Remove-Item $tempDir -Recurse -Force
+						}
+						$success = $true
+					}
+					elseif ($type -eq "move") {
+						$oldRemoteSrc = $op.oldRemoteSrc
+						$remoteDest = $op.remoteDest
+						Write-Output "PROGRESS_UPDATE:STATUS:配置整理中 ($completed/$total): $oldRemoteSrc"
+						
+						$oldRelPath = $oldRemoteSrc
+						if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }
+						$newRelPath = $remoteDest
+						if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }
+
+						$newRelDir = Split-Path $newRelPath
+						$newRelDir = $newRelDir.Replace("\\", "/")
+						if ($newRelDir -eq ".") { $newRelDir = "" }
+						$newFileName = Split-Path $newRelPath -Leaf
+						$oldFileName = Split-Path $oldRelPath -Leaf
+
+						$fullOldPath = "$subPath/$oldRelPath"
+						$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath
+						if (-not $fileItem) {
+							throw "Source file not found: $fullOldPath"
+						}
+
+						$fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }
+						$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir
+						if (-not $destFolderItem) {
+							$destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir
+						}
+
+						if ($destFolderItem.Path -ne $fileItem.Parent.Path) {
+							$destFolderItem.GetFolder.MoveHere($fileItem, 16)
+							Start-Sleep -Milliseconds 150
+							$fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1
+						}
+
+						if ($fileItem -and $oldFileName -ne $newFileName) {
+							$fileItem.Name = $newFileName
+							Start-Sleep -Milliseconds 100
+						}
+						$success = $true
+					}
+					elseif ($type -eq "copy") {
+						$localSrc = $op.localSrc
+						$remoteDest = $op.remoteDest
+						Write-Output "PROGRESS_UPDATE:STATUS:コピー中 ($completed/$total): $remoteDest"
+
+						$relPath = $remoteDest
+						if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }
+						$relativeDestDir = Split-Path $relPath
+						$relativeDestDir = $relativeDestDir.Replace("\\", "/")
+						$destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }
+
+						$fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }
+						$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
+						if (-not $destFolderItem) {
+							$destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath
+						}
+
+						$destFolder = $destFolderItem.GetFolder
+						$destFolder.CopyHere($localSrc, 16)
+
+						$fileName = [System.IO.Path]::GetFileName($localSrc)
+						$pollSuccess = $false
+						
+						for ($i = 0; $i -lt 50; $i++) {
+							$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+							if (-not $phoneItem) {
+								$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+							}
+							$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
+							
+							if ($destFolderItem) {
+								$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
+								if ($item) {
+									Start-Sleep -Milliseconds 250
+									$pollSuccess = $true
+									break
+								}
+							}
+							Start-Sleep -Milliseconds 100
+						}
+
+						if ($pollSuccess) {
+							$success = $true
+						} else {
+							throw "Copy failed or verification timed out for: $fileName"
+						}
+					}
+				} catch {
+					$errorMsg = $_.ToString()
+					$success = $false
+				}
+
+				if ($success) {
+					$consecutiveFailures = 0
+					Write-Output "PROGRESS_UPDATE:SUCCESS_OP:$trackId"
+				} else {
+					$consecutiveFailures++
+					$failedTrackIds += $trackId
+					Write-Output "PROGRESS_UPDATE:FAILED_OP:\${trackId}:$errorMsg"
+					
+					if ($consecutiveFailures -ge 3) {
+						Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"
+						# Wait for Node.js reply on stdin
+						$reply = [Console]::In.ReadLine()
+						if ($reply -eq "ABORT") {
+							Write-Output "PROGRESS_UPDATE:STATUS:ユーザーにより中断されました。"
+							break
+						} else {
+							$consecutiveFailures = 0
+						}
+					}
+				}
+			}
+
+			Write-Output "JSON_RESULTS_START"
+			if ($failedTrackIds.Count -eq 0) {
+				"[]"
+			} elseif ($failedTrackIds.Count -eq 1) {
+				"[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"
+			} else {
+				$failedTrackIds | ConvertTo-Json -Compress
+			}
+			Write-Output "JSON_RESULTS_END"
+		`;
+
+		const total = ops.length;
+		let completed = 0;
+
+		const progressHandler = (line: string, writeStdin: (str: string) => void) => {
+			const trimmed = line.trim();
+			if (trimmed.startsWith("PROGRESS_UPDATE:STATUS:")) {
+				const msg = trimmed.substring("PROGRESS_UPDATE:STATUS:".length);
+				if (onProgress) {
+					onProgress(msg, completed, total);
+				}
+			} else if (trimmed.startsWith("PROGRESS_UPDATE:SUCCESS_OP:")) {
+				completed++;
+				if (onProgress) {
+					onProgress(`処理成功: ${completed}/${total}`, completed, total);
+				}
+			} else if (trimmed.startsWith("PROGRESS_UPDATE:FAILED_OP:")) {
+				completed++;
+				const parts = trimmed.substring("PROGRESS_UPDATE:FAILED_OP:".length).split(":");
+				const errorMsg = parts.slice(1).join(":");
+				if (onProgress) {
+					onProgress(`処理失敗: ${completed}/${total} (${errorMsg})`, completed, total);
+				}
+			} else if (trimmed.startsWith("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:")) {
+				const failedCount = parseInt(trimmed.substring("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:".length), 10);
+				if (onConsecutiveFailures) {
+					onConsecutiveFailures(failedCount).then((shouldContinue) => {
+						if (shouldContinue) {
+							writeStdin("CONTINUE\r\n");
+						} else {
+							writeStdin("ABORT\r\n");
+						}
+					});
+				} else {
+					writeStdin("CONTINUE\r\n");
+				}
+			}
+		};
+
+		try {
+			const rawStdout = await runPowerShellInteractive(
+				script,
+				{
+					deviceName: this.deviceName,
+					subPath: this.subPath,
+					operations: ops,
+				},
+				progressHandler,
+			);
+
+			let jsonPart = "[]";
+			const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+			const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+			if (startIndex !== -1 && endIndex !== -1) {
+				jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+			} else {
+				jsonPart = rawStdout.trim();
+			}
+
+			const parsed = JSON.parse(jsonPart || "[]");
+			const failedTrackIds: string[] = Array.isArray(parsed) ? parsed : [parsed];
+			return { failedTrackIds };
+		} catch (e) {
+			console.error("[PowerShellMtp] executeBatchSync error:", e);
+			throw e;
+		}
+	}
+
+	async getFileSizes(relativePaths: string[]): Promise<Record<string, number>> {
+		if (process.platform !== "win32") {
+			console.log("[PowerShellMtp] getFileSizes: simulated fallback mode on macOS/Linux.");
+			const mockSizes: Record<string, number> = {};
+			relativePaths.forEach((rel) => {
+				mockSizes[rel] = 1000000;
+			});
+			return mockSizes;
+		}
+
+		const script = `
+			$relativePaths = $params.relativePaths
+
+			$shell = New-Object -ComObject Shell.Application
+			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+			if (-not $phoneItem) {
+				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+			}
+
+			if (-not $phoneItem) {
+				Write-Output "JSON_RESULTS_START"
+				Write-Output "{}"
+				Write-Output "JSON_RESULTS_END"
+				exit 0
+			}
+
+			# Group paths by parent folder
+			$grouped = @{}
+			foreach ($rel in $relativePaths) {
+				$normalized = $rel.Replace("\\", "/")
+				$segments = $normalized -split "/"
+				if ($segments.Count -le 1) {
+					$parent = ""
+					$file = $normalized
+				} else {
+					$parent = ($segments[0..($segments.Count-2)] -join "/")
+					$file = $segments[-1]
+				}
+				if (-not $grouped.ContainsKey($parent)) {
+					$grouped[$parent] = @()
+				}
+				$grouped[$parent] += $file
+			}
+
+			$results = @{}
+			foreach ($parent in $grouped.Keys) {
+				$fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
+				$folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
+				if ($folderItem) {
+					$folder = $folderItem.GetFolder
+					if ($folder) {
+						$files = $grouped[$parent]
+						foreach ($item in $folder.Items()) {
+							if ($item.Name -in $files) {
+								$sizeStr = $folder.GetDetailsOf($item, 2)
+								$size = 0
+								if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|バイト)?') {
+									$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+									$unit = $Matches[2]
+									if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+									elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+									elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+									else { $size = [int64]$val }
+								} else {
+									$size = $item.Size
+								}
+								$fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/$($item.Name)" }
+								$results[$fullRelPath] = $size
+							}
+						}
+					}
+				}
+			}
+
+			Write-Output "JSON_RESULTS_START"
+			$results | ConvertTo-Json -Compress
+			Write-Output "JSON_RESULTS_END"
+		`;
+
+		try {
+			const rawStdout = await runPowerShellWithParams(script, {
+				deviceName: this.deviceName,
+				subPath: this.subPath,
+				relativePaths,
+			});
+
+			let jsonPart = "{}";
+			const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+			const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+			if (startIndex !== -1 && endIndex !== -1) {
+				jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+			} else {
+				jsonPart = rawStdout.trim();
+			}
+
+			const parsed = JSON.parse(jsonPart || "{}");
+			return parsed;
+		} catch (e) {
+			console.error("[PowerShellMtp] getFileSizes error:", e);
+			return {};
+		}
 	}
 }
 

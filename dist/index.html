@@ -4,7 +4,7 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-B8nn9_OO.js"></script>
+  <script type="module" crossorigin src="./assets/js/index-B6C64Sfn.js"></script>
   <link rel="stylesheet" crossorigin href="./assets/css/index-Bv5MReVo.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.4.3</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.4.4</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -570,6 +570,36 @@
 			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
 				<button type="button" id="btn-overwrite-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">戻る</button>
 				<button type="button" id="btn-overwrite-confirm-submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">同期を続行する</button>
+			</div>
+		</div>
+	</div>
+
+	<!-- 9. Retry Failed Files Selection Modal -->
+	<div id="modal-retry-failed-confirm" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-lg p-5 mx-4 flex flex-col max-h-[80%] text-xs">
+			<div class="flex items-center space-x-2 text-red-400 mb-2">
+				<i class="icon-alert-triangle text-xl"></i>
+				<h3 class="text-sm font-bold">整合性エラーが発生したファイルの再試行</h3>
+			</div>
+
+			<p class="text-gray-400 mb-2">
+				整合性チェックを通過できなかったファイルが <strong id="lbl-retry-failed-count" class="text-red-400 font-mono">0</strong> 件あります。再選択して「再試行を実行」をクリックすると、選択したファイルのみ同期処理をやり直します。
+			</p>
+
+			<!-- Master retry checkbox in modal -->
+			<div class="flex items-center space-x-2 py-1.5 mb-1.5 bg-gray-900 border border-gray-700 px-3 rounded">
+				<input type="checkbox" id="chk-modal-retry-failed-master" class="rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" checked>
+				<label for="chk-modal-retry-failed-master" class="font-semibold text-gray-300 select-none cursor-pointer">すべての失敗ファイルを再試行する</label>
+			</div>
+
+			<!-- Retry list -->
+			<div id="retry-failed-target-list" class="flex-1 min-h-0 overflow-y-auto bg-gray-900 border border-gray-700 rounded p-2.5 mb-3 divide-y divide-gray-800">
+				<!-- Dynamically injected retry rows -->
+			</div>
+
+			<div class="flex justify-end space-x-2 pt-3 border-t border-gray-700">
+				<button type="button" id="btn-retry-failed-cancel" class="bg-gray-700 hover:bg-gray-650 px-3 py-1.5 rounded transition">キャンセル</button>
+				<button type="button" id="btn-retry-failed-confirm-submit" class="bg-indigo-600 hover:bg-indigo-500 px-3.5 py-1.5 rounded transition text-white font-semibold">再試行を実行</button>
 			</div>
 		</div>
 	</div>

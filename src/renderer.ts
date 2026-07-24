@@ -1096,22 +1096,8 @@ function startSyncExecution() {
 		.then((result: any) => {
 			const failedTrackIds = result?.failedTrackIds || [];
 			if (failedTrackIds.length > 0) {
-				// Show a confirmation dialog to retry the failed files only
 				setTimeout(() => {
-					if (confirm(`整合性チェックを通過できなかったファイルが ${failedTrackIds.length} 件あります。失敗したファイルのみ再試行しますか？`)) {
-						// Filter checked sets to only include the failed track IDs
-						state.checkedCopyTrackIds = new Set(copyTrackIds.filter((id) => failedTrackIds.includes(id)));
-						state.checkedMoveTrackIds = new Set(moveTrackIds.filter((id) => failedTrackIds.includes(id)));
-						// Clear delete checks as they aren't retried
-						state.checkedDeleteTrackIds.clear();
-						state.checkedDeleteItunesTrackIds.clear();
-
-						// Close progress modal and re-run sync execution
-						elModalProgress.classList.add("hidden");
-						startSyncExecution();
-					} else {
-						elBtnProgressClose.disabled = false;
-					}
+					showRetryFailedModal(failedTrackIds, copyTrackIds, moveTrackIds);
 				}, 500);
 			} else {
 				if (isMock) {
@@ -1129,6 +1115,92 @@ function startSyncExecution() {
 			alert("同期処理中に重大なエラーが発生しました: " + e.message);
 			elModalProgress.classList.add("hidden");
 		});
+}
+
+function showRetryFailedModal(failedTrackIds: string[], originalCopyTrackIds: string[], originalMoveTrackIds: string[]) {
+	const elModalRetryFailedConfirm = document.getElementById("modal-retry-failed-confirm")!;
+	const elLblRetryFailedCount = document.getElementById("lbl-retry-failed-count")!;
+	const elChkModalRetryFailedMaster = document.getElementById("chk-modal-retry-failed-master") as HTMLInputElement;
+	const elRetryFailedTargetList = document.getElementById("retry-failed-target-list")!;
+	const elBtnRetryFailedCancel = document.getElementById("btn-retry-failed-cancel")!;
+	const elBtnRetryFailedConfirmSubmit = document.getElementById("btn-retry-failed-confirm-submit")!;
+
+	elLblRetryFailedCount.textContent = String(failedTrackIds.length);
+	elRetryFailedTargetList.innerHTML = "";
+	elChkModalRetryFailedMaster.checked = true;
+
+	const selectedRetryTrackIds = new Set<string>(failedTrackIds);
+
+	failedTrackIds.forEach((id) => {
+		const item = state.scannedTracks.find((x) => x.id === id);
+		if (!item) return;
+
+		const meta = item.itunesTrack || item.phoneTrack;
+		if (!meta) return;
+
+		const row = document.createElement("div");
+		row.className = "py-2 flex items-center justify-between text-xxs hover:bg-gray-900/60 gap-3 border-b border-gray-800";
+
+		row.innerHTML = `
+			<label for="chk-modal-retry-${id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+				<input type="checkbox" id="chk-modal-retry-${id}" class="chk-modal-retry-item rounded bg-gray-700 border-gray-650 text-red-500 focus:ring-red-400 h-3.5 w-3.5" checked>
+				<div class="truncate flex-1">
+					<div class="font-semibold text-gray-200">${meta.artist || "Unknown"} - ${meta.title || "Unknown"}</div>
+					<div class="text-gray-500 truncate font-mono text-[10px]">${meta.relativePath || ""}</div>
+				</div>
+			</label>
+		`;
+		elRetryFailedTargetList.appendChild(row);
+
+		const chk = document.getElementById(`chk-modal-retry-${id}`) as HTMLInputElement;
+		chk.addEventListener("change", () => {
+			if (chk.checked) {
+				selectedRetryTrackIds.add(id);
+			} else {
+				selectedRetryTrackIds.delete(id);
+			}
+			let allChecked = true;
+			elRetryFailedTargetList.querySelectorAll(".chk-modal-retry-item").forEach((el: any) => {
+				if (!el.checked) allChecked = false;
+			});
+			elChkModalRetryFailedMaster.checked = allChecked;
+		});
+	});
+
+	const onMasterChange = () => {
+		const isChecked = elChkModalRetryFailedMaster.checked;
+		elRetryFailedTargetList.querySelectorAll(".chk-modal-retry-item").forEach((el: any) => {
+			el.checked = isChecked;
+			const id = el.id.substring("chk-modal-retry-".length);
+			if (isChecked) {
+				selectedRetryTrackIds.add(id);
+			} else {
+				selectedRetryTrackIds.delete(id);
+			}
+		});
+	};
+	elChkModalRetryFailedMaster.onclick = onMasterChange;
+
+	const onCancel = () => {
+		elModalRetryFailedConfirm.classList.add("hidden");
+		elBtnProgressClose.disabled = false;
+	};
+	elBtnRetryFailedCancel.onclick = onCancel;
+
+	const onSubmit = () => {
+		elModalRetryFailedConfirm.classList.add("hidden");
+
+		state.checkedCopyTrackIds = new Set(originalCopyTrackIds.filter((id) => selectedRetryTrackIds.has(id)));
+		state.checkedMoveTrackIds = new Set(originalMoveTrackIds.filter((id) => selectedRetryTrackIds.has(id)));
+		state.checkedDeleteTrackIds.clear();
+		state.checkedDeleteItunesTrackIds.clear();
+
+		elModalProgress.classList.add("hidden");
+		startSyncExecution();
+	};
+	elBtnRetryFailedConfirmSubmit.onclick = onSubmit;
+
+	elModalRetryFailedConfirm.classList.remove("hidden");
 }
 
 function setupColumnResize() {
