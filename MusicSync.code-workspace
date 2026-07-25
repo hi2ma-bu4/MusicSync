@@ -12,6 +12,10 @@
 			"**/dist/**": true
 		},
 		"cSpell.words": [
+			"albumartist",
+			"flac",
+			"musicsync",
+			"webmtp",
 			"webusb"
 		]
 	}

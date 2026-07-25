@@ -1,0 +1,75 @@
+$relativePaths = $params.relativePaths
+
+$shell = New-Object -ComObject Shell.Application
+$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if (-not $phoneItem) {
+    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+}
+
+if (-not $phoneItem) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "{}"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+# Group paths by parent folder
+$grouped = @{}
+foreach ($rel in $relativePaths) {
+    $normalized = $rel.Replace("\", "/")
+    $segments = $normalized -split "/"
+    if ($segments.Count -le 1) {
+        $parent = ""
+        $file = $normalized
+    }
+    else {
+        $parent = ($segments[0..($segments.Count - 2)] -join "/")
+        $file = $segments[-1]
+    }
+    if (-not $grouped.ContainsKey($parent)) {
+        $grouped[$parent] = @()
+    }
+    $grouped[$parent] += $file
+}
+
+$results = @{}
+foreach ($parent in $grouped.Keys) {
+    $fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
+    $folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
+    if ($folderItem) {
+        $folder = $folderItem.GetFolder
+        if ($folder) {
+            $files = $grouped[$parent]
+            foreach ($item in $folder.Items()) {
+                if ($item.Name -in $files) {
+                    $rawSize = $item.ExtendedProperty("System.Size")
+                    if ($null -eq $rawSize) { $rawSize = $item.Size }
+                    if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+
+                    $size = 0
+                    if ($null -ne $rawSize -and $rawSize -ne "") {
+                        try { $size = [int64]$rawSize } catch {}
+                    }
+
+                    if ($size -eq 0) {
+                        $sizeStr = $folder.GetDetailsOf($item, 2)
+                        if ($sizeStr -and $sizeStr -match '([\d\.,\s]+)\s*(KB|MB|GB|B|ƒoƒCƒg)?') {
+                            $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+                            $unit = $Matches[2]
+                            if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+                            elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+                            elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+                            else { $size = [int64]$val }
+                        }
+                    }
+                    $fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/" + $item.Name }
+                    $results[$fullRelPath] = $size
+                }
+            }
+        }
+    }
+}
+
+Write-Output "JSON_RESULTS_START"
+$results | ConvertTo-Json -Compress
+Write-Output "JSON_RESULTS_END"

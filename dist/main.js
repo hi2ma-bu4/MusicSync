@@ -500,6 +500,228 @@ async function getTrackMetadata(filePath, relativePath) {
   }
 }
 
+// src/main/powershell/mtp/cleanEmptyDirs.ps1
+var cleanEmptyDirs_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$targetRootItem = Get-MtpFolderItem $phoneItem $subPath\nif (-not $targetRootItem) { exit 0 }\n\nfunction Clean-EmptyMtpFolders($folderItem) {\n    $folder = $folderItem.GetFolder\n    if (-not $folder) { return }\n\n    foreach ($item in $folder.Items()) {\n        if ($item.GetFolder) {\n            Clean-EmptyMtpFolders $item\n        }\n    }\n\n    if ($folderItem.Path -ne $targetRootItem.Path) {\n        if ($folder.Items().Count -eq 0) {\n            $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n            $null = New-Item -ItemType Directory -Path $tempDir -Force\n            $shell.NameSpace($tempDir).MoveHere($folderItem, 16 + 1024)\n            Start-Sleep -Milliseconds 150\n            Remove-Item $tempDir -Recurse -Force\n        }\n    }\n}\n\nClean-EmptyMtpFolders $targetRootItem\n"SUCCESS"\n';
+
+// src/main/powershell/mtp/copyFile.ps1
+var copyFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n}\n\n$destFolder = $destFolderItem.GetFolder\n$destFolder.CopyHere($localSrc, 16)\n\n$fileName = [System.IO.Path]::GetFileName($localSrc)\n$success = $false\n\n# Poll with refreshing and re-querying the target folder\nfor ($i = 0; $i -lt 50; $i++) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n    if (-not $phoneItem) {\n        $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n    }\n    $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n    if ($destFolderItem) {\n        $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n        if ($item) {\n            Start-Sleep -Milliseconds 500\n            $success = $true\n            break\n        }\n    }\n    Start-Sleep -Milliseconds 200\n}\n\nif ($success) { "SUCCESS" } else { "FAILED" }\n';
+
+// src/main/powershell/mtp/deleteFile.ps1
+var deleteFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif ($fileItem) {\n    $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n    $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n    $tempFolder = $shell.NameSpace($tempDir)\n    $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n    for ($i = 0; $i -lt 50; $i++) {\n        if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n        Start-Sleep -Milliseconds 100\n    }\n\n    Remove-Item $tempDir -Recurse -Force\n}\n"SUCCESS"\n';
+
+// src/main/powershell/mtp/executeBatchSync.ps1
+var executeBatchSync_default = '$ops = $params.operations\n\n$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) {\n    throw "Phone not found: $phoneName"\n}\n\n$consecutiveFailures = 0\n$failedTrackIds = @()\n$total = $ops.Count\n$completed = 0\n\nforeach ($op in $ops) {\n    $completed++\n    $type = $op.type\n    $trackId = $op.trackId\n    $success = $false\n    $errorMsg = ""\n\n    try {\n        if ($type -eq "delete") {\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D ($completed/$total): $remoteDest"\n\n            $relPathInsideSub = $remoteDest\n            if ($relPathInsideSub -match "^$subPath/(.*)$") {\n                $relPathInsideSub = $Matches[1]\n            }\n            $fullPath = "$subPath/$relPathInsideSub"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullPath\n            if ($fileItem) {\n                $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n                $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n                $tempFolder = $shell.NameSpace($tempDir)\n                $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n                for ($i = 0; $i -lt 50; $i++) {\n                    if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n                    Start-Sleep -Milliseconds 50\n                }\n                Remove-Item $tempDir -Recurse -Force\n            }\n            $success = $true\n        }\n        elseif ($type -eq "move") {\n            $oldRemoteSrc = $op.oldRemoteSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D ($completed/$total): $oldRemoteSrc"\n\n            $oldRelPath = $oldRemoteSrc\n            if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }\n            $newRelPath = $remoteDest\n            if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }\n\n            $newRelDir = Split-Path $newRelPath\n            $newRelDir = $newRelDir.Replace("\\", "/")\n            if ($newRelDir -eq ".") { $newRelDir = "" }\n            $newFileName = Split-Path $newRelPath -Leaf\n            $oldFileName = Split-Path $oldRelPath -Leaf\n\n            $fullOldPath = "$subPath/$oldRelPath"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\n            if (-not $fileItem) {\n                throw "Source file not found: $fullOldPath"\n            }\n\n            $fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n            }\n\n            if ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n                $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n                Start-Sleep -Milliseconds 150\n                $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1\n            }\n\n            if ($fileItem -and $oldFileName -ne $newFileName) {\n                $fileItem.Name = $newFileName\n                Start-Sleep -Milliseconds 100\n            }\n            $success = $true\n        }\n        elseif ($type -eq "copy") {\n            $localSrc = $op.localSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D ($completed/$total): $remoteDest"\n\n            $relPath = $remoteDest\n            if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }\n            $relativeDestDir = Split-Path $relPath\n            $relativeDestDir = $relativeDestDir.Replace("\\", "/")\n            $destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }\n\n            $fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n            }\n\n            $destFolder = $destFolderItem.GetFolder\n            $destFolder.CopyHere($localSrc, 16)\n\n            $fileName = [System.IO.Path]::GetFileName($localSrc)\n            $pollSuccess = $false\n\n            for ($i = 0; $i -lt 50; $i++) {\n                $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n                if (-not $phoneItem) {\n                    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n                }\n                $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n                if ($destFolderItem) {\n                    $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n                    if ($item) {\n                        Start-Sleep -Milliseconds 250\n                        $pollSuccess = $true\n                        break\n                    }\n                }\n                Start-Sleep -Milliseconds 100\n            }\n\n            if ($pollSuccess) {\n                $success = $true\n            }\n            else {\n                throw "Copy failed or verification timed out for: $fileName"\n            }\n        }\n    }\n    catch {\n        $errorMsg = $_.ToString()\n        $success = $false\n    }\n\n    if ($success) {\n        $consecutiveFailures = 0\n        Write-Output "PROGRESS_UPDATE:SUCCESS_OP:${trackId}"\n    }\n    else {\n        $consecutiveFailures++\n        $failedTrackIds += $trackId\n        Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"\n\n        if ($consecutiveFailures -ge 3) {\n            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"\n            # Wait for Node.js reply on stdin\n            $reply = [Console]::In.ReadLine()\n            if ($reply -eq "ABORT") {\n                Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"\n                break\n            }\n            else {\n                $consecutiveFailures = 0\n            }\n        }\n    }\n}\n\nWrite-Output "JSON_RESULTS_START"\nif ($failedTrackIds.Count -eq 0) {\n    "[]"\n}\nelseif ($failedTrackIds.Count -eq 1) {\n    "[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"\n}\nelse {\n    $failedTrackIds | ConvertTo-Json -Compress\n}\nWrite-Output "JSON_RESULTS_END"\n';
+
+// src/main/powershell/mtp/findMusicFiles.ps1
+var findMusicFiles_default = `$shell = New-Object -ComObject Shell.Application
+$drives = $shell.NameSpace(17)
+if (-not $drives) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if (-not $phoneItem) {
+    $phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+}
+
+if (-not $phoneItem) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$targetItem = Get-MtpFolderItem $phoneItem $subPath
+if (-not $targetItem) {
+    [Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$global:scannedCount = 0
+function Scan-Folder($folderItem, $relPath) {
+    $folder = $folderItem.GetFolder
+    if (-not $folder) { return }
+    foreach ($item in $folder.Items()) {
+        $name = $item.Name
+        $subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
+
+        if ($item.IsFolder) {
+            Scan-Folder $item $subRelPath
+        }
+        else {
+            $ext = ""
+            if ($name -match '\\.([a-zA-Z0-9]+)$') {
+                $ext = "." + $Matches[1].ToLower()
+            }
+            if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
+                $global:scannedCount++
+                if ($global:scannedCount % 5 -eq 0) {
+                    Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
+                }
+                # Retrieve size and modification date using direct properties or GetDetailsOf fallback
+                $rawSize = $item.ExtendedProperty("System.Size")
+                if ($null -eq $rawSize) { $rawSize = $item.Size }
+                if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+
+                $size = 0
+                if ($null -ne $rawSize -and $rawSize -ne "") {
+                    try { $size = [int64]$rawSize } catch {}
+                }
+
+                if ($size -eq 0) {
+                    $sizeStr = $folder.GetDetailsOf($item, 2)
+                    if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                        $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+                        $unit = $Matches[2]
+                        if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+                        elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+                        elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+                        else { $size = [int64]$val }
+                    }
+                }
+
+                $mtimeMs = 0
+                $dateStr = $folder.GetDetailsOf($item, 3)
+                if ($dateStr) {
+                    try {
+                        $date = Get-Date $dateStr
+                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                    }
+                    catch {
+                        Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
+                    }
+                }
+                if ($mtimeMs -eq 0 -and $item.ModifyDate) {
+                    try {
+                        $date = Get-Date $item.ModifyDate
+                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                    }
+                    catch {
+                        Write-Warning "Failed to parse direct ModifyDate for $name : $_"
+                    }
+                }
+                [PSCustomObject]@{
+                    relativePath = $subRelPath
+                    size         = $size
+                    mtimeMs      = $mtimeMs
+                }
+            }
+        }
+    }
+}
+
+$results = Scan-Folder $targetItem ""
+if ($null -eq $results) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+}
+else {
+    Write-Output "JSON_RESULTS_START"
+    $arr = @($results)
+    if ($arr.Count -eq 1) {
+        "[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
+    }
+    else {
+        $arr | ConvertTo-Json -Compress
+    }
+    Write-Output "JSON_RESULTS_END"
+}
+`;
+
+// src/main/powershell/mtp/getFileSizes.ps1
+var getFileSizes_default = `$relativePaths = $params.relativePaths
+
+$shell = New-Object -ComObject Shell.Application
+$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if (-not $phoneItem) {
+    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+}
+
+if (-not $phoneItem) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "{}"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+# Group paths by parent folder
+$grouped = @{}
+foreach ($rel in $relativePaths) {
+    $normalized = $rel.Replace("\\", "/")
+    $segments = $normalized -split "/"
+    if ($segments.Count -le 1) {
+        $parent = ""
+        $file = $normalized
+    }
+    else {
+        $parent = ($segments[0..($segments.Count - 2)] -join "/")
+        $file = $segments[-1]
+    }
+    if (-not $grouped.ContainsKey($parent)) {
+        $grouped[$parent] = @()
+    }
+    $grouped[$parent] += $file
+}
+
+$results = @{}
+foreach ($parent in $grouped.Keys) {
+    $fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
+    $folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
+    if ($folderItem) {
+        $folder = $folderItem.GetFolder
+        if ($folder) {
+            $files = $grouped[$parent]
+            foreach ($item in $folder.Items()) {
+                if ($item.Name -in $files) {
+                    $rawSize = $item.ExtendedProperty("System.Size")
+                    if ($null -eq $rawSize) { $rawSize = $item.Size }
+                    if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+
+                    $size = 0
+                    if ($null -ne $rawSize -and $rawSize -ne "") {
+                        try { $size = [int64]$rawSize } catch {}
+                    }
+
+                    if ($size -eq 0) {
+                        $sizeStr = $folder.GetDetailsOf($item, 2)
+                        if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                            $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+                            $unit = $Matches[2]
+                            if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+                            elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+                            elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+                            else { $size = [int64]$val }
+                        }
+                    }
+                    $fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/" + $item.Name }
+                    $results[$fullRelPath] = $size
+                }
+            }
+        }
+    }
+}
+
+Write-Output "JSON_RESULTS_START"
+$results | ConvertTo-Json -Compress
+Write-Output "JSON_RESULTS_END"
+`;
+
+// src/main/powershell/mtp/getTrackMetadata.ps1
+var getTrackMetadata_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 1 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $fileItem) {\n    [Console]::Error.WriteLine("[getTrackMetadata] File not found: " + $fullPath)\n    exit 1\n}\n\n$localFolder = $shell.NameSpace($tempFilePath)\n# 16: Respond with "Yes to All" to any dialogs, 1024: Disable dialog UI completely\n$localFolder.CopyHere($fileItem, 16 + 1024)\n\n$tempCreatedFile = [System.IO.Path]::Combine($tempFilePath, $fileItem.Name)\n$success = $false\nfor ($i = 0; $i -lt 100; $i++) {\n    if (Test-Path -LiteralPath $tempCreatedFile) {\n        # Short delay to ensure Windows is done writing to disk\n        Start-Sleep -Milliseconds 150\n        $success = $true\n        break\n    }\n    Start-Sleep -Milliseconds 100\n}\n\nif ($success) {\n    "SUCCESS"\n}\nelse {\n    "FAILED"\n}\n';
+
+// src/main/powershell/mtp/isConnected.ps1
+var isConnected_default = '$shell = New-Object -ComObject Shell.Application\n$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phone) {\n    $phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }\n';
+
+// src/main/powershell/mtp/moveFile.ps1
+var moveFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullOldPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\nif (-not $fileItem) { throw "Source file not found: $fullOldPath" }\n\n$fullNewDir = if ($tempFilePath -eq "" -or $tempFilePath -eq ".") { $subPath } else { "$subPath/$tempFilePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n}\n\nif ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n    $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n    Start-Sleep -Milliseconds 250\n    $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldRelativePath } | Select-Object -First 1\n}\n\nif ($fileItem -and $oldRelativePath -ne $newRelativePath) {\n    $fileItem.Name = $newRelativePath\n    Start-Sleep -Milliseconds 150\n}\n\n"SUCCESS"\n';
+
 // src/main/storageWrapper.ts
 var activeMtpWrappers = /* @__PURE__ */ new Set();
 var MtpUserCancelledError = class extends Error {
@@ -1406,15 +1628,7 @@ var PowerShellMtpStorageWrapper = class {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
     try {
-      const script = `
-				$shell = New-Object -ComObject Shell.Application
-				$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-				if (-not $phone) {
-					$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-				}
-				if ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }
-			`;
-      const res = await runPowerShellWithParams(script, { deviceName: this.deviceName });
+      const res = await runPowerShellWithParams(isConnected_default, { deviceName: this.deviceName });
       return res.trim() === "CONNECTED";
     } catch (e) {
       console.error("[PowerShellMtp] isConnected failed:", e);
@@ -1433,123 +1647,6 @@ var PowerShellMtpStorageWrapper = class {
     if (process.platform !== "win32") {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$drives = $shell.NameSpace(17)
-			if (-not $drives) {
-				Write-Output "JSON_RESULTS_START"
-				Write-Output "[]"
-				Write-Output "JSON_RESULTS_END"
-				exit 0
-			}
-
-			$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-
-			if (-not $phoneItem) {
-				Write-Output "JSON_RESULTS_START"
-				Write-Output "[]"
-				Write-Output "JSON_RESULTS_END"
-				exit 0
-			}
-
-			$targetItem = Get-MtpFolderItem $phoneItem $subPath
-			if (-not $targetItem) {
-				[Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
-				Write-Output "JSON_RESULTS_START"
-				Write-Output "[]"
-				Write-Output "JSON_RESULTS_END"
-				exit 0
-			}
-
-			$global:scannedCount = 0
-			function Scan-Folder($folderItem, $relPath) {
-				$folder = $folderItem.GetFolder
-				if (-not $folder) { return }
-				foreach ($item in $folder.Items()) {
-					$name = $item.Name
-					$subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
-
-					if ($item.IsFolder) {
-						Scan-Folder $item $subRelPath
-					} else {
-						$ext = ""
-						if ($name -match '\\.([a-zA-Z0-9]+)$') {
-							$ext = "." + $Matches[1].ToLower()
-						}
-						if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
-							$global:scannedCount++
-							if ($global:scannedCount % 5 -eq 0) {
-								Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
-							}
-							# Retrieve size and modification date using direct properties or GetDetailsOf fallback
-							$rawSize = $item.ExtendedProperty("System.Size")
-							if ($rawSize -eq $null) { $rawSize = $item.Size }
-							if ($rawSize -eq $null) { $rawSize = $item.ExtendedProperty("Size") }
-
-							$size = 0
-							if ($rawSize -ne $null -and $rawSize -ne "") {
-								try { $size = [int64]$rawSize } catch {}
-							}
-
-							if ($size -eq 0) {
-								$sizeStr = $folder.GetDetailsOf($item, 2)
-								if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
-									$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-									$unit = $Matches[2]
-									if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-									elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-									elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-									else { $size = [int64]$val }
-								}
-							}
-
-							$mtimeMs = 0
-							$dateStr = $folder.GetDetailsOf($item, 3)
-							if ($dateStr) {
-								try {
-									$date = Get-Date $dateStr
-									$mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
-								} catch {
-									Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
-								}
-							}
-							if ($mtimeMs -eq 0 -and $item.ModifyDate) {
-								try {
-									$date = Get-Date $item.ModifyDate
-									$mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
-								} catch {
-									Write-Warning "Failed to parse direct ModifyDate for $name : $_"
-								}
-							}
-							[PSCustomObject]@{
-								relativePath = $subRelPath
-								size = $size
-								mtimeMs = $mtimeMs
-							}
-						}
-					}
-				}
-			}
-
-			$results = Scan-Folder $targetItem ""
-			if ($results -eq $null) {
-				Write-Output "JSON_RESULTS_START"
-				Write-Output "[]"
-				Write-Output "JSON_RESULTS_END"
-			} else {
-				Write-Output "JSON_RESULTS_START"
-				$arr = @($results)
-				if ($arr.Count -eq 1) {
-					"[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
-				} else {
-					$arr | ConvertTo-Json -Compress
-				}
-				Write-Output "JSON_RESULTS_END"
-			}
-		`;
     try {
       const progressHandler = (line) => {
         const trimmed = line.trim();
@@ -1557,7 +1654,7 @@ var PowerShellMtpStorageWrapper = class {
           onProgress(trimmed.substring("PROGRESS_UPDATE:".length));
         }
       };
-      const rawStdout = await runPowerShellWithParams(script, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
+      const rawStdout = await runPowerShellWithParams(findMusicFiles_default, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
       let jsonPart = "[]";
       const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
       const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
@@ -1610,45 +1707,8 @@ var PowerShellMtpStorageWrapper = class {
       fs2.mkdirSync(trackTempDir, { recursive: true });
     }
     const relPathInsideSub = this.getRelPathInsideSub(relativePath);
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) { exit 1 }
-
-			$fullPath = "$subPath/$relativePath"
-			$fileItem = Get-MtpFolderItem $phoneItem $fullPath
-			if (-not $fileItem) {
-				[Console]::Error.WriteLine("[getTrackMetadata] File not found: " + $fullPath)
-				exit 1
-			}
-
-			$localFolder = $shell.NameSpace($tempFilePath)
-			# 16: Respond with "Yes to All" to any dialogs, 1024: Disable dialog UI completely
-			$localFolder.CopyHere($fileItem, 16 + 1024)
-
-			$tempCreatedFile = [System.IO.Path]::Combine($tempFilePath, $fileItem.Name)
-			$success = $false
-			for ($i = 0; $i -lt 100; $i++) {
-				if (Test-Path -LiteralPath $tempCreatedFile) {
-					# Short delay to ensure Windows is done writing to disk
-					Start-Sleep -Milliseconds 150
-					$success = $true
-					break
-				}
-				Start-Sleep -Milliseconds 100
-			}
-
-			if ($success) {
-				"SUCCESS"
-			} else {
-				"FAILED"
-			}
-		`;
     try {
-      const res = await runPowerShellWithParams(script, {
+      const res = await runPowerShellWithParams(getTrackMetadata_default, {
         deviceName: this.deviceName,
         subPath: this.subPath,
         relativePath: relPathInsideSub,
@@ -1687,48 +1747,7 @@ var PowerShellMtpStorageWrapper = class {
     const relPathInsideSub = this.getRelPathInsideSub(remoteDestRelativePath);
     const relativeDestDir = path2.dirname(relPathInsideSub).replace(/\\/g, "/");
     const destDirInSub = relativeDestDir === "." ? "" : relativeDestDir;
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) { throw "Phone not found" }
-
-			$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }
-			$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-			if (-not $destFolderItem) {
-				$destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath
-			}
-
-			$destFolder = $destFolderItem.GetFolder
-			$destFolder.CopyHere($localSrc, 16)
-
-			$fileName = [System.IO.Path]::GetFileName($localSrc)
-			$success = $false
-
-			# Poll with refreshing and re-querying the target folder
-			for ($i = 0; $i -lt 50; $i++) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-				if (-not $phoneItem) {
-					$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-				}
-				$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-
-				if ($destFolderItem) {
-					$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
-					if ($item) {
-						Start-Sleep -Milliseconds 500
-						$success = $true
-						break
-					}
-				}
-				Start-Sleep -Milliseconds 200
-			}
-
-			if ($success) { "SUCCESS" } else { "FAILED" }
-		`;
-    const res = await runPowerShellWithParams(script, {
+    const res = await runPowerShellWithParams(copyFile_default, {
       deviceName: this.deviceName,
       subPath: this.subPath,
       localSrc,
@@ -1747,38 +1766,7 @@ var PowerShellMtpStorageWrapper = class {
     const newRelDirInsideSub = path2.dirname(newRelPathInsideSub).replace(/\\/g, "/");
     const newFileName = path2.basename(newRelPathInsideSub);
     const oldFileName = path2.basename(oldRelPathInsideSub);
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) { throw "Phone not found" }
-
-			$fullOldPath = "$subPath/$relativePath"
-			$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath
-			if (-not $fileItem) { throw "Source file not found: $fullOldPath" }
-
-			$fullNewDir = if ($tempFilePath -eq "" -or $tempFilePath -eq ".") { $subPath } else { "$subPath/$tempFilePath" }
-			$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir
-			if (-not $destFolderItem) {
-				$destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir
-			}
-
-			if ($destFolderItem.Path -ne $fileItem.Parent.Path) {
-				$destFolderItem.GetFolder.MoveHere($fileItem, 16)
-				Start-Sleep -Milliseconds 250
-				$fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldRelativePath } | Select-Object -First 1
-			}
-
-			if ($fileItem -and $oldRelativePath -ne $newRelativePath) {
-				$fileItem.Name = $newRelativePath
-				Start-Sleep -Milliseconds 150
-			}
-
-			"SUCCESS"
-		`;
-    const res = await runPowerShellWithParams(script, {
+    const res = await runPowerShellWithParams(moveFile_default, {
       deviceName: this.deviceName,
       subPath: this.subPath,
       oldRelativePath: oldFileName,
@@ -1795,33 +1783,7 @@ var PowerShellMtpStorageWrapper = class {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
     const relPathInsideSub = this.getRelPathInsideSub(relativePath);
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) { exit 0 }
-
-			$fullPath = "$subPath/$relativePath"
-			$fileItem = Get-MtpFolderItem $phoneItem $fullPath
-			if ($fileItem) {
-				$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
-				$null = New-Item -ItemType Directory -Path $tempDir -Force
-
-				$tempFolder = $shell.NameSpace($tempDir)
-				$tempFolder.MoveHere($fileItem, 16 + 1024)
-
-				for ($i = 0; $i -lt 50; $i++) {
-					if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
-					Start-Sleep -Milliseconds 100
-				}
-
-				Remove-Item $tempDir -Recurse -Force
-			}
-			"SUCCESS"
-		`;
-    await runPowerShellWithParams(script, {
+    await runPowerShellWithParams(deleteFile_default, {
       deviceName: this.deviceName,
       subPath: this.subPath,
       relativePath: relPathInsideSub
@@ -1832,42 +1794,7 @@ var PowerShellMtpStorageWrapper = class {
     if (process.platform !== "win32") {
       throw new Error("PowerShell MTP is only supported on Windows.");
     }
-    const script = `
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) { exit 0 }
-
-			$targetRootItem = Get-MtpFolderItem $phoneItem $subPath
-			if (-not $targetRootItem) { exit 0 }
-
-			function Clean-EmptyMtpFolders($folderItem) {
-				$folder = $folderItem.GetFolder
-				if (-not $folder) { return }
-
-				foreach ($item in $folder.Items()) {
-					if ($item.GetFolder) {
-						Clean-EmptyMtpFolders $item
-					}
-				}
-
-				if ($folderItem.Path -ne $targetRootItem.Path) {
-					if ($folder.Items().Count -eq 0) {
-						$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
-						$null = New-Item -ItemType Directory -Path $tempDir -Force
-						$shell.NameSpace($tempDir).MoveHere($folderItem, 16 + 1024)
-						Start-Sleep -Milliseconds 150
-						Remove-Item $tempDir -Recurse -Force
-					}
-				}
-			}
-
-			Clean-EmptyMtpFolders $targetRootItem
-			"SUCCESS"
-		`;
-    await runPowerShellWithParams(script, {
+    await runPowerShellWithParams(cleanEmptyDirs_default, {
       deviceName: this.deviceName,
       subPath: this.subPath
     });
@@ -1886,180 +1813,6 @@ var PowerShellMtpStorageWrapper = class {
       }
       return { failedTrackIds };
     }
-    const script = `
-			$ops = $params.operations
-
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-			if (-not $phoneItem) {
-				throw "Phone not found: $phoneName"
-			}
-
-			$consecutiveFailures = 0
-			$failedTrackIds = @()
-			$total = $ops.Count
-			$completed = 0
-
-			foreach ($op in $ops) {
-				$completed++
-				$type = $op.type
-				$trackId = $op.trackId
-				$success = $false
-				$errorMsg = ""
-
-				try {
-					if ($type -eq "delete") {
-						$remoteDest = $op.remoteDest
-						Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D ($completed/$total): $remoteDest"
-
-						$relPathInsideSub = $remoteDest
-						if ($relPathInsideSub -match "^$subPath/(.*)$") {
-							$relPathInsideSub = $Matches[1]
-						}
-						$fullPath = "$subPath/$relPathInsideSub"
-						$fileItem = Get-MtpFolderItem $phoneItem $fullPath
-						if ($fileItem) {
-							$tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())
-							$null = New-Item -ItemType Directory -Path $tempDir -Force
-
-							$tempFolder = $shell.NameSpace($tempDir)
-							$tempFolder.MoveHere($fileItem, 16 + 1024)
-
-							for ($i = 0; $i -lt 50; $i++) {
-								if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }
-								Start-Sleep -Milliseconds 50
-							}
-							Remove-Item $tempDir -Recurse -Force
-						}
-						$success = $true
-					}
-					elseif ($type -eq "move") {
-						$oldRemoteSrc = $op.oldRemoteSrc
-						$remoteDest = $op.remoteDest
-						Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D ($completed/$total): $oldRemoteSrc"
-
-						$oldRelPath = $oldRemoteSrc
-						if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }
-						$newRelPath = $remoteDest
-						if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }
-
-						$newRelDir = Split-Path $newRelPath
-						$newRelDir = $newRelDir.Replace("\\", "/")
-						if ($newRelDir -eq ".") { $newRelDir = "" }
-						$newFileName = Split-Path $newRelPath -Leaf
-						$oldFileName = Split-Path $oldRelPath -Leaf
-
-						$fullOldPath = "$subPath/$oldRelPath"
-						$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath
-						if (-not $fileItem) {
-							throw "Source file not found: $fullOldPath"
-						}
-
-						$fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }
-						$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir
-						if (-not $destFolderItem) {
-							$destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir
-						}
-
-						if ($destFolderItem.Path -ne $fileItem.Parent.Path) {
-							$destFolderItem.GetFolder.MoveHere($fileItem, 16)
-							Start-Sleep -Milliseconds 150
-							$fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1
-						}
-
-						if ($fileItem -and $oldFileName -ne $newFileName) {
-							$fileItem.Name = $newFileName
-							Start-Sleep -Milliseconds 100
-						}
-						$success = $true
-					}
-					elseif ($type -eq "copy") {
-						$localSrc = $op.localSrc
-						$remoteDest = $op.remoteDest
-						Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D ($completed/$total): $remoteDest"
-
-						$relPath = $remoteDest
-						if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }
-						$relativeDestDir = Split-Path $relPath
-						$relativeDestDir = $relativeDestDir.Replace("\\", "/")
-						$destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }
-
-						$fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }
-						$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-						if (-not $destFolderItem) {
-							$destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath
-						}
-
-						$destFolder = $destFolderItem.GetFolder
-						$destFolder.CopyHere($localSrc, 16)
-
-						$fileName = [System.IO.Path]::GetFileName($localSrc)
-						$pollSuccess = $false
-
-						for ($i = 0; $i -lt 50; $i++) {
-							$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-							if (-not $phoneItem) {
-								$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-							}
-							$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath
-
-							if ($destFolderItem) {
-								$item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1
-								if ($item) {
-									Start-Sleep -Milliseconds 250
-									$pollSuccess = $true
-									break
-								}
-							}
-							Start-Sleep -Milliseconds 100
-						}
-
-						if ($pollSuccess) {
-							$success = $true
-						} else {
-							throw "Copy failed or verification timed out for: $fileName"
-						}
-					}
-				} catch {
-					$errorMsg = $_.ToString()
-					$success = $false
-				}
-
-				if ($success) {
-					$consecutiveFailures = 0
-					Write-Output "PROGRESS_UPDATE:SUCCESS_OP:$($trackId)"
-				} else {
-					$consecutiveFailures++
-					$failedTrackIds += $trackId
-					Write-Output "PROGRESS_UPDATE:FAILED_OP:$($trackId):$($errorMsg)"
-
-					if ($consecutiveFailures -ge 3) {
-						Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"
-						# Wait for Node.js reply on stdin
-						$reply = [Console]::In.ReadLine()
-						if ($reply -eq "ABORT") {
-							Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"
-							break
-						} else {
-							$consecutiveFailures = 0
-						}
-					}
-				}
-			}
-
-			Write-Output "JSON_RESULTS_START"
-			if ($failedTrackIds.Count -eq 0) {
-				"[]"
-			} elseif ($failedTrackIds.Count -eq 1) {
-				"[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"
-			} else {
-				$failedTrackIds | ConvertTo-Json -Compress
-			}
-			Write-Output "JSON_RESULTS_END"
-		`;
     const total = ops.length;
     let completed = 0;
     const progressHandler = (line, writeStdin) => {
@@ -2095,7 +1848,7 @@ var PowerShellMtpStorageWrapper = class {
     };
     try {
       const rawStdout = await runPowerShellInteractive(
-        script,
+        executeBatchSync_default,
         {
           deviceName: this.deviceName,
           subPath: this.subPath,
@@ -2128,84 +1881,8 @@ var PowerShellMtpStorageWrapper = class {
       });
       return mockSizes;
     }
-    const script = `
-			$relativePaths = $params.relativePaths
-
-			$shell = New-Object -ComObject Shell.Application
-			$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-			if (-not $phoneItem) {
-				$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-			}
-
-			if (-not $phoneItem) {
-				Write-Output "JSON_RESULTS_START"
-				Write-Output "{}"
-				Write-Output "JSON_RESULTS_END"
-				exit 0
-			}
-
-			# Group paths by parent folder
-			$grouped = @{}
-			foreach ($rel in $relativePaths) {
-				$normalized = $rel.Replace("\\", "/")
-				$segments = $normalized -split "/"
-				if ($segments.Count -le 1) {
-					$parent = ""
-					$file = $normalized
-				} else {
-					$parent = ($segments[0..($segments.Count-2)] -join "/")
-					$file = $segments[-1]
-				}
-				if (-not $grouped.ContainsKey($parent)) {
-					$grouped[$parent] = @()
-				}
-				$grouped[$parent] += $file
-			}
-
-			$results = @{}
-			foreach ($parent in $grouped.Keys) {
-				$fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
-				$folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
-				if ($folderItem) {
-					$folder = $folderItem.GetFolder
-					if ($folder) {
-						$files = $grouped[$parent]
-						foreach ($item in $folder.Items()) {
-							if ($item.Name -in $files) {
-								$rawSize = $item.ExtendedProperty("System.Size")
-								if ($rawSize -eq $null) { $rawSize = $item.Size }
-								if ($rawSize -eq $null) { $rawSize = $item.ExtendedProperty("Size") }
-
-								$size = 0
-								if ($rawSize -ne $null -and $rawSize -ne "") {
-									try { $size = [int64]$rawSize } catch {}
-								}
-
-								if ($size -eq 0) {
-									$sizeStr = $folder.GetDetailsOf($item, 2)
-									if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
-										$val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-										$unit = $Matches[2]
-										if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-										elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-										elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-										else { $size = [int64]$val }
-									}
-								}
-								$fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/$($item.Name)" }
-								$results[$fullRelPath] = $size
-							}
-						}
-					}
-				}
-			}
-
-			Write-Output "JSON_RESULTS_START"
-			$results | ConvertTo-Json -Compress
-			Write-Output "JSON_RESULTS_END"
-		`;
     try {
-      const rawStdout = await runPowerShellWithParams(script, {
+      const rawStdout = await runPowerShellWithParams(getFileSizes_default, {
         deviceName: this.deviceName,
         subPath: this.subPath,
         relativePaths

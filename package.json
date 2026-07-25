@@ -1,6 +1,6 @@
 {
   "name": "musicsync",
-  "version": "0.4.4",
+  "version": "0.5.1",
   "description": "iTunesのmusicフォルダをイイ感じに同期する",
   "author": "hi2ma-bu4",
   "keywords": [],
@@ -8,7 +8,7 @@
   "type": "module",
   "main": "dist/main.js",
   "scripts": {
-    "check-types": "npx tsc --noEmit",
+    "check-types": "tsc --noEmit",
     "build:main": "node dev/build.mjs",
     "build:renderer": "vite build --config vite.config.mjs",
     "build": "npm run check-types && npm run build:renderer && npm run build:main",
@@ -29,6 +29,7 @@
     "@chialab/esbuild-plugin-commonjs": "^0.19.1",
     "@types/node": "^26.1.1",
     "esbuild": "^0.28.1",
+    "iconv-lite": "^0.7.3",
     "typescript": "^7.0.2",
     "vite": "^8.1.5"
   },
