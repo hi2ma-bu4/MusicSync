@@ -437,6 +437,7 @@ async function getTrackMetadata(filePath, relativePath) {
     const coverArtSize = picture ? picture.data.length : 0;
     const albumartist = metadata.common.albumartist || "";
     const composer = metadata.common.composer && metadata.common.composer[0] || "";
+    const duration = metadata.format.duration || 0;
     let yearStr = "";
     if (metadata.common.year) {
       yearStr = String(metadata.common.year);
@@ -474,7 +475,8 @@ async function getTrackMetadata(filePath, relativePath) {
       albumartist,
       composer,
       year: yearStr,
-      comment: commentStr
+      comment: commentStr,
+      duration
     };
   } catch (err) {
     const stats = await fs.promises.stat(filePath);
@@ -495,7 +497,8 @@ async function getTrackMetadata(filePath, relativePath) {
       albumartist: "",
       composer: "",
       year: "",
-      comment: ""
+      comment: "",
+      duration: 0
     };
   }
 }
@@ -932,7 +935,8 @@ var MockMtpStorageWrapper = class {
         genre: "R&B",
         disc: "1",
         hasCoverArt: true,
-        coverArtSize: 5e4
+        coverArtSize: 5e4,
+        duration: 200
       }
     });
     this.mockFiles.set(`${this.subPath}/Lil Nas X/Old Town Road.mp3`, {
@@ -946,7 +950,8 @@ var MockMtpStorageWrapper = class {
         genre: "Country",
         disc: "1",
         hasCoverArt: false,
-        coverArtSize: 0
+        coverArtSize: 0,
+        duration: 154
       }
     });
   }
@@ -988,7 +993,8 @@ var MockMtpStorageWrapper = class {
         albumartist: file.metadata.albumartist || "",
         composer: file.metadata.composer || "",
         year: file.metadata.year || "",
-        comment: file.metadata.comment || ""
+        comment: file.metadata.comment || "",
+        duration: file.metadata.duration || 0
       };
     }
     return {
@@ -1003,7 +1009,8 @@ var MockMtpStorageWrapper = class {
       size: 0,
       mtimeMs: Date.now(),
       hasCoverArt: false,
-      coverArtSize: 0
+      coverArtSize: 0,
+      duration: 0
     };
   }
   async copyFileFromLocal(localSrc, remoteDestRelativePath) {
@@ -1988,7 +1995,7 @@ function loadCache(profileId, suffix) {
       const keys = Object.keys(cache);
       if (keys.length > 0) {
         const firstItem = cache[keys[0]];
-        if (firstItem && firstItem.comment === void 0) {
+        if (firstItem && (firstItem.comment === void 0 || firstItem.duration === void 0)) {
           hasFormatMismatch = true;
         }
       }

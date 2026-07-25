@@ -274,6 +274,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 				disc: "1",
 				hasCoverArt: true,
 				coverArtSize: 50000,
+				duration: 200,
 			},
 		});
 		this.mockFiles.set(`${this.subPath}/Lil Nas X/Old Town Road.mp3`, {
@@ -288,6 +289,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 				disc: "1",
 				hasCoverArt: false,
 				coverArtSize: 0,
+				duration: 154,
 			},
 		});
 	}
@@ -334,6 +336,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 				composer: file.metadata.composer || "",
 				year: file.metadata.year || "",
 				comment: file.metadata.comment || "",
+				duration: file.metadata.duration || 0,
 			};
 		}
 		return {
@@ -349,6 +352,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 			mtimeMs: Date.now(),
 			hasCoverArt: false,
 			coverArtSize: 0,
+			duration: 0,
 		};
 	}
 

@@ -269,10 +269,11 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	});
 
 	elBtnSettingsResetCache.addEventListener("click", async () => {
-		if (confirm("スキャン結果キャッシュおよびサムネイル画像を全て削除（リセット）します。よろしいですか？")) {
+		const confirmed = await showCustomConfirm("キャッシュの全削除", "スキャン結果キャッシュおよびサムネイル画像を全て削除（リセット）します。よろしいですか？");
+		if (confirmed) {
 			try {
 				await api.resetCache();
-				alert("キャッシュの全削除が完了しました。");
+				await showCustomAlert("全削除完了", "キャッシュの全削除が完了しました。");
 				elModalSettings.classList.add("hidden");
 				if (state.currentProfileId) {
 					const btnScan = document.getElementById("btn-scan");
@@ -281,7 +282,7 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 					}
 				}
 			} catch (e: any) {
-				alert("キャッシュ削除中にエラーが発生しました: " + e.message);
+				await showCustomAlert("削除エラー", "キャッシュ削除中にエラーが発生しました: " + e.message);
 			}
 		}
 	});
@@ -669,4 +670,60 @@ export function updateDynamicColors(settings: any) {
 		.text-phone_only { color: var(--color-phone-only) !important; }
 		.border-phone_only { border-color: var(--color-phone-only) !important; }
 	`;
+}
+
+export function showCustomConfirm(title: string, message: string): Promise<boolean> {
+	return new Promise((resolve) => {
+		const elModal = document.getElementById("modal-custom-confirm")!;
+		const elTitle = document.getElementById("custom-confirm-title")!;
+		const elMsg = document.getElementById("custom-confirm-message")!;
+		const elBtnCancel = document.getElementById("btn-custom-confirm-cancel")!;
+		const elBtnSubmit = document.getElementById("btn-custom-confirm-submit")!;
+
+		elTitle.textContent = title;
+		elMsg.textContent = message;
+
+		const cleanup = () => {
+			elModal.classList.add("hidden");
+			elBtnCancel.removeEventListener("click", onCancel);
+			elBtnSubmit.removeEventListener("click", onSubmit);
+		};
+
+		const onCancel = () => {
+			cleanup();
+			resolve(false);
+		};
+
+		const onSubmit = () => {
+			cleanup();
+			resolve(true);
+		};
+
+		elBtnCancel.addEventListener("click", onCancel);
+		elBtnSubmit.addEventListener("click", onSubmit);
+
+		elModal.classList.remove("hidden");
+	});
+}
+
+export function showCustomAlert(title: string, message: string): Promise<void> {
+	return new Promise((resolve) => {
+		const elModal = document.getElementById("modal-custom-alert")!;
+		const elTitle = document.getElementById("custom-alert-title")!;
+		const elMsg = document.getElementById("custom-alert-message")!;
+		const elBtnSubmit = document.getElementById("btn-custom-alert-submit")!;
+
+		elTitle.textContent = title;
+		elMsg.textContent = message;
+
+		const onSubmit = () => {
+			elModal.classList.add("hidden");
+			elBtnSubmit.removeEventListener("click", onSubmit);
+			resolve();
+		};
+
+		elBtnSubmit.addEventListener("click", onSubmit);
+
+		elModal.classList.remove("hidden");
+	});
 }

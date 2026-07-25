@@ -16,6 +16,7 @@ export interface TrackMetadata {
 	composer?: string;
 	year?: string;
 	comment?: string;
+	duration?: number;
 }
 
 export interface ScanResultItem {

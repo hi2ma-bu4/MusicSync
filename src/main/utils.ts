@@ -77,6 +77,8 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 		const albumartist = metadata.common.albumartist || "";
 		const composer = (metadata.common.composer && metadata.common.composer[0]) || "";
 
+		const duration = metadata.format.duration || 0;
+
 		// Year can be stored in metadata.common.year or metadata.common.date
 		let yearStr = "";
 		if (metadata.common.year) {
@@ -119,6 +121,7 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			composer,
 			year: yearStr,
 			comment: commentStr,
+			duration,
 		};
 	} catch (err) {
 		const stats = await fs.promises.stat(filePath);
@@ -140,6 +143,7 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			composer: "",
 			year: "",
 			comment: "",
+			duration: 0,
 		};
 	}
 }

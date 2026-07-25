@@ -311,3 +311,36 @@ export function normalizeArtistForIntegration(name: string): string {
 	// 5. Convert to lowercase
 	return res.toLowerCase();
 }
+
+// Format bytes into GB, MB, etc.
+export function formatBytes(bytes: number): string {
+	if (bytes === 0) return "0 B";
+	const k = 1024;
+	const sizes = ["B", "KB", "MB", "GB", "TB"];
+	const i = Math.floor(Math.log(bytes) / Math.log(k));
+	return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i];
+}
+
+// Format duration into HH:MM:SS (e.g. 1850:20:10)
+export function formatDurationHHMMSS(seconds: number): string {
+	if (isNaN(seconds) || seconds < 0) return "00:00:00";
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const s = Math.round(seconds % 60);
+	return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}:${String(s).padStart(2, "0")}`;
+}
+
+// Format signed delta bytes (+1.23 GB, -45.6 MB, ±0 B)
+export function formatDeltaBytes(bytes: number): string {
+	if (bytes === 0) return "±0 B";
+	const prefix = bytes > 0 ? "+" : "";
+	return prefix + formatBytes(bytes);
+}
+
+// Format signed delta duration (+02:15:30, -00:45:00, ±00:00:00)
+export function formatDeltaDurationHHMMSS(seconds: number): string {
+	if (seconds === 0) return "±00:00:00";
+	const sign = seconds > 0 ? "+" : "-";
+	const absSec = Math.abs(seconds);
+	return sign + formatDurationHHMMSS(absSec);
+}

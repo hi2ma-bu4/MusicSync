@@ -2,10 +2,10 @@ import "lucide-static/font/lucide.css";
 import "./style.css";
 
 import { api, isMock } from "./renderer/api";
-import { initModals, updateDynamicColors } from "./renderer/components/modals";
+import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
-import { compareTracks, getSafeId, isTrackChecked, normalizeArtistForIntegration, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
+import { compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getSafeId, isTrackChecked, normalizeArtistForIntegration, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import { ScanResultItem } from "./renderer/types";
 import { DEFAULT_DELIMITERS } from "./shared/constants";
@@ -60,6 +60,7 @@ const elCntPhoneOnly = document.getElementById("cnt-phone_only")!;
 const elCntPathWarnings = document.getElementById("cnt-path-warnings")!;
 const elCntCheckedCopy = document.getElementById("cnt-checked-copy")!;
 const elCntCheckedDelete = document.getElementById("cnt-checked-delete")!;
+const elValTotalStats = document.getElementById("val-total-stats")!;
 
 // Modals
 const elModalProfile = document.getElementById("modal-profile")!;
@@ -75,7 +76,7 @@ const elColorUpdated = document.getElementById("color-updated") as HTMLInputElem
 const elColorSynced = document.getElementById("color-synced") as HTMLInputElement;
 const elColorPhoneOnly = document.getElementById("color-phone_only") as HTMLInputElement;
 
-// Reorganization Modal
+// Reorganization Modal (使ってなくね?)
 const elModalMoveConfirm = document.getElementById("modal-move-confirm")!;
 const elLblMoveCount = document.getElementById("lbl-move-count")!;
 const elChkModalMoveMaster = document.getElementById("chk-modal-move-master") as HTMLInputElement;
@@ -460,6 +461,11 @@ function updateStatsSummary() {
 	let phoneOnly = 0;
 	let pathWarnings = 0;
 
+	let phoneTotalSize = 0;
+	let phoneTotalDuration = 0;
+	let itunesTotalSize = 0;
+	let itunesTotalDuration = 0;
+
 	state.scannedTracks.forEach((t) => {
 		if (t.status === "phone_only") {
 			phoneOnly++;
@@ -472,6 +478,15 @@ function updateStatsSummary() {
 		if (t.pathMismatch) {
 			pathWarnings++;
 		}
+
+		if (t.status !== "missing") {
+			phoneTotalSize += t.phoneTrack?.size ?? t.itunesTrack?.size ?? 0;
+			phoneTotalDuration += t.phoneTrack?.duration ?? t.itunesTrack?.duration ?? 0;
+		}
+		if (t.status !== "phone_only") {
+			itunesTotalSize += t.itunesTrack?.size ?? t.phoneTrack?.size ?? 0;
+			itunesTotalDuration += t.itunesTrack?.duration ?? t.phoneTrack?.duration ?? 0;
+		}
 	});
 
 	elCntTotal.textContent = String(total);
@@ -479,6 +494,10 @@ function updateStatsSummary() {
 	elCntUpdated.textContent = String(updated);
 	elCntSynced.textContent = String(synced);
 	elCntPhoneOnly.textContent = String(phoneOnly);
+
+	if (elValTotalStats) {
+		elValTotalStats.textContent = `${formatBytes(phoneTotalSize)}/${formatBytes(itunesTotalSize)} (${formatDurationHHMMSS(phoneTotalDuration)}/${formatDurationHHMMSS(itunesTotalDuration)})`;
+	}
 
 	const elStatBtnPathWarning = document.getElementById("stat-btn-path_warning");
 	if (pathWarnings > 0) {
@@ -639,7 +658,8 @@ function setupEventListeners() {
 	elBtnDropdownDeleteProfile.addEventListener("click", async () => {
 		const p = state.profiles.find((x) => x.id === state.currentProfileId);
 		if (!p) return;
-		if (confirm(`プロファイル「${p.name}」を削除してもよろしいですか？`)) {
+		const confirmed = await showCustomConfirm("プロファイルの削除", `プロファイル「${p.name}」を削除してもよろしいですか？`);
+		if (confirmed) {
 			state.profiles = await api.deleteProfile(p.id);
 			state.currentProfileId = null;
 			state.scannedTracks = [];
@@ -670,6 +690,11 @@ function setupEventListeners() {
 
 	elBtnScan.addEventListener("click", async () => {
 		if (!state.currentProfileId) return;
+
+		if (!elBtnSyncExec.disabled) {
+			const confirmed = await showCustomConfirm("比較の再実行確認", "同期可能な変更がありますが、本当に再比較を実行しますか？（現在の選択状態はリセットされます）");
+			if (!confirmed) return;
+		}
 
 		elProgressModalTitle.textContent = "ライブラリを解析中...";
 		elLblProgressStatus.textContent = "比較処理を開始しています...";
@@ -733,7 +758,7 @@ function setupEventListeners() {
 		} catch (e: any) {
 			console.error("Error during scan:", e);
 			cancelProgress();
-			alert("スキャン中にエラーが発生しました: " + e.message);
+			await showCustomAlert("スキャンエラー", "スキャン中にエラーが発生しました: " + e.message);
 			elModalProgress.classList.add("hidden");
 		}
 	});
@@ -750,6 +775,29 @@ function setupEventListeners() {
 		document.getElementById("lbl-confirm-move-count")!.textContent = `${moveCount} 件`;
 		document.getElementById("lbl-confirm-delete-itunes-count")!.textContent = `${deleteItunesCount} 件`;
 		document.getElementById("lbl-confirm-delete-count")!.textContent = `${deletePhoneOnlyCount} 件`;
+
+		let deltaSize = 0;
+		let deltaDuration = 0;
+
+		state.scannedTracks.forEach((t) => {
+			if (t.status === "missing" && state.checkedCopyTrackIds.has(t.id)) {
+				deltaSize += t.itunesTrack?.size ?? 0;
+				deltaDuration += t.itunesTrack?.duration ?? 0;
+			} else if (t.status === "updated" && state.checkedCopyTrackIds.has(t.id)) {
+				deltaSize += (t.itunesTrack?.size ?? 0) - (t.phoneTrack?.size ?? 0);
+				deltaDuration += (t.itunesTrack?.duration ?? 0) - (t.phoneTrack?.duration ?? 0);
+			}
+
+			// Deleted tracks
+			const isDeleted = state.checkedDeleteTrackIds.has(t.id);
+			if (isDeleted && (t.status === "synced" || t.status === "updated" || t.status === "phone_only")) {
+				deltaSize -= t.phoneTrack?.size ?? 0;
+				deltaDuration -= t.phoneTrack?.duration ?? 0;
+			}
+		});
+
+		document.getElementById("lbl-confirm-delta-size")!.textContent = formatDeltaBytes(deltaSize);
+		document.getElementById("lbl-confirm-delta-duration")!.textContent = formatDeltaDurationHHMMSS(deltaDuration);
 
 		const pathsMismatchedSelected = state.scannedTracks.filter((t) => (t.status === "missing" || t.status === "updated" || t.status === "synced") && t.pathMismatch && (state.checkedCopyTrackIds.has(t.id) || state.checkedMoveTrackIds.has(t.id)));
 
@@ -891,6 +939,17 @@ function setupEventListeners() {
 			}
 		}
 	});
+
+	window.addEventListener(
+		"keydown",
+		(e) => {
+			if ((e.ctrlKey && e.key.toLowerCase() === "r") || e.key === "F5") {
+				e.preventDefault();
+				e.stopPropagation();
+			}
+		},
+		true,
+	);
 
 	// Custom Warning Popover logic (delegated)
 	let closeTimeout: any = null;
@@ -1109,10 +1168,10 @@ function startSyncExecution() {
 				}
 			}
 		})
-		.catch((e: any) => {
+		.catch(async (e: any) => {
 			console.error("Error during sync execution:", e);
 			cancelProgress();
-			alert("同期処理中に重大なエラーが発生しました: " + e.message);
+			await showCustomAlert("同期エラー", "同期処理中に重大なエラーが発生しました: " + e.message);
 			elModalProgress.classList.add("hidden");
 		});
 }

@@ -102,6 +102,8 @@ if (!window.api) {
 						track: "1",
 						genre: "K-Pop",
 						disc: "1",
+						size: 8500000,
+						duration: 199,
 					},
 				},
 				{
@@ -115,6 +117,8 @@ if (!window.api) {
 						track: "1",
 						genre: "K-Pop",
 						disc: "2",
+						size: 9200000,
+						duration: 207,
 					},
 				},
 				{
@@ -128,6 +132,8 @@ if (!window.api) {
 						track: "1",
 						genre: "Pop",
 						relativePath: "Pop/Stay.mp3",
+						size: 5500000,
+						duration: 141,
 					},
 					phoneTrack: {
 						title: "Stay",
@@ -136,6 +142,8 @@ if (!window.api) {
 						track: "1",
 						genre: "Pop",
 						relativePath: "Stay.mp3",
+						size: 5000000,
+						duration: 138,
 					},
 				},
 				{
@@ -149,6 +157,8 @@ if (!window.api) {
 						track: "3",
 						genre: "R&B",
 						relativePath: "R&B/The Weeknd/After Hours/03 Blinding Lights.mp3",
+						size: 7800000,
+						duration: 200,
 					},
 					phoneTrack: {
 						title: "Blinding Lights",
@@ -157,6 +167,8 @@ if (!window.api) {
 						track: "3",
 						genre: "R&B",
 						relativePath: "R&B/The Weeknd/After Hours/03 Blinding Lights.mp3",
+						size: 7800000,
+						duration: 200,
 					},
 				},
 				{
@@ -170,6 +182,8 @@ if (!window.api) {
 						track: "1",
 						genre: "Country",
 						relativePath: "Lil Nas X/Old Town Road.mp3",
+						size: 6200000,
+						duration: 157,
 					},
 				},
 			];

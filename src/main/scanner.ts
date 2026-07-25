@@ -27,7 +27,7 @@ function loadCache(profileId: string, suffix: string): Record<string, TrackMetad
 			const keys = Object.keys(cache);
 			if (keys.length > 0) {
 				const firstItem = cache[keys[0]];
-				if (firstItem && firstItem.comment === undefined) {
+				if (firstItem && (firstItem.comment === undefined || firstItem.duration === undefined)) {
 					hasFormatMismatch = true;
 				}
 			}
