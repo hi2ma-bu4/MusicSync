@@ -1,8 +1,8 @@
-import { app, dialog, ipcMain, Menu, MenuItem, net, protocol, shell } from "electron";
+import { app, dialog, ipcMain, Menu, MenuItem, protocol, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
-import { pathToFileURL } from "node:url";
+import { Readable } from "node:stream";
 import { DEFAULT_DELIMITERS } from "../shared/constants";
 import { lastScanResults, runScan } from "./scanner";
 import { runSync } from "./sync";
@@ -21,7 +21,55 @@ export function registerIpcHandlers() {
 				return new Response("Not Found", { status: 404 });
 			}
 
-			return await net.fetch(pathToFileURL(decodedPath).toString());
+			const stat = fs.statSync(decodedPath);
+			const fileSize = stat.size;
+
+			const ext = path.extname(decodedPath).toLowerCase();
+			let contentType = "audio/mpeg";
+			if (ext === ".m4a") {
+				contentType = "audio/mp4";
+			} else if (ext === ".wav") {
+				contentType = "audio/wav";
+			} else if (ext === ".flac") {
+				contentType = "audio/flac";
+			} else if (ext === ".ogg") {
+				contentType = "audio/ogg";
+			}
+
+			const rangeHeader = request.headers.get("range") || request.headers.get("Range");
+
+			if (rangeHeader) {
+				const parts = rangeHeader.replace(/bytes=/, "").split("-");
+				const start = parseInt(parts[0], 10);
+				const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
+				const chunkSize = end - start + 1;
+
+				const nodeStream = fs.createReadStream(decodedPath, { start, end });
+				const webStream = Readable.toWeb(nodeStream);
+
+				return new Response(webStream as any, {
+					status: 206,
+					statusText: "Partial Content",
+					headers: {
+						"Content-Range": `bytes ${start}-${end}/${fileSize}`,
+						"Accept-Ranges": "bytes",
+						"Content-Length": String(chunkSize),
+						"Content-Type": contentType,
+					},
+				});
+			} else {
+				const nodeStream = fs.createReadStream(decodedPath);
+				const webStream = Readable.toWeb(nodeStream);
+
+				return new Response(webStream as any, {
+					status: 200,
+					headers: {
+						"Content-Length": String(fileSize),
+						"Content-Type": contentType,
+						"Accept-Ranges": "bytes",
+					},
+				});
+			}
 		} catch (e) {
 			console.error("[media protocol] Failed to fetch media protocol file:", e);
 			return new Response("Internal Server Error", { status: 500 });

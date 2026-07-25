@@ -1490,10 +1490,28 @@ let holdTimer: any = null;
 let tickTimer: any = null;
 let isHoldingAction = false;
 
+function updateVolumeIconUI(vol: number) {
+	const iconVolume = document.getElementById("icon-player-volume")!;
+	if (!iconVolume) return;
+
+	if (vol === 0) {
+		iconVolume.className = "icon-volume-x text-xs text-gray-500";
+	} else if (vol < 0.5) {
+		iconVolume.className = "icon-volume-1 text-xs text-indigo-400";
+	} else {
+		iconVolume.className = "icon-volume-2 text-xs text-indigo-400";
+	}
+}
+
 function setupPlayerEventListeners() {
 	const btnPlay = document.getElementById("btn-player-play")!;
 	const btnLoop = document.getElementById("btn-player-loop")!;
 	const seekbar = document.getElementById("player-seekbar") as HTMLInputElement;
+
+	const btnVolume = document.getElementById("btn-player-volume")!;
+	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
+	const popover = document.getElementById("volume-popover")!;
+	const tooltip = document.getElementById("player-volume-tooltip")!;
 
 	btnPlay.addEventListener("click", () => {
 		togglePlayPause();
@@ -1509,6 +1527,41 @@ function setupPlayerEventListeners() {
 			audioElement.currentTime = (pct / 100) * audioElement.duration;
 		}
 	});
+
+	if (btnVolume && volumeInput && popover) {
+		volumeInput.addEventListener("input", () => {
+			const vol = parseFloat(volumeInput.value);
+			if (audioElement) {
+				audioElement.volume = vol;
+			}
+			updateVolumeIconUI(vol);
+			if (tooltip) {
+				tooltip.textContent = String(Math.round(vol * 100));
+			}
+		});
+
+		btnVolume.addEventListener("click", (e) => {
+			e.stopPropagation();
+			popover.classList.toggle("hidden");
+		});
+
+		popover.addEventListener("click", (e) => {
+			e.stopPropagation();
+		});
+
+		document.addEventListener("click", (e) => {
+			if (popover && !popover.contains(e.target as Node) && e.target !== btnVolume) {
+				popover.classList.add("hidden");
+			}
+		});
+
+		// Set initial icon and tooltip state
+		const initialVol = parseFloat(volumeInput.value);
+		updateVolumeIconUI(initialVol);
+		if (tooltip) {
+			tooltip.textContent = String(Math.round(initialVol * 100));
+		}
+	}
 
 	setupLongPressHandlers();
 }
@@ -1765,6 +1818,11 @@ function playTrackInternal(track: ScanResultItem) {
 	} else {
 		audioElement = new Audio();
 		setupAudioEventListeners(audioElement);
+	}
+
+	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
+	if (volumeInput && audioElement) {
+		audioElement.volume = parseFloat(volumeInput.value);
 	}
 
 	currentPlayingTrack = track;
