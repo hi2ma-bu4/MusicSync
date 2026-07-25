@@ -312,6 +312,33 @@ export function normalizeArtistForIntegration(name: string): string {
 	return res.toLowerCase();
 }
 
+export function normalizeForSearch(name: string): string {
+	// 1. Convert all whitespace characters (half-width and full-width) to single half-width spaces
+	let res = name.replace(/[\s\u3000]+/g, " ");
+
+	// 2. Convert half-width katakana to full-width katakana
+	for (const [hw, fw] of Object.entries(voicedHwMap)) {
+		res = res.replace(new RegExp(hw, "g"), fw);
+	}
+	for (const [hw, fw] of Object.entries(semiVoicedHwMap)) {
+		res = res.replace(new RegExp(hw, "g"), fw);
+	}
+	res = res.replace(/[\uFF61-\uFF9F]/g, (ch) => hwKatakanaMap[ch] || ch);
+
+	// 3. Convert full-width katakana to hiragana
+	res = res.replace(/[\u30A1-\u30F6]/g, (ch) => {
+		return String.fromCharCode(ch.charCodeAt(0) - 0x60);
+	});
+
+	// 4. Convert full-width alphanumeric/symbols in range FF01-FF5E to half-width ASCII
+	res = res.replace(/[\uFF01-\uFF5E]/g, (ch) => {
+		return String.fromCharCode(ch.charCodeAt(0) - 0xfee0);
+	});
+
+	// 5. Convert to lowercase
+	return res.toLowerCase().trim();
+}
+
 // Format bytes into GB, MB, etc.
 export function formatBytes(bytes: number): string {
 	if (bytes === 0) return "0 B";

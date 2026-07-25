@@ -309,6 +309,24 @@ export function registerIpcHandlers() {
 				);
 			}
 
+			// Add Detailed Information MenuItem at the bottom
+			menu.append(new MenuItem({ type: "separator" }));
+			if (params.trackId) {
+				menu.append(
+					new MenuItem({
+						label: "詳細情報を表示",
+						click: () => sendCommand("show-track-detail", params.trackId!),
+					}),
+				);
+			} else if (params.album) {
+				menu.append(
+					new MenuItem({
+						label: "アルバム詳細情報を表示",
+						click: () => sendCommand("show-album-detail", params.album!),
+					}),
+				);
+			}
+
 			const win = (event as any).sender.getOwnerBrowserWindow();
 			if (win) {
 				menu.popup({ window: win });

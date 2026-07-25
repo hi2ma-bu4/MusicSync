@@ -13,8 +13,12 @@
 		},
 		"cSpell.words": [
 			"albumartist",
+			"albumartists",
 			"flac",
 			"musicsync",
+			"notmatch",
+			"resizer",
+			"seekbar",
 			"webmtp",
 			"webusb"
 		]

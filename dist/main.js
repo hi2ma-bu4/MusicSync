@@ -2820,6 +2820,22 @@ function registerIpcHandlers() {
           })
         );
       }
+      menu.append(new MenuItem({ type: "separator" }));
+      if (params.trackId) {
+        menu.append(
+          new MenuItem({
+            label: "\u8A73\u7D30\u60C5\u5831\u3092\u8868\u793A",
+            click: () => sendCommand("show-track-detail", params.trackId)
+          })
+        );
+      } else if (params.album) {
+        menu.append(
+          new MenuItem({
+            label: "\u30A2\u30EB\u30D0\u30E0\u8A73\u7D30\u60C5\u5831\u3092\u8868\u793A",
+            click: () => sendCommand("show-album-detail", params.album)
+          })
+        );
+      }
       const win = event.sender.getOwnerBrowserWindow();
       if (win) {
         menu.popup({ window: win });

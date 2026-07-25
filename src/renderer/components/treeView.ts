@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -125,15 +125,18 @@ export function updateAllTreeCheckboxes() {
 export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (tab: "artist" | "album" | "genre" | "track", targetName: string) => void) {
 	container.innerHTML = "";
 
-	const query = state.searchQuery.trim().toLowerCase();
+	const query = state.searchQuery.trim();
 	if (!query) return;
+	const normQuery = normalizeForSearch(query);
 
 	const matchedAlbums: string[] = [];
-	const matchedArtists: string[] = [];
+	const matchedArtists: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
 	const matchedTracks: any[] = [];
 
 	const albumSet = new Set<string>();
-	const artistSet = new Set<string>();
+
+	// Track artist matches to prioritize split ones over non-split ones, and collect associated album names
+	const matchedArtistsMap = new Map<string, { splitName: string; originalArtist?: string; albumNames: Set<string> }>();
 
 	state.scannedTracks.forEach((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
@@ -142,21 +145,70 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 		const artist = meta.artist || "";
 		const album = meta.album || "";
 
-		if (title.toLowerCase().includes(query)) {
+		const normTitle = normalizeForSearch(title);
+		const normAlbum = normalizeForSearch(album);
+		const normArtist = normalizeForSearch(artist);
+
+		if (normTitle.includes(normQuery)) {
 			matchedTracks.push(t);
 		}
-		if (album.toLowerCase().includes(query) && !albumSet.has(album)) {
+		if (normAlbum.includes(normQuery) && !albumSet.has(album)) {
 			albumSet.add(album);
 			matchedAlbums.push(album);
 		}
-		if (artist.toLowerCase().includes(query) && !artistSet.has(artist)) {
-			artistSet.add(artist);
-			matchedArtists.push(artist);
+
+		// Artist matching: search in split artists (high priority) and full artist (low priority)
+		const splitNames = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		let matchedAnySplit = false;
+		splitNames.forEach((name) => {
+			const normSplit = normalizeForSearch(name);
+			if (normSplit.includes(normQuery)) {
+				matchedAnySplit = true;
+				const key = `split:${normSplit}`;
+				if (!matchedArtistsMap.has(key)) {
+					matchedArtistsMap.set(key, { splitName: name, albumNames: new Set() });
+				}
+				if (album) {
+					matchedArtistsMap.get(key)!.albumNames.add(album);
+				}
+			}
+		});
+
+		// Low priority overall artist name fallback if no split name matches
+		if (!matchedAnySplit && normArtist.includes(normQuery)) {
+			const key = `full:${normArtist}`;
+			if (!matchedArtistsMap.has(key)) {
+				matchedArtistsMap.set(key, { splitName: artist, originalArtist: artist, albumNames: new Set() });
+			}
+			if (album) {
+				matchedArtistsMap.get(key)!.albumNames.add(album);
+			}
 		}
 	});
 
+	// Convert map to sorted arrays (split artists first, then full artists)
+	const splitArtistsList: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
+	const fullArtistsList: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
+
+	matchedArtistsMap.forEach((val, key) => {
+		const obj = {
+			splitName: val.splitName,
+			originalArtist: val.originalArtist,
+			albumNames: Array.from(val.albumNames).sort(),
+		};
+		if (key.startsWith("split:")) {
+			splitArtistsList.push(obj);
+		} else {
+			fullArtistsList.push(obj);
+		}
+	});
+
+	splitArtistsList.sort((a, b) => a.splitName.localeCompare(b.splitName, "ja"));
+	fullArtistsList.sort((a, b) => a.splitName.localeCompare(b.splitName, "ja"));
+
+	const finalMatchedArtists = [...splitArtistsList, ...fullArtistsList];
+
 	matchedAlbums.sort();
-	matchedArtists.sort();
 	matchedTracks.sort((a, b) => {
 		const ma = a.itunesTrack || a.phoneTrack;
 		const mb = b.itunesTrack || b.phoneTrack;
@@ -167,8 +219,8 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 	if (matchedAlbums.length > 0) {
 		activeCategories.push({ name: "album", headerText: `アルバム (${matchedAlbums.length}件)`, totalCount: matchedAlbums.length, items: matchedAlbums });
 	}
-	if (matchedArtists.length > 0) {
-		activeCategories.push({ name: "artist", headerText: `アーティスト (${matchedArtists.length}件)`, totalCount: matchedArtists.length, items: matchedArtists });
+	if (finalMatchedArtists.length > 0) {
+		activeCategories.push({ name: "artist", headerText: `アーティスト (${finalMatchedArtists.length}件)`, totalCount: finalMatchedArtists.length, items: finalMatchedArtists });
 	}
 	if (matchedTracks.length > 0) {
 		activeCategories.push({ name: "track", headerText: `曲 (${matchedTracks.length}件)`, totalCount: matchedTracks.length, items: matchedTracks });
@@ -223,30 +275,94 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 		const visibleItems = cat.items.slice(0, allocCount);
 		visibleItems.forEach((item) => {
 			const row = document.createElement("div");
-			row.className = "py-1.5 flex items-center justify-between hover:bg-gray-750/30 rounded px-2 transition cursor-pointer select-none text-gray-300";
+			row.className = "py-1.5 flex items-center justify-between hover:bg-gray-750/30 rounded px-2 transition cursor-pointer select-none text-gray-300 gap-2";
 
 			if (cat.name === "album") {
 				row.innerHTML = `
-					<span class="truncate font-semibold text-gray-200">　${item}</span>
-					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
+					<div class="flex items-center space-x-2 min-w-0 flex-1">
+						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
+							<img class="search-album-art w-full h-full object-cover hidden" data-album-name="${item}" src="" alt="">
+							<i class="search-art-placeholder icon-music text-gray-600 text-[10px]"></i>
+						</div>
+						<span class="truncate font-semibold text-gray-200">${item}</span>
+					</div>
+					<i class="icon-chevron-right text-gray-500 text-xxs shrink-0"></i>
 				`;
 				row.addEventListener("click", () => onNavigate("album", item));
+
+				// Lazy load album art
+				setTimeout(() => {
+					const img = row.querySelector(".search-album-art") as HTMLImageElement;
+					const placeholder = row.querySelector(".search-art-placeholder") as HTMLElement;
+					if (img && state.currentProfileId) {
+						api.getThumbnail(state.currentProfileId, item).then((dataUri) => {
+							if (dataUri) {
+								img.src = dataUri;
+								img.classList.remove("hidden");
+								if (placeholder) placeholder.classList.add("hidden");
+							}
+						});
+					}
+				}, 10);
 			} else if (cat.name === "artist") {
-				row.innerHTML = `
-					<span class="truncate font-semibold text-gray-200">　${item}</span>
-					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
-				`;
-				row.addEventListener("click", () => onNavigate("artist", item));
+				let artistText = item.splitName;
+				if (item.originalArtist) {
+					// Low priority overall artist name fallback
+					let albumTag = "";
+					if (item.albumNames && item.albumNames.length > 0) {
+						const safeAlbums = item.albumNames.filter((a: string) => a && a !== "Unknown Album");
+						if (safeAlbums.length === 1) {
+							albumTag = ` <span class="text-gray-500 font-normal text-[10px]">(${safeAlbums[0]})</span>`;
+						} else if (safeAlbums.length > 1) {
+							albumTag = ` <span class="text-gray-500 font-normal text-[10px]">(${safeAlbums[0]}、...)</span>`;
+						}
+					}
+					row.innerHTML = `
+						<div class="flex items-center space-x-1 min-w-0 flex-1">
+							<span class="truncate font-semibold text-gray-400 italic">${artistText}</span>
+							${albumTag}
+						</div>
+						<i class="icon-chevron-right text-gray-500 text-xxs shrink-0"></i>
+					`;
+				} else {
+					row.innerHTML = `
+						<span class="truncate font-semibold text-gray-200">${artistText}</span>
+						<i class="icon-chevron-right text-gray-500 text-xxs shrink-0"></i>
+					`;
+				}
+				row.addEventListener("click", () => onNavigate("artist", item.splitName));
 			} else {
 				const meta = item.itunesTrack || item.phoneTrack;
+				const trackAlbum = meta?.album || "";
 				row.innerHTML = `
-					<div class="flex items-center space-x-1 truncate">
-						<span class="text-gray-200 truncate">　${meta?.title}</span>
-						<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+					<div class="flex items-center space-x-2 min-w-0 flex-1">
+						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
+							<img class="search-track-art w-full h-full object-cover hidden" data-album-name="${trackAlbum.replace(/"/g, "&quot;")}" src="" alt="">
+							<i class="search-track-placeholder icon-music text-gray-600 text-[10px]"></i>
+						</div>
+						<div class="flex items-center space-x-1 truncate min-w-0 flex-1">
+							<span class="text-gray-200 truncate font-semibold">${meta?.title}</span>
+							<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+						</div>
 					</div>
-					<i class="icon-chevron-right text-gray-500 text-xxs"></i>
+					<i class="icon-chevron-right text-gray-500 text-xxs shrink-0"></i>
 				`;
 				row.addEventListener("click", () => onNavigate("track", meta?.title || ""));
+
+				// Lazy load track album art
+				setTimeout(() => {
+					const img = row.querySelector(".search-track-art") as HTMLImageElement;
+					const placeholder = row.querySelector(".search-track-placeholder") as HTMLElement;
+					if (img && trackAlbum && state.currentProfileId) {
+						api.getThumbnail(state.currentProfileId, trackAlbum).then((dataUri) => {
+							if (dataUri) {
+								img.src = dataUri;
+								img.classList.remove("hidden");
+								if (placeholder) placeholder.classList.add("hidden");
+							}
+						});
+					}
+				}, 10);
 			}
 			listContainer.appendChild(row);
 		});

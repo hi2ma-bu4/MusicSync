@@ -758,6 +758,118 @@
 		</div>
 	</div>
 
+	<!-- 10. Album/Track Detailed Information Modal -->
+	<div id="modal-detail" class="fixed inset-0 bg-black bg-opacity-75 flex items-center justify-center z-50 hidden">
+		<div class="bg-gray-800 border border-gray-700 rounded-md shadow-2xl w-full max-w-lg p-5 mx-4 flex flex-col max-h-[90%] text-xs">
+			<h3 id="detail-modal-title" class="text-sm font-bold text-indigo-300 mb-3.5">詳細情報</h3>
+
+			<div class="overflow-y-auto flex-1 pr-1.5 space-y-4">
+				<!-- Core Meta Info (Shared) -->
+				<div class="flex gap-4 items-start bg-gray-900/40 p-3 rounded border border-gray-750">
+					<!-- Album Art -->
+					<div class="w-20 h-20 rounded bg-gray-850 border border-gray-750 flex items-center justify-center shrink-0 overflow-hidden shadow-md relative">
+						<img id="detail-album-art" class="w-full h-full object-cover hidden" src="" alt="">
+						<i id="detail-art-placeholder" class="icon-music text-gray-500 text-2xl"></i>
+					</div>
+					<div class="flex-1 min-w-0 space-y-2">
+						<div>
+							<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">アルバム名</label>
+							<input type="text" id="detail-album-name" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white font-semibold focus:outline-none">
+						</div>
+						<div class="grid grid-cols-2 gap-2">
+							<div>
+								<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">発売年</label>
+								<input type="text" id="detail-year" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+							</div>
+							<div>
+								<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">ジャンル</label>
+								<input type="text" id="detail-genre" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+							</div>
+						</div>
+					</div>
+				</div>
+
+				<!-- Track or Album Title Meta -->
+				<div id="detail-title-container">
+					<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">曲名</label>
+					<input type="text" id="detail-title" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white font-bold focus:outline-none">
+				</div>
+
+				<!-- Main Metadata Grid -->
+				<div class="space-y-2">
+					<div>
+						<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">アルバムアーティスト名</label>
+						<input type="text" id="detail-album-artist" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+					</div>
+					<div>
+						<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">アーティスト名</label>
+						<input type="text" id="detail-artist" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+					</div>
+					<div>
+						<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">作曲者</label>
+						<input type="text" id="detail-composer" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+					</div>
+
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">トラック数</label>
+							<div class="flex items-center space-x-1.5">
+								<input type="text" id="detail-track-no" readonly class="w-12 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white text-center focus:outline-none">
+								<span class="text-gray-500">/</span>
+								<input type="text" id="detail-track-total" readonly class="w-12 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white text-center focus:outline-none">
+							</div>
+						</div>
+						<div>
+							<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">ディスク番号</label>
+							<div class="flex items-center space-x-1.5">
+								<input type="text" id="detail-disc-no" readonly class="w-12 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white text-center focus:outline-none">
+								<span class="text-gray-500">/</span>
+								<input type="text" id="detail-disc-total" readonly class="w-12 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white text-center focus:outline-none">
+							</div>
+						</div>
+					</div>
+
+					<div class="grid grid-cols-2 gap-3">
+						<div>
+							<label id="lbl-detail-size-label" class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">ファイルサイズ</label>
+							<input type="text" id="detail-size" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+						</div>
+						<div>
+							<label id="lbl-detail-duration-label" class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">再生時間</label>
+							<input type="text" id="detail-duration" readonly class="w-full bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none">
+						</div>
+					</div>
+				</div>
+
+				<!-- Paths with Explorer Buttons (Track Only) -->
+				<div id="detail-paths-container" class="space-y-2 pt-2 border-t border-gray-750">
+					<div>
+						<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">iTunes上のパス</label>
+						<div class="flex space-x-1.5">
+							<input type="text" id="detail-itunes-path" readonly class="flex-1 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none text-xxs font-mono">
+							<button type="button" id="btn-detail-itunes-explorer" class="bg-gray-700 hover:bg-gray-650 disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1 rounded text-xxs transition shrink-0 cursor-pointer text-gray-300 font-semibold flex items-center space-x-1">
+								<i class="icon-folder"></i><span>表示</span>
+							</button>
+						</div>
+					</div>
+					<div>
+						<label class="block text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-0.5">比較先上のパス</label>
+						<div class="flex space-x-1.5">
+							<input type="text" id="detail-phone-path" readonly class="flex-1 bg-gray-700/50 border border-gray-650 rounded px-2 py-1 text-white focus:outline-none text-xxs font-mono">
+							<button type="button" id="btn-detail-phone-explorer" class="bg-gray-700 hover:bg-gray-650 disabled:opacity-40 disabled:cursor-not-allowed px-2.5 py-1 rounded text-xxs transition shrink-0 cursor-pointer text-gray-300 font-semibold flex items-center space-x-1">
+								<i class="icon-folder"></i><span>表示</span>
+							</button>
+						</div>
+					</div>
+				</div>
+			</div>
+
+			<div class="flex justify-end pt-3 border-t border-gray-700 mt-4">
+				<button type="button" id="btn-detail-close" class="bg-indigo-650 hover:bg-indigo-600 px-5 py-1.5 rounded transition text-white font-semibold cursor-pointer">閉じる</button>
+			</div>
+		</div>
+	</div>
+
 	<!-- Module Loader -->
 	<script type="module" src="./renderer.ts"></script>
 </body>

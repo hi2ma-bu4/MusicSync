@@ -146,6 +146,13 @@ async function init() {
 			updateAllTreeCheckboxes();
 			updateSummaryBar();
 			updateMasterCheckboxState();
+		} else if (command === "show-track-detail") {
+			const track = state.scannedTracks.find((t) => t.id === arg);
+			if (track) {
+				showDetailedModal("track", track);
+			}
+		} else if (command === "show-album-detail") {
+			showDetailedModal("album", arg);
 		} else {
 			navigateToSuggestion(command === "jump-artist" ? "artist" : command === "jump-album" ? "album" : "genre", arg);
 		}
@@ -259,20 +266,25 @@ function switchTab(tabId: "artist" | "album" | "genre" | "track") {
 	updateMasterCheckboxState();
 }
 
+import { normalizeForSearch } from "./renderer/components/utils";
+
 function renderSearchCombobox() {
-	const query = state.searchQuery.trim().toLowerCase();
+	const query = state.searchQuery.trim();
 	if (!query) {
 		elSearchCombobox.classList.add("hidden");
 		elSearchCombobox.innerHTML = "";
 		return;
 	}
+	const normQuery = normalizeForSearch(query);
 
 	const matchedAlbums: string[] = [];
-	const matchedArtists: string[] = [];
+	const matchedArtists: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
 	const matchedTracks: any[] = [];
 
 	const albumSet = new Set<string>();
-	const artistSet = new Set<string>();
+
+	// Track artist matches to prioritize split ones over non-split ones, and collect associated album names
+	const matchedArtistsMap = new Map<string, { splitName: string; originalArtist?: string; albumNames: Set<string> }>();
 
 	state.scannedTracks.forEach((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
@@ -281,21 +293,70 @@ function renderSearchCombobox() {
 		const artist = meta.artist || "";
 		const album = meta.album || "";
 
-		if (title.toLowerCase().includes(query)) {
+		const normTitle = normalizeForSearch(title);
+		const normAlbum = normalizeForSearch(album);
+		const normArtist = normalizeForSearch(artist);
+
+		if (normTitle.includes(normQuery)) {
 			matchedTracks.push(t);
 		}
-		if (album.toLowerCase().includes(query) && !albumSet.has(album)) {
+		if (normAlbum.includes(normQuery) && !albumSet.has(album)) {
 			albumSet.add(album);
 			matchedAlbums.push(album);
 		}
-		if (artist.toLowerCase().includes(query) && !artistSet.has(artist)) {
-			artistSet.add(artist);
-			matchedArtists.push(artist);
+
+		// Artist matching: search in split artists (high priority) and full artist (low priority)
+		const splitNames = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		let matchedAnySplit = false;
+		splitNames.forEach((name) => {
+			const normSplit = normalizeForSearch(name);
+			if (normSplit.includes(normQuery)) {
+				matchedAnySplit = true;
+				const key = `split:${normSplit}`;
+				if (!matchedArtistsMap.has(key)) {
+					matchedArtistsMap.set(key, { splitName: name, albumNames: new Set() });
+				}
+				if (album) {
+					matchedArtistsMap.get(key)!.albumNames.add(album);
+				}
+			}
+		});
+
+		// Low priority overall artist name fallback if no split name matches
+		if (!matchedAnySplit && normArtist.includes(normQuery)) {
+			const key = `full:${normArtist}`;
+			if (!matchedArtistsMap.has(key)) {
+				matchedArtistsMap.set(key, { splitName: artist, originalArtist: artist, albumNames: new Set() });
+			}
+			if (album) {
+				matchedArtistsMap.get(key)!.albumNames.add(album);
+			}
 		}
 	});
 
+	// Convert map to sorted arrays (split artists first, then full artists)
+	const splitArtistsList: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
+	const fullArtistsList: { splitName: string; originalArtist?: string; albumNames: string[] }[] = [];
+
+	matchedArtistsMap.forEach((val, key) => {
+		const obj = {
+			splitName: val.splitName,
+			originalArtist: val.originalArtist,
+			albumNames: Array.from(val.albumNames).sort(),
+		};
+		if (key.startsWith("split:")) {
+			splitArtistsList.push(obj);
+		} else {
+			fullArtistsList.push(obj);
+		}
+	});
+
+	splitArtistsList.sort((a, b) => a.splitName.localeCompare(b.splitName, "ja"));
+	fullArtistsList.sort((a, b) => a.splitName.localeCompare(b.splitName, "ja"));
+
+	const finalMatchedArtists = [...splitArtistsList, ...fullArtistsList];
+
 	matchedAlbums.sort();
-	matchedArtists.sort();
 	matchedTracks.sort((a, b) => {
 		const ma = a.itunesTrack || a.phoneTrack;
 		const mb = b.itunesTrack || b.phoneTrack;
@@ -306,8 +367,8 @@ function renderSearchCombobox() {
 	if (matchedAlbums.length > 0) {
 		activeCategories.push({ name: "album", headerText: `アルバム (${matchedAlbums.length}件)`, totalCount: matchedAlbums.length, items: matchedAlbums });
 	}
-	if (matchedArtists.length > 0) {
-		activeCategories.push({ name: "artist", headerText: `アーティスト (${matchedArtists.length}件)`, totalCount: matchedArtists.length, items: matchedArtists });
+	if (finalMatchedArtists.length > 0) {
+		activeCategories.push({ name: "artist", headerText: `アーティスト (${finalMatchedArtists.length}件)`, totalCount: finalMatchedArtists.length, items: finalMatchedArtists });
 	}
 	if (matchedTracks.length > 0) {
 		activeCategories.push({ name: "track", headerText: `曲 (${matchedTracks.length}件)`, totalCount: matchedTracks.length, items: matchedTracks });
@@ -365,32 +426,99 @@ function renderSearchCombobox() {
 		const visibleItems = cat.items.slice(0, allocCount);
 		visibleItems.forEach((item) => {
 			const row = document.createElement("div");
-			row.className = "py-1 flex items-center justify-between hover:bg-gray-700/50 rounded px-1.5 transition cursor-pointer select-none text-gray-300 truncate";
+			row.className = "py-1 flex items-center justify-between hover:bg-gray-700/50 rounded px-1.5 transition cursor-pointer select-none text-gray-300 gap-2";
 
 			if (cat.name === "album") {
-				row.innerHTML = `<span class="truncate">　${item}</span>`;
+				row.innerHTML = `
+					<div class="flex items-center space-x-2 min-w-0 flex-1">
+						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
+							<img class="search-combobox-album-art w-full h-full object-cover hidden" data-album-name="${item}" src="" alt="">
+							<i class="search-combobox-art-placeholder icon-music text-gray-600 text-[10px]"></i>
+						</div>
+						<span class="truncate font-semibold text-gray-200">${item}</span>
+					</div>
+				`;
 				row.addEventListener("click", (e) => {
 					e.stopPropagation();
 					navigateToSuggestion("album", item);
 				});
+
+				// Lazy load album art
+				setTimeout(() => {
+					const img = row.querySelector(".search-combobox-album-art") as HTMLImageElement;
+					const placeholder = row.querySelector(".search-combobox-art-placeholder") as HTMLElement;
+					if (img && state.currentProfileId) {
+						api.getThumbnail(state.currentProfileId, item).then((dataUri) => {
+							if (dataUri) {
+								img.src = dataUri;
+								img.classList.remove("hidden");
+								if (placeholder) placeholder.classList.add("hidden");
+							}
+						});
+					}
+				}, 10);
 			} else if (cat.name === "artist") {
-				row.innerHTML = `<span class="truncate">　${item}</span>`;
+				let artistText = item.splitName;
+				if (item.originalArtist) {
+					// Low priority overall artist name fallback
+					let albumTag = "";
+					if (item.albumNames && item.albumNames.length > 0) {
+						const safeAlbums = item.albumNames.filter((a: string) => a && a !== "Unknown Album");
+						if (safeAlbums.length === 1) {
+							albumTag = ` <span class="text-gray-500 font-normal text-[10px]">(${safeAlbums[0]})</span>`;
+						} else if (safeAlbums.length > 1) {
+							albumTag = ` <span class="text-gray-500 font-normal text-[10px]">(${safeAlbums[0]}、...)</span>`;
+						}
+					}
+					row.innerHTML = `
+						<div class="flex items-center space-x-1 min-w-0 flex-1">
+							<span class="truncate font-semibold text-gray-400 italic">${artistText}</span>
+							${albumTag}
+						</div>
+					`;
+				} else {
+					row.innerHTML = `
+						<span class="truncate font-semibold text-gray-200">${artistText}</span>
+					`;
+				}
 				row.addEventListener("click", (e) => {
 					e.stopPropagation();
-					navigateToSuggestion("artist", item);
+					navigateToSuggestion("artist", item.splitName);
 				});
 			} else {
 				const meta = item.itunesTrack || item.phoneTrack;
+				const trackAlbum = meta?.album || "";
 				row.innerHTML = `
-					<div class="flex items-center space-x-1 truncate font-sans">
-						<span class="text-gray-200 truncate">　${meta?.title}</span>
-						<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+					<div class="flex items-center space-x-2 min-w-0 flex-1">
+						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
+							<img class="search-combobox-track-art w-full h-full object-cover hidden" data-album-name="${trackAlbum.replace(/"/g, "&quot;")}" src="" alt="">
+							<i class="search-combobox-track-placeholder icon-music text-gray-600 text-[10px]"></i>
+						</div>
+						<div class="flex items-center space-x-1 truncate font-sans min-w-0 flex-1">
+							<span class="text-gray-200 truncate font-semibold">${meta?.title}</span>
+							<span class="text-gray-500 text-[10px] truncate">by ${meta?.artist}</span>
+						</div>
 					</div>
 				`;
 				row.addEventListener("click", (e) => {
 					e.stopPropagation();
 					navigateToSuggestion("track", meta?.title || "");
 				});
+
+				// Lazy load track album art
+				setTimeout(() => {
+					const img = row.querySelector(".search-combobox-track-art") as HTMLImageElement;
+					const placeholder = row.querySelector(".search-combobox-track-placeholder") as HTMLElement;
+					if (img && trackAlbum && state.currentProfileId) {
+						api.getThumbnail(state.currentProfileId, trackAlbum).then((dataUri) => {
+							if (dataUri) {
+								img.src = dataUri;
+								img.classList.remove("hidden");
+								if (placeholder) placeholder.classList.add("hidden");
+							}
+						});
+					}
+				}, 10);
 			}
 			listContainer.appendChild(row);
 		});
@@ -596,11 +724,14 @@ function applyFilterAndRender() {
 
 	// 1. Filter by search query
 	if (state.searchQuery !== "") {
-		const q = state.searchQuery.toLowerCase();
+		const qNorm = normalizeForSearch(state.searchQuery);
 		tracks = tracks.filter((t) => {
 			const meta = t.itunesTrack || t.phoneTrack;
 			if (!meta) return false;
-			return (meta.title || "").toLowerCase().includes(q) || (meta.artist || "").toLowerCase().includes(q) || (meta.album || "").toLowerCase().includes(q);
+			const titleNorm = normalizeForSearch(meta.title || "");
+			const artistNorm = normalizeForSearch(meta.artist || "");
+			const albumNorm = normalizeForSearch(meta.album || "");
+			return titleNorm.includes(qNorm) || artistNorm.includes(qNorm) || albumNorm.includes(qNorm);
 		});
 	}
 
@@ -2139,6 +2270,285 @@ function toggleLoopMode() {
 		iconLoop.className = "icon-repeat-off text-xs text-gray-400";
 		btnLoop.title = "1曲再生して停止";
 	}
+}
+
+// ==========================================
+// 【詳細情報モーダル機能 / DETAILED METADATA MODAL CONTROLLER】
+// ==========================================
+function showDetailedModal(type: "track" | "album", data: any) {
+	const modal = document.getElementById("modal-detail")!;
+	const titleEl = document.getElementById("detail-modal-title")!;
+	const artImg = document.getElementById("detail-album-art") as HTMLImageElement;
+	const artPlaceholder = document.getElementById("detail-art-placeholder")!;
+
+	const txtAlbumName = document.getElementById("detail-album-name") as HTMLInputElement;
+	const txtYear = document.getElementById("detail-year") as HTMLInputElement;
+	const txtGenre = document.getElementById("detail-genre") as HTMLInputElement;
+	const divTitleContainer = document.getElementById("detail-title-container")!;
+	const txtTitle = document.getElementById("detail-title") as HTMLInputElement;
+
+	const txtAlbumArtist = document.getElementById("detail-album-artist") as HTMLInputElement;
+	const txtArtist = document.getElementById("detail-artist") as HTMLInputElement;
+	const txtComposer = document.getElementById("detail-composer") as HTMLInputElement;
+
+	const txtTrackNo = document.getElementById("detail-track-no") as HTMLInputElement;
+	const txtTrackTotal = document.getElementById("detail-track-total") as HTMLInputElement;
+	const txtDiscNo = document.getElementById("detail-disc-no") as HTMLInputElement;
+	const txtDiscTotal = document.getElementById("detail-disc-total") as HTMLInputElement;
+
+	const lblSizeLabel = document.getElementById("lbl-detail-size-label")!;
+	const txtSize = document.getElementById("detail-size") as HTMLInputElement;
+	const lblDurationLabel = document.getElementById("lbl-detail-duration-label")!;
+	const txtDuration = document.getElementById("detail-duration") as HTMLInputElement;
+
+	const divPathsContainer = document.getElementById("detail-paths-container")!;
+	const txtItunesPath = document.getElementById("detail-itunes-path") as HTMLInputElement;
+	const txtPhonePath = document.getElementById("detail-phone-path") as HTMLInputElement;
+
+	const btnItunesExplorer = document.getElementById("btn-detail-itunes-explorer") as HTMLButtonElement;
+	const btnPhoneExplorer = document.getElementById("btn-detail-phone-explorer") as HTMLButtonElement;
+	const btnClose = document.getElementById("btn-detail-close")!;
+
+	// Reset state
+	artImg.classList.add("hidden");
+	artImg.src = "";
+	artPlaceholder.classList.remove("hidden");
+
+	// Reset inputs text colors
+	const resetColorsAndStyle = (el: HTMLInputElement) => {
+		el.classList.remove("text-gray-500", "placeholder-gray-500", "italic", "opacity-50");
+		el.classList.add("text-white");
+		el.value = "";
+		el.placeholder = "";
+	};
+	[txtAlbumName, txtYear, txtGenre, txtTitle, txtAlbumArtist, txtArtist, txtComposer, txtTrackNo, txtTrackTotal, txtDiscNo, txtDiscTotal, txtSize, txtDuration, txtItunesPath, txtPhonePath].forEach(resetColorsAndStyle);
+
+	const applyPlaceholderMixOrHyphen = (el: HTMLInputElement, value: "ミックス" | "-") => {
+		el.classList.add("text-gray-500", "placeholder-gray-500", "italic", "opacity-50");
+		el.classList.remove("text-white");
+		el.value = value;
+	};
+
+	if (type === "track") {
+		titleEl.textContent = "曲の詳細情報";
+		divTitleContainer.classList.remove("hidden");
+		divPathsContainer.classList.remove("hidden");
+		lblSizeLabel.textContent = "ファイルサイズ";
+		lblDurationLabel.textContent = "再生時間";
+
+		const track = data as ScanResultItem;
+		const meta = track.itunesTrack || track.phoneTrack;
+		if (!meta) return;
+
+		// Load Album Art
+		if (meta.album && state.currentProfileId) {
+			api.getThumbnail(state.currentProfileId, meta.album).then((dataUri) => {
+				if (dataUri) {
+					artImg.src = dataUri;
+					artImg.classList.remove("hidden");
+					artPlaceholder.classList.add("hidden");
+				}
+			});
+		}
+
+		txtAlbumName.value = meta.album || "";
+		txtYear.value = meta.year || "";
+		txtGenre.value = meta.genre || "";
+		txtTitle.value = meta.title || "";
+		txtAlbumArtist.value = meta.albumartist || "";
+		txtArtist.value = meta.artist || "";
+		txtComposer.value = meta.composer || "";
+
+		// Parse track layout [1] / [6]
+		if (meta.track) {
+			const parts = meta.track.split("/");
+			txtTrackNo.value = parts[0] || "";
+			if (parts[1]) {
+				txtTrackTotal.value = parts[1];
+			} else {
+				// Search if there are other tracks in the same album to find max track number
+				const albumTracks = state.scannedTracks.filter((t) => (t.itunesTrack || t.phoneTrack)?.album === meta.album);
+				let maxTrack = 0;
+				albumTracks.forEach((t) => {
+					const mt = t.itunesTrack || t.phoneTrack;
+					if (mt && mt.track) {
+						const num = parseInt(mt.track.split("/")[0], 10);
+						if (!isNaN(num) && num > maxTrack) maxTrack = num;
+					}
+				});
+				txtTrackTotal.value = maxTrack > 0 ? String(maxTrack) : "";
+			}
+		}
+
+		// Disc Number [1] / [2]
+		if (meta.disc) {
+			const parts = meta.disc.split("/");
+			txtDiscNo.value = parts[0] || "";
+			if (parts[1]) {
+				txtDiscTotal.value = parts[1];
+			} else {
+				const albumTracks = state.scannedTracks.filter((t) => (t.itunesTrack || t.phoneTrack)?.album === meta.album);
+				let maxDisc = 0;
+				albumTracks.forEach((t) => {
+					const mt = t.itunesTrack || t.phoneTrack;
+					if (mt && mt.disc) {
+						const num = parseInt(mt.disc.split("/")[0], 10);
+						if (!isNaN(num) && num > maxDisc) maxDisc = num;
+					}
+				});
+				txtDiscTotal.value = maxDisc > 0 ? String(maxDisc) : "";
+			}
+		} else {
+			applyPlaceholderMixOrHyphen(txtDiscNo, "-");
+			applyPlaceholderMixOrHyphen(txtDiscTotal, "-");
+		}
+
+		txtSize.value = formatBytes(meta.size || 0);
+		txtDuration.value = formatDurationHHMMSS(meta.duration || 0);
+
+		// Path fields
+		const itunesPathExists = track.itunesTrack && track.itunesTrack.filePath;
+		const phonePathExists = track.phoneTrack && track.phoneTrack.filePath;
+
+		txtItunesPath.value = track.itunesTrack?.filePath || "";
+		txtPhonePath.value = track.phoneTrack?.filePath || "";
+
+		// Enable/Disable explorer buttons
+		// If path is empty, or not technically representable (like mock mtp or simulated mtp targets where physical file opening isn't possible), disable it
+		const canShowItunes = !!itunesPathExists;
+		const canShowPhone = !!(phonePathExists && state.profiles.find((p) => p.id === state.currentProfileId)?.storageType === "local");
+
+		btnItunesExplorer.disabled = !canShowItunes;
+		btnPhoneExplorer.disabled = !canShowPhone;
+
+		// Clean up previous event listeners by cloning button
+		const btnItunesClone = btnItunesExplorer.cloneNode(true) as HTMLButtonElement;
+		btnItunesExplorer.parentNode!.replaceChild(btnItunesClone, btnItunesExplorer);
+		btnItunesClone.addEventListener("click", () => {
+			if (track.itunesTrack?.filePath) {
+				api.showItemInFolder(track.itunesTrack.filePath);
+			}
+		});
+
+		const btnPhoneClone = btnPhoneExplorer.cloneNode(true) as HTMLButtonElement;
+		btnPhoneExplorer.parentNode!.replaceChild(btnPhoneClone, btnPhoneExplorer);
+		btnPhoneClone.addEventListener("click", () => {
+			if (track.phoneTrack?.filePath) {
+				api.showItemInFolder(track.phoneTrack.filePath);
+			}
+		});
+	} else {
+		// Album detailed mode
+		const albumName = data as string;
+		titleEl.textContent = "アルバムの詳細情報";
+		divTitleContainer.classList.add("hidden");
+		divPathsContainer.classList.add("hidden");
+		lblSizeLabel.textContent = "合計アルバムファイルサイズ";
+		lblDurationLabel.textContent = "合計再生時間";
+
+		const albumTracks = state.scannedTracks.filter((t) => (t.itunesTrack || t.phoneTrack)?.album === albumName);
+		if (albumTracks.length === 0) return;
+
+		// Load Album Art (Check any track in album)
+		if (state.currentProfileId) {
+			api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
+				if (dataUri) {
+					artImg.src = dataUri;
+					artImg.classList.remove("hidden");
+					artPlaceholder.classList.add("hidden");
+				}
+			});
+		}
+
+		txtAlbumName.value = albumName;
+
+		// Gather metadata lists from album tracks to determine "Mix" (ミックス) or distinct years/genres
+		const years = new Set<string>();
+		const genres = new Set<string>();
+		const albumartists = new Set<string>();
+		const artists = new Set<string>();
+		const composers = new Set<string>();
+		const discs = new Set<number>();
+
+		let totalSize = 0;
+		let totalDuration = 0;
+
+		albumTracks.forEach((t) => {
+			const mt = t.itunesTrack || t.phoneTrack;
+			if (!mt) return;
+
+			if (mt.year) years.add(mt.year);
+			if (mt.genre) genres.add(mt.genre);
+			if (mt.albumartist) albumartists.add(mt.albumartist);
+			if (mt.artist) artists.add(mt.artist);
+			if (mt.composer) composers.add(mt.composer);
+
+			const discNum = parseInt(mt.disc?.split("/")[0] || "1", 10) || 1;
+			discs.add(discNum);
+
+			totalSize += mt.size || 0;
+			totalDuration += mt.duration || 0;
+		});
+
+		// Multiple years -> "Mix" in placeholder style
+		if (years.size > 1) {
+			applyPlaceholderMixOrHyphen(txtYear, "ミックス");
+		} else {
+			txtYear.value = years.size === 1 ? Array.from(years)[0] : "";
+		}
+
+		// Multiple genres -> "Mix" in placeholder style
+		if (genres.size > 1) {
+			applyPlaceholderMixOrHyphen(txtGenre, "ミックス");
+		} else {
+			txtGenre.value = genres.size === 1 ? Array.from(genres)[0] : "";
+		}
+
+		// Multiple album artists -> "Mix" in placeholder style
+		if (albumartists.size > 1) {
+			applyPlaceholderMixOrHyphen(txtAlbumArtist, "ミックス");
+		} else {
+			txtAlbumArtist.value = albumartists.size === 1 ? Array.from(albumartists)[0] : "";
+		}
+
+		// Multiple artists -> "Mix" in placeholder style
+		if (artists.size > 1) {
+			applyPlaceholderMixOrHyphen(txtArtist, "ミックス");
+		} else {
+			txtArtist.value = artists.size === 1 ? Array.from(artists)[0] : "";
+		}
+
+		// Multiple composers -> "Mix" in placeholder style
+		if (composers.size > 1) {
+			applyPlaceholderMixOrHyphen(txtComposer, "ミックス");
+		} else {
+			txtComposer.value = composers.size === 1 ? Array.from(composers)[0] : "";
+		}
+
+		// Tracks count handling: tracks split across accordion or flat lists
+		// Left: "-" (hyphen), Right: total count of tracks in this album
+		applyPlaceholderMixOrHyphen(txtTrackNo, "-");
+		txtTrackTotal.value = String(albumTracks.length);
+
+		// Disc count handling: if multiple discs exist, left is "-" (hyphen), right is max disc number
+		const maxDiscNum = discs.size > 0 ? Math.max(...Array.from(discs)) : 1;
+		if (discs.size > 1) {
+			applyPlaceholderMixOrHyphen(txtDiscNo, "-");
+			txtDiscTotal.value = String(maxDiscNum);
+		} else {
+			txtDiscNo.value = String(maxDiscNum);
+			txtDiscTotal.value = String(maxDiscNum);
+		}
+
+		txtSize.value = formatBytes(totalSize);
+		txtDuration.value = formatDurationHHMMSS(totalDuration);
+	}
+
+	btnClose.onclick = () => {
+		modal.classList.add("hidden");
+	};
+
+	modal.classList.remove("hidden");
 }
 
 // Start everything
