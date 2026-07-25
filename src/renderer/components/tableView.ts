@@ -45,7 +45,7 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 
 	let rowsHtml = "";
 
-	visibleSlice.forEach((t, i) => {
+	visibleSlice.forEach((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
 		if (!meta) return;
 

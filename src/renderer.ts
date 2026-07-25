@@ -76,12 +76,6 @@ const elColorUpdated = document.getElementById("color-updated") as HTMLInputElem
 const elColorSynced = document.getElementById("color-synced") as HTMLInputElement;
 const elColorPhoneOnly = document.getElementById("color-phone_only") as HTMLInputElement;
 
-// Reorganization Modal (使ってなくね?)
-const elModalMoveConfirm = document.getElementById("modal-move-confirm")!;
-const elLblMoveCount = document.getElementById("lbl-move-count")!;
-const elChkModalMoveMaster = document.getElementById("chk-modal-move-master") as HTMLInputElement;
-const elMoveTargetList = document.getElementById("move-target-list")!;
-
 // Progress Modal
 const elModalProgress = document.getElementById("modal-progress")!;
 const elProgressModalTitle = document.getElementById("progress-modal-title")!;

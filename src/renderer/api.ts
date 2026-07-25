@@ -84,6 +84,7 @@ if (!window.api) {
 			return ["模擬MTPデバイス (Mock MTP Device - デバッグ用)", "Samsung Galaxy S21", "Google Pixel 6 Pro"];
 		},
 		onContextMenuCommand: (callback: any) => {
+			void callback;
 			return () => {};
 		},
 		startScan: async (_profileId: string) => {

@@ -267,7 +267,6 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		// Calculate N-1 match scores and select best candidate
 		let bestMatch: TrackMetadata | null = null;
 		let bestScore = 0;
-		let bestMatchesFields: string[] = [];
 
 		const nonEmptyCount = (iArtistNorm !== "" ? 1 : 0) + (iAlbumNorm !== "" ? 1 : 0) + (iTitleNorm !== "" ? 1 : 0) + (iTrackNorm !== "" ? 1 : 0);
 
@@ -275,46 +274,37 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 			if (matchedPhoneIds.has(P.id)) continue;
 
 			let score = 0;
-			const fields: string[] = [];
 
 			// Artist
 			const pArtistNorm = normText(P.artist);
 			if (iArtistNorm === pArtistNorm && iArtistNorm !== "") {
 				score++;
-				fields.push("artist");
 			} else if (iArtistNorm === "" && pArtistNorm === "") {
 				score++;
-				fields.push("artist");
 			}
 
 			// Album
 			const pAlbumNorm = normText(P.album);
 			if (iAlbumNorm === pAlbumNorm && iAlbumNorm !== "") {
 				score++;
-				fields.push("album");
 			} else if (iAlbumNorm === "" && pAlbumNorm === "") {
 				score++;
-				fields.push("album");
 			}
 
 			// Title
 			const pTitleNorm = normText(P.title);
 			if (iTitleNorm === pTitleNorm && iTitleNorm !== "") {
 				score++;
-				fields.push("title");
 			} else if (iTitleNorm === "" && pTitleNorm === "") {
 				score++;
-				fields.push("title");
 			}
 
 			// Track
 			const pTrackNorm = normTrack(P.track);
 			if (iTrackNorm === pTrackNorm && iTrackNorm !== "") {
 				score++;
-				fields.push("track");
 			} else if (iTrackNorm === "" && pTrackNorm === "") {
 				score++;
-				fields.push("track");
 			}
 
 			// N-1 matching rule: 3 or 4 fields match
@@ -336,20 +326,17 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 				if (!bestMatch) {
 					bestMatch = P;
 					bestScore = score;
-					bestMatchesFields = fields;
 				} else {
 					// Tie breaks:
 					// 1. Direct relative path match
 					if (P.relativePath === I.relativePath) {
 						bestMatch = P;
 						bestScore = score;
-						bestMatchesFields = fields;
 					} else if (bestMatch.relativePath !== I.relativePath) {
 						// 2. Higher score
 						if (score > bestScore) {
 							bestMatch = P;
 							bestScore = score;
-							bestMatchesFields = fields;
 						}
 					}
 				}

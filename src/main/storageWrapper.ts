@@ -198,6 +198,7 @@ export class LocalStorageWrapper implements TargetStorageWrapper {
 	}
 
 	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+		void onProgress;
 		return findLocalMusicFiles(this.phonePath, this.phonePath);
 	}
 
@@ -303,6 +304,7 @@ export class MockMtpStorageWrapper implements TargetStorageWrapper {
 	}
 
 	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
+		void onProgress;
 		const results: { filePath: string; relativePath: string; size?: number; mtimeMs?: number }[] = [];
 		for (const [key, val] of this.mockFiles.entries()) {
 			results.push({
@@ -402,7 +404,6 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 	private productId: number;
 	private subPath: string;
 	private mtpInstance: any = null;
-	private deviceObjectHandles: number[] = [];
 	private fileMap: Map<string, number> = new Map(); // relativePath -> objectHandle
 	private profileId?: string;
 
@@ -496,7 +497,8 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 				throw new MtpUserCancelledError(`MTP接続に失敗しました。再試行エラー: ${e.message}`);
 			}
 		} else {
-			throw new MtpUserCancelledError(`MTP接続に失敗しました。ユーザーにより選択または再試行がキャンセルされました。`);
+			const errorMsg = lastError ? ` 詳細: ${lastError.message}` : "";
+			throw new MtpUserCancelledError(`MTP接続に失敗しました。ユーザーにより選択または再試行がキャンセルされました。${errorMsg}`);
 		}
 	}
 
@@ -530,7 +532,6 @@ export class MtpStorageWrapper implements TargetStorageWrapper {
 	async findMusicFiles(onProgress?: (msg: string) => void): Promise<{ filePath: string; relativePath: string; size?: number; mtimeMs?: number }[]> {
 		const mtp = await this.connectMtp();
 		const handles = await mtp.getObjectHandles();
-		this.deviceObjectHandles = handles;
 
 		const results: { filePath: string; relativePath: string; size?: number; mtimeMs?: number }[] = [];
 		this.fileMap.clear();

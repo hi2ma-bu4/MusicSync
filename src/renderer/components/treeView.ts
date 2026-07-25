@@ -236,7 +236,7 @@ interface RenderCallbacks {
 	renderActiveView: () => void;
 }
 
-function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, parentUpdateId: string, parentTracks: any[], albumTracks: any[], cb: RenderCallbacks, hasMultipleDiscs: boolean, discNum: number, discTracks: any[]) {
+function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, cb: RenderCallbacks) {
 	const meta = t.itunesTrack || t.phoneTrack;
 	if (!meta) return;
 
@@ -276,7 +276,7 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 }
 
 // Lazy renders tracks inside an Album
-function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, parentUpdateId: string, parentTracks: any[], cb: RenderCallbacks) {
+function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, cb: RenderCallbacks) {
 	elTracksChildren.innerHTML = "";
 
 	// Sort albumTracks using active sort rules
@@ -319,7 +319,7 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 
 			// Render tracks of this disc
 			discTracks.forEach((t) => {
-				renderSingleTrackRow(elTracksChildren, t, albumKey, parentUpdateId, parentTracks, albumTracks, cb, hasMultipleDiscs, discNum, discTracks);
+				renderSingleTrackRow(elTracksChildren, t, albumKey, cb);
 			});
 
 			// Setup Disc Checkbox Listener
@@ -339,13 +339,13 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 	} else {
 		// Just render normally
 		albumTracks.forEach((t) => {
-			renderSingleTrackRow(elTracksChildren, t, albumKey, parentUpdateId, parentTracks, albumTracks, cb, false, 1, []);
+			renderSingleTrackRow(elTracksChildren, t, albumKey, cb);
 		});
 	}
 }
 
 // Lazy renders albums inside an Artist
-function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMap: Map<string, any[]>, sortedAlbums: string[], cb: RenderCallbacks, artistKey: string, artistTracks: any[]) {
+function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMap: Map<string, any[]>, sortedAlbums: string[], cb: RenderCallbacks) {
 	elChildren.innerHTML = "";
 	sortedAlbums.forEach((albumName) => {
 		const albumTracks = albumMap.get(albumName)!;
@@ -421,7 +421,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			if (newOpenState) {
 				const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
 				if (elTracksChildren.innerHTML === "") {
-					renderAlbumTracks(elTracksChildren, albumTracks, albumKey, artistKey, artistTracks, cb);
+					renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
 					updateAllTreeCheckboxes();
 				}
 			}
@@ -429,7 +429,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 
 		if (isAlbumOpen) {
 			const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
-			renderAlbumTracks(elTracksChildren, albumTracks, albumKey, artistKey, artistTracks, cb);
+			renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
 		}
 	});
 }
@@ -554,7 +554,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			if (newOpenState) {
 				const elChildren = document.getElementById(`children-${artistKey}`)!;
 				if (elChildren.innerHTML === "") {
-					renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb, artistKey, artistTracks);
+					renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
 					updateAllTreeCheckboxes();
 				}
 			}
@@ -562,7 +562,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 
 		if (isArtistOpen) {
 			const elChildren = document.getElementById(`children-${artistKey}`)!;
-			renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb, artistKey, artistTracks);
+			renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
 		}
 	});
 }
@@ -667,7 +667,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			if (newOpenState) {
 				const elChildren = document.getElementById(`children-${albumKey}`)!;
 				if (elChildren.innerHTML === "") {
-					renderAlbumTracks(elChildren, albumTracks, albumKey, "", [], cb);
+					renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
 					updateAllTreeCheckboxes();
 				}
 			}
@@ -675,7 +675,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 		if (isAlbumOpen) {
 			const elChildren = document.getElementById(`children-${albumKey}`)!;
-			renderAlbumTracks(elChildren, albumTracks, albumKey, "", [], cb);
+			renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
 		}
 	});
 }
@@ -771,7 +771,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			if (newOpenState) {
 				const elChildren = document.getElementById(`children-${genreKey}`)!;
 				if (elChildren.innerHTML === "") {
-					renderAlbumTracks(elChildren, genreTracks, genreKey, "", [], cb);
+					renderAlbumTracks(elChildren, genreTracks, genreKey, cb);
 					updateAllTreeCheckboxes();
 				}
 			}
@@ -779,7 +779,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 
 		if (isGenreOpen) {
 			const elChildren = document.getElementById(`children-${genreKey}`)!;
-			renderAlbumTracks(elChildren, genreTracks, genreKey, "", [], cb);
+			renderAlbumTracks(elChildren, genreTracks, genreKey, cb);
 		}
 	});
 }

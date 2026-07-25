@@ -872,6 +872,7 @@ var LocalStorageWrapper = class {
     return fs2.existsSync(targetPath);
   }
   async findMusicFiles(onProgress) {
+    void onProgress;
     return findMusicFiles(this.phonePath, this.phonePath);
   }
   async getTrackMetadata(filePath, relativePath) {
@@ -962,6 +963,7 @@ var MockMtpStorageWrapper = class {
     return this.mockFiles.has(relativePath);
   }
   async findMusicFiles(onProgress) {
+    void onProgress;
     const results = [];
     for (const [key, val] of this.mockFiles.entries()) {
       results.push({
@@ -1050,7 +1052,6 @@ var MtpStorageWrapper = class {
   productId;
   subPath;
   mtpInstance = null;
-  deviceObjectHandles = [];
   fileMap = /* @__PURE__ */ new Map();
   // relativePath -> objectHandle
   profileId;
@@ -1130,7 +1131,8 @@ var MtpStorageWrapper = class {
         throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u518D\u8A66\u884C\u30A8\u30E9\u30FC: ${e.message}`);
       }
     } else {
-      throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u9078\u629E\u307E\u305F\u306F\u518D\u8A66\u884C\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002`);
+      const errorMsg = lastError ? ` \u8A73\u7D30: ${lastError.message}` : "";
+      throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u9078\u629E\u307E\u305F\u306F\u518D\u8A66\u884C\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002${errorMsg}`);
     }
   }
   async isConnected() {
@@ -1158,7 +1160,6 @@ var MtpStorageWrapper = class {
   async findMusicFiles(onProgress) {
     const mtp = await this.connectMtp();
     const handles = await mtp.getObjectHandles();
-    this.deviceObjectHandles = handles;
     const results = [];
     this.fileMap.clear();
     const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
@@ -2191,43 +2192,33 @@ async function runScan(profile, event) {
     }
     let bestMatch = null;
     let bestScore = 0;
-    let bestMatchesFields = [];
     const nonEmptyCount = (iArtistNorm !== "" ? 1 : 0) + (iAlbumNorm !== "" ? 1 : 0) + (iTitleNorm !== "" ? 1 : 0) + (iTrackNorm !== "" ? 1 : 0);
     for (const P of candidates) {
       if (matchedPhoneIds.has(P.id)) continue;
       let score = 0;
-      const fields = [];
       const pArtistNorm = normText(P.artist);
       if (iArtistNorm === pArtistNorm && iArtistNorm !== "") {
         score++;
-        fields.push("artist");
       } else if (iArtistNorm === "" && pArtistNorm === "") {
         score++;
-        fields.push("artist");
       }
       const pAlbumNorm = normText(P.album);
       if (iAlbumNorm === pAlbumNorm && iAlbumNorm !== "") {
         score++;
-        fields.push("album");
       } else if (iAlbumNorm === "" && pAlbumNorm === "") {
         score++;
-        fields.push("album");
       }
       const pTitleNorm = normText(P.title);
       if (iTitleNorm === pTitleNorm && iTitleNorm !== "") {
         score++;
-        fields.push("title");
       } else if (iTitleNorm === "" && pTitleNorm === "") {
         score++;
-        fields.push("title");
       }
       const pTrackNorm = normTrack(P.track);
       if (iTrackNorm === pTrackNorm && iTrackNorm !== "") {
         score++;
-        fields.push("track");
       } else if (iTrackNorm === "" && pTrackNorm === "") {
         score++;
-        fields.push("track");
       }
       let isValidMatch = false;
       if (nonEmptyCount < 2) {
@@ -2243,17 +2234,14 @@ async function runScan(profile, event) {
         if (!bestMatch) {
           bestMatch = P;
           bestScore = score;
-          bestMatchesFields = fields;
         } else {
           if (P.relativePath === I.relativePath) {
             bestMatch = P;
             bestScore = score;
-            bestMatchesFields = fields;
           } else if (bestMatch.relativePath !== I.relativePath) {
             if (score > bestScore) {
               bestMatch = P;
               bestScore = score;
-              bestMatchesFields = fields;
             }
           }
         }
