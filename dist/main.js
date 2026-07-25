@@ -2699,7 +2699,56 @@ function registerIpcHandlers() {
         );
         menu.append(new MenuItem({ type: "separator" }));
       }
-      if (params.artist) {
+      if (params.artistSelectionState) {
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u9078\u629E",
+            enabled: params.artistSelectionState.canSelectAll,
+            click: () => sendCommand("select-all-artist", params.artist)
+          })
+        );
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u89E3\u9664",
+            enabled: params.artistSelectionState.canDeselectAll,
+            click: () => sendCommand("deselect-all-artist", params.artist)
+          })
+        );
+        menu.append(new MenuItem({ type: "separator" }));
+        menu.append(
+          new MenuItem({
+            label: "\u542B\u307E\u308C\u308B\u5168\u30A2\u30EB\u30D0\u30E0\u3092\u9078\u629E",
+            enabled: params.artistSelectionState.canSelectAllAlbums,
+            click: () => sendCommand("select-albums-artist", params.artist)
+          })
+        );
+        menu.append(
+          new MenuItem({
+            label: "\u542B\u307E\u308C\u308B\u5168\u30A2\u30EB\u30D0\u30E0\u3092\u89E3\u9664",
+            enabled: params.artistSelectionState.canDeselectAllAlbums,
+            click: () => sendCommand("deselect-albums-artist", params.artist)
+          })
+        );
+      } else if (params.albumSelectionState) {
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u9078\u629E",
+            enabled: params.albumSelectionState.canSelectAll,
+            click: () => sendCommand("select-all-album", params.album)
+          })
+        );
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u89E3\u9664",
+            enabled: params.albumSelectionState.canDeselectAll,
+            click: () => sendCommand("deselect-all-album", params.album)
+          })
+        );
+      }
+      if (params.artistSelectionState || params.albumSelectionState) {
+        menu.append(new MenuItem({ type: "separator" }));
+      }
+      if (params.artist && !params.artistSelectionState) {
         if (params.artists && params.artists.length > 1) {
           const submenu = new Menu();
           const sortedArtists = [...params.artists].sort((a, b) => a.localeCompare(b, "ja"));
@@ -2726,7 +2775,7 @@ function registerIpcHandlers() {
           );
         }
       }
-      if (params.album) {
+      if (params.album && !params.albumSelectionState) {
         menu.append(
           new MenuItem({
             label: `\u30A2\u30EB\u30D0\u30E0\u300C${params.album}\u300D\u306E\u66F2\u3092\u8868\u793A`,

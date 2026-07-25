@@ -154,6 +154,16 @@ export function registerIpcHandlers() {
 				genre?: string;
 				itunesFilePath?: string;
 				phoneFilePath?: string;
+				albumSelectionState?: {
+					canSelectAll: boolean;
+					canDeselectAll: boolean;
+				};
+				artistSelectionState?: {
+					canSelectAll: boolean;
+					canDeselectAll: boolean;
+					canSelectAllAlbums: boolean;
+					canDeselectAllAlbums: boolean;
+				};
 			},
 		) => {
 			const menu = new Menu();
@@ -172,7 +182,58 @@ export function registerIpcHandlers() {
 				menu.append(new MenuItem({ type: "separator" }));
 			}
 
-			if (params.artist) {
+			if (params.artistSelectionState) {
+				menu.append(
+					new MenuItem({
+						label: "すべて選択",
+						enabled: params.artistSelectionState.canSelectAll,
+						click: () => sendCommand("select-all-artist", params.artist!),
+					}),
+				);
+				menu.append(
+					new MenuItem({
+						label: "すべて解除",
+						enabled: params.artistSelectionState.canDeselectAll,
+						click: () => sendCommand("deselect-all-artist", params.artist!),
+					}),
+				);
+				menu.append(new MenuItem({ type: "separator" }));
+				menu.append(
+					new MenuItem({
+						label: "含まれる全アルバムを選択",
+						enabled: params.artistSelectionState.canSelectAllAlbums,
+						click: () => sendCommand("select-albums-artist", params.artist!),
+					}),
+				);
+				menu.append(
+					new MenuItem({
+						label: "含まれる全アルバムを解除",
+						enabled: params.artistSelectionState.canDeselectAllAlbums,
+						click: () => sendCommand("deselect-albums-artist", params.artist!),
+					}),
+				);
+			} else if (params.albumSelectionState) {
+				menu.append(
+					new MenuItem({
+						label: "すべて選択",
+						enabled: params.albumSelectionState.canSelectAll,
+						click: () => sendCommand("select-all-album", params.album!),
+					}),
+				);
+				menu.append(
+					new MenuItem({
+						label: "すべて解除",
+						enabled: params.albumSelectionState.canDeselectAll,
+						click: () => sendCommand("deselect-all-album", params.album!),
+					}),
+				);
+			}
+
+			if (params.artistSelectionState || params.albumSelectionState) {
+				menu.append(new MenuItem({ type: "separator" }));
+			}
+
+			if (params.artist && !params.artistSelectionState) {
 				if (params.artists && params.artists.length > 1) {
 					const submenu = new Menu();
 					const sortedArtists = [...params.artists].sort((a, b) => a.localeCompare(b, "ja"));
@@ -200,7 +261,7 @@ export function registerIpcHandlers() {
 				}
 			}
 
-			if (params.album) {
+			if (params.album && !params.albumSelectionState) {
 				menu.append(
 					new MenuItem({
 						label: `アルバム「${params.album}」の曲を表示`,

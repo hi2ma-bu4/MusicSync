@@ -104,6 +104,48 @@ async function init() {
 			if (track) {
 				playTrack(track);
 			}
+		} else if (command === "select-all-artist") {
+			pushHistoryState();
+			const tracks = getArtistTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, true));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "deselect-all-artist") {
+			pushHistoryState();
+			const tracks = getArtistTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, false));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "select-albums-artist") {
+			pushHistoryState();
+			const tracks = getTracksOfAlbumsContainingArtist(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, true));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "deselect-albums-artist") {
+			pushHistoryState();
+			const tracks = getTracksOfAlbumsContainingArtist(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, false));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "select-all-album") {
+			pushHistoryState();
+			const tracks = getAlbumTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, true));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "deselect-all-album") {
+			pushHistoryState();
+			const tracks = getAlbumTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, false));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
 		} else {
 			navigateToSuggestion(command === "jump-artist" ? "artist" : command === "jump-album" ? "album" : "genre", arg);
 		}
@@ -576,6 +618,39 @@ function applyFilterAndRender() {
 	state.filteredTracks = tracks.sort((a, b) => compareTracks(a, b, state.sortRules));
 	renderActiveView();
 	updateMasterCheckboxState();
+}
+
+function getArtistTracks(artistName: string): any[] {
+	return state.filteredTracks.filter((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (!meta) return false;
+		const splitNames = splitAndNormalizeArtist(meta.artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		const normalizedTarget = normalizeArtistForIntegration(artistName);
+		return splitNames.some((name) => normalizeArtistForIntegration(name) === normalizedTarget);
+	});
+}
+
+function getAlbumTracks(albumName: string): any[] {
+	return state.filteredTracks.filter((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		return meta && meta.album === albumName;
+	});
+}
+
+function getTracksOfAlbumsContainingArtist(artistName: string): any[] {
+	const artistTracks = getArtistTracks(artistName);
+	const albumNames = new Set<string>();
+	artistTracks.forEach((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (meta && meta.album) {
+			albumNames.add(meta.album);
+		}
+	});
+
+	return state.filteredTracks.filter((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		return meta && meta.album && albumNames.has(meta.album);
+	});
 }
 
 function setupEventListeners() {
@@ -1059,6 +1134,7 @@ function setupEventListeners() {
 	document.addEventListener("contextmenu", (e) => {
 		const trackRow = (e.target as HTMLElement).closest(".context-track");
 		const albumRow = (e.target as HTMLElement).closest(".context-album");
+		const artistRow = (e.target as HTMLElement).closest(".context-artist");
 
 		if (trackRow) {
 			e.preventDefault();
@@ -1090,11 +1166,40 @@ function setupEventListeners() {
 
 			const artists = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
 
+			const albumTracks = getAlbumTracks(album);
+			const allChecked = albumTracks.length > 0 && albumTracks.every((t) => isTrackChecked(t));
+			const noneChecked = albumTracks.length > 0 && albumTracks.every((t) => !isTrackChecked(t));
+
 			api.showContextMenu({
 				artist,
 				artists,
 				album,
 				genre,
+				albumSelectionState: {
+					canSelectAll: !allChecked,
+					canDeselectAll: !noneChecked,
+				},
+			});
+		} else if (artistRow) {
+			e.preventDefault();
+			const artistName = artistRow.getAttribute("data-artist") || "";
+
+			const artistTracks = getArtistTracks(artistName);
+			const artistAllChecked = artistTracks.length > 0 && artistTracks.every((t) => isTrackChecked(t));
+			const artistNoneChecked = artistTracks.length > 0 && artistTracks.every((t) => !isTrackChecked(t));
+
+			const containingAlbumTracks = getTracksOfAlbumsContainingArtist(artistName);
+			const albumsAllChecked = containingAlbumTracks.length > 0 && containingAlbumTracks.every((t) => isTrackChecked(t));
+			const albumsNoneChecked = containingAlbumTracks.length > 0 && containingAlbumTracks.every((t) => !isTrackChecked(t));
+
+			api.showContextMenu({
+				artist: artistName,
+				artistSelectionState: {
+					canSelectAll: !artistAllChecked,
+					canDeselectAll: !artistNoneChecked,
+					canSelectAllAlbums: !albumsAllChecked,
+					canDeselectAllAlbums: !albumsNoneChecked,
+				},
 			});
 		}
 	});

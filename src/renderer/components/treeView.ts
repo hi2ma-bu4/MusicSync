@@ -32,55 +32,91 @@ export function updateAllTreeCheckboxes() {
 	// 1. Sync all track checkboxes
 	const trackInputs = document.querySelectorAll(`input[id^="chk-track-"]`);
 	trackInputs.forEach((el: any) => {
+		// Since the ID format can be either `chk-track-${albumKey}-${t.id}` or `chk-track-${albumKey}-${discNum}-${t.id}`,
+		// we should retrieve the actual track ID from the end.
+		// Since `t.id` is a UUID or unique string, we can search for it in state.filteredTracks
 		const track = state.filteredTracks.find((t) => el.id.endsWith("-" + t.id));
 		if (track) {
 			el.checked = isTrackChecked(track);
 		}
 	});
 
-	// 2. Sync all disc, album, genre, and artist checkboxes based on DOM hierarchy
+	// 2. Sync all disc, album, genre, and artist checkboxes directly from the filteredTracks state
 	const parentInputs = document.querySelectorAll(`input[id^="chk-"]:not([id^="chk-track-"])`);
 	parentInputs.forEach((el: any) => {
-		if (el.id.startsWith("chk-disc-")) {
-			const prefix = el.id.replace("chk-disc-", "chk-track-");
-			const trackCheckboxes = document.querySelectorAll(`input[id^="${prefix}-"]`);
-			let checkedCount = 0;
-			trackCheckboxes.forEach((chk: any) => {
-				if (chk.checked) checkedCount++;
-			});
-			if (trackCheckboxes.length > 0) {
-				if (checkedCount === 0) {
-					el.checked = false;
-					el.indeterminate = false;
-				} else if (checkedCount === trackCheckboxes.length) {
-					el.checked = true;
-					el.indeterminate = false;
-				} else {
-					el.checked = false;
-					el.indeterminate = true;
-				}
-			}
-		} else {
-			const key = el.id.substring(4); // Remove "chk-"
-			const childrenContainer = document.getElementById(`children-${key}`);
-			if (childrenContainer) {
-				const trackCheckboxes = childrenContainer.querySelectorAll(`input[id^="chk-track-"]`);
-				let checkedCount = 0;
-				trackCheckboxes.forEach((chk: any) => {
-					if (chk.checked) checkedCount++;
+		const dataType = el.getAttribute("data-type");
+		if (!dataType) return;
+
+		let tracks: any[] = [];
+
+		if (dataType === "artist") {
+			const artistName = el.getAttribute("data-artist");
+			if (artistName) {
+				const normalizedTarget = normalizeArtistForIntegration(artistName);
+				tracks = state.filteredTracks.filter((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					if (!meta) return false;
+					const splitNames = splitAndNormalizeArtist(meta.artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+					return splitNames.some((name) => normalizeArtistForIntegration(name) === normalizedTarget);
 				});
-				if (trackCheckboxes.length > 0) {
-					if (checkedCount === 0) {
-						el.checked = false;
-						el.indeterminate = false;
-					} else if (checkedCount === trackCheckboxes.length) {
-						el.checked = true;
-						el.indeterminate = false;
-					} else {
-						el.checked = false;
-						el.indeterminate = true;
-					}
-				}
+			}
+		} else if (dataType === "artistalbum") {
+			const artistName = el.getAttribute("data-artist");
+			const albumName = el.getAttribute("data-album");
+			if (artistName && albumName) {
+				const normalizedTarget = normalizeArtistForIntegration(artistName);
+				tracks = state.filteredTracks.filter((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					if (!meta || meta.album !== albumName) return false;
+					const splitNames = splitAndNormalizeArtist(meta.artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+					return splitNames.some((name) => normalizeArtistForIntegration(name) === normalizedTarget);
+				});
+			}
+		} else if (dataType === "album") {
+			const albumName = el.getAttribute("data-album");
+			if (albumName) {
+				tracks = state.filteredTracks.filter((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					return meta && meta.album === albumName;
+				});
+			}
+		} else if (dataType === "genre") {
+			const genreName = el.getAttribute("data-genre");
+			if (genreName) {
+				tracks = state.filteredTracks.filter((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					const gName = (meta && meta.genre) || "Unknown Genre";
+					return gName === genreName;
+				});
+			}
+		} else if (dataType === "disc") {
+			const albumName = el.getAttribute("data-album");
+			const discVal = el.getAttribute("data-disc");
+			if (albumName && discVal) {
+				const discNum = parseInt(discVal, 10) || 1;
+				tracks = state.filteredTracks.filter((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					if (!meta || meta.album !== albumName) return false;
+					const tDisc = parseInt(meta.disc || "1", 10) || 1;
+					return tDisc === discNum;
+				});
+			}
+		}
+
+		if (tracks.length > 0) {
+			let checkedCount = 0;
+			tracks.forEach((t) => {
+				if (isTrackChecked(t)) checkedCount++;
+			});
+			if (checkedCount === 0) {
+				el.checked = false;
+				el.indeterminate = false;
+			} else if (checkedCount === tracks.length) {
+				el.checked = true;
+				el.indeterminate = false;
+			} else {
+				el.checked = false;
+				el.indeterminate = true;
 			}
 		}
 	});
@@ -236,9 +272,11 @@ interface RenderCallbacks {
 	renderActiveView: () => void;
 }
 
-function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, cb: RenderCallbacks) {
+function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, cb: RenderCallbacks, discNum?: number) {
 	const meta = t.itunesTrack || t.phoneTrack;
 	if (!meta) return;
+
+	const trackCheckboxId = discNum !== undefined ? `chk-track-${albumKey}-${discNum}-${t.id}` : `chk-track-${albumKey}-${t.id}`;
 
 	const row = document.createElement("div");
 	row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900/60 gap-2 bg-${t.status} context-track`;
@@ -249,8 +287,8 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 	row.setAttribute("data-genre", meta.genre || "");
 
 	row.innerHTML = `
-		<label for="chk-track-${albumKey}-${t.id}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
-			<input type="checkbox" id="chk-track-${albumKey}-${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
+		<label for="${trackCheckboxId}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
+			<input type="checkbox" id="${trackCheckboxId}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 			<div class="flex items-center space-x-1 truncate">
 				<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
 				<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -265,7 +303,7 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 
 	elTracksChildren.appendChild(row);
 
-	const chkTrack = document.getElementById(`chk-track-${albumKey}-${t.id}`) as HTMLInputElement;
+	const chkTrack = document.getElementById(trackCheckboxId) as HTMLInputElement;
 	chkTrack.addEventListener("change", () => {
 		pushHistoryState();
 		setTrackCheckedState(t, chkTrack.checked);
@@ -307,19 +345,21 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 		const sortedDiscs = Array.from(discGroups.keys()).sort((a, b) => a - b);
 		sortedDiscs.forEach((discNum) => {
 			const discTracks = discGroups.get(discNum)!;
+			const firstTrackMeta = discTracks[0]?.itunesTrack || discTracks[0]?.phoneTrack;
+			const albumName = firstTrackMeta?.album || "";
 
 			// Add Disc Header
 			const discHeader = document.createElement("div");
 			discHeader.className = "px-3 py-1 bg-gray-900/40 text-[10px] text-gray-400 flex items-center space-x-2 border-b border-gray-800/60 select-none";
 			discHeader.innerHTML = `
-				<input type="checkbox" id="chk-disc-${albumKey}-${discNum}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3 w-3 cursor-pointer">
+				<input type="checkbox" id="chk-disc-${albumKey}-${discNum}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3 w-3 cursor-pointer" data-type="disc" data-album="${albumName}" data-disc="${discNum}">
 				<span class="font-semibold text-gray-400">ディスク ${discNum}</span>
 			`;
 			elTracksChildren.appendChild(discHeader);
 
 			// Render tracks of this disc
 			discTracks.forEach((t) => {
-				renderSingleTrackRow(elTracksChildren, t, albumKey, cb);
+				renderSingleTrackRow(elTracksChildren, t, albumKey, cb, discNum);
 			});
 
 			// Setup Disc Checkbox Listener
@@ -366,7 +406,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 		divAlbum.innerHTML = `
 			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
+					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="artistalbum" data-artist="${artistName}" data-album="${albumName}">
 					<div class="flex items-center space-x-1.5 truncate">
 						<i class="icon-disc text-indigo-300 text-xxs"></i>
 						<span class="font-semibold text-gray-300">${albumName}</span>
@@ -495,12 +535,13 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		});
 
 		const divArtist = document.createElement("div");
-		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
+		divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-artist";
+		divArtist.setAttribute("data-artist", artistName);
 
 		divArtist.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${artistKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
+					<input type="checkbox" id="chk-${artistKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="artist" data-artist="${artistName}">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-user text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${artistName}</span>
@@ -612,7 +653,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		div.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
+					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="album" data-album="${albumName}">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-disc text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${albumName}</span>
@@ -717,7 +758,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		div.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${genreKey}" tabindex="0">
 				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0">
+					<input type="checkbox" id="chk-${genreKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="genre" data-genre="${genreName}">
 					<div class="flex items-center space-x-1 truncate">
 						<i class="icon-tags text-indigo-400 text-xxs"></i>
 						<span class="font-bold text-gray-200">${genreName}</span>
