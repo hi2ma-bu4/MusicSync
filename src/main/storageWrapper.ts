@@ -2,6 +2,7 @@ import { dialog } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { setProcessingRelativePath } from "./cancelState";
 import { TrackMetadata } from "./types";
 import { findMusicFiles as findLocalMusicFiles, getTrackMetadata as getLocalTrackMetadata } from "./utils";
 
@@ -16,6 +17,19 @@ import isConnectedScript from "./powershell/mtp/isConnected.ps1";
 import moveFileScript from "./powershell/mtp/moveFile.ps1";
 
 export const activeMtpWrappers = new Set<MtpStorageWrapper>();
+export const activeChildProcesses = new Set<any>();
+
+export function cancelActiveChildProcesses() {
+	console.log(`[StorageWrapper] Cancelling ${activeChildProcesses.size} active child processes...`);
+	for (const child of activeChildProcesses) {
+		try {
+			child.kill();
+		} catch (e) {
+			console.error("[StorageWrapper] Failed to kill child process:", e);
+		}
+	}
+	activeChildProcesses.clear();
+}
 
 export class MtpUserCancelledError extends Error {
 	constructor(message: string) {
@@ -963,6 +977,7 @@ async function runPowerShellFileCommand(scriptPath: string, onProgressLine?: (li
 	const { spawn } = await import("node:child_process");
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+		activeChildProcesses.add(child);
 
 		let stdout = "";
 		let stderr = "";
@@ -988,6 +1003,7 @@ async function runPowerShellFileCommand(scriptPath: string, onProgressLine?: (li
 		});
 
 		child.on("close", (code) => {
+			activeChildProcesses.delete(child);
 			if (bufferLine && onProgressLine) {
 				onProgressLine(bufferLine);
 			}
@@ -1009,6 +1025,7 @@ async function runPowerShellFileInteractive(scriptPath: string, onProgressLine?:
 	const { spawn } = await import("node:child_process");
 	return new Promise<string>((resolve, reject) => {
 		const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+		activeChildProcesses.add(child);
 
 		let stdout = "";
 		let stderr = "";
@@ -1038,6 +1055,7 @@ async function runPowerShellFileInteractive(scriptPath: string, onProgressLine?:
 		});
 
 		child.on("close", (code) => {
+			activeChildProcesses.delete(child);
 			if (bufferLine && onProgressLine) {
 				onProgressLine(bufferLine, writeStdin);
 			}
@@ -1306,15 +1324,21 @@ export class PowerShellMtpStorageWrapper implements TargetStorageWrapper {
 			const trimmed = line.trim();
 			if (trimmed.startsWith("PROGRESS_UPDATE:STATUS:")) {
 				const msg = trimmed.substring("PROGRESS_UPDATE:STATUS:".length);
+				const currentOp = ops[completed];
+				if (currentOp && (currentOp.type === "copy" || currentOp.type === "move")) {
+					setProcessingRelativePath(currentOp.remoteDest || null, this);
+				}
 				if (onProgress) {
 					onProgress(msg, completed, total);
 				}
 			} else if (trimmed.startsWith("PROGRESS_UPDATE:SUCCESS_OP:")) {
+				setProcessingRelativePath(null, null);
 				completed++;
 				// if (onProgress) {
 				// 	onProgress(`処理成功: ${completed}/${total}`, completed, total);
 				// }
 			} else if (trimmed.startsWith("PROGRESS_UPDATE:FAILED_OP:")) {
+				setProcessingRelativePath(null, null);
 				completed++;
 				const parts = trimmed.substring("PROGRESS_UPDATE:FAILED_OP:".length).split(":");
 				const errorMsg = parts.slice(1).join(":");

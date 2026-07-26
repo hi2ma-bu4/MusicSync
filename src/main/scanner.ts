@@ -1,6 +1,7 @@
 import { app, dialog } from "electron";
 import fs from "node:fs";
 import path from "node:path";
+import { activeScanCancelled, resetScanCancelled } from "./cancelState";
 import { getStorageWrapper } from "./storageWrapper";
 import { ScanResultItem, TrackMetadata } from "./types";
 import { findMusicFiles, getTrackMetadata, normText, normTrack } from "./utils";
@@ -69,6 +70,7 @@ function saveCache(profileId: string, suffix: string, cache: Record<string, Trac
 }
 
 export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent): Promise<void> {
+	resetScanCancelled();
 	const profileId = profile.id;
 	const sendProgress = (step: string, message: string, progress: number, details?: any) => {
 		event.sender.send("scan-progress", { step, message, progress, ...details });
@@ -81,11 +83,21 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 
 	sendProgress("itunes_list", "iTunesフォルダ内のファイルを検索中...", 5);
 	const itunesFiles = await findMusicFiles(profile.itunesPath);
+	if (activeScanCancelled) {
+		throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+	}
 
 	sendProgress("phone_list", "比較先フォルダ内のファイルを検索中...", 15);
 	const phoneFiles = await storage.findMusicFiles((msg) => {
+		if (activeScanCancelled) {
+			// We can trigger an error/interrupt inside the progress callback
+			throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+		}
 		sendProgress("phone_list", msg, 15);
 	});
+	if (activeScanCancelled) {
+		throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+	}
 
 	// Load caches
 	const itunesCache = loadCache(profileId, "itunes");
@@ -116,6 +128,9 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	let current = 0;
 	let total = itunesFiles.length;
 	for (const file of itunesFiles) {
+		if (activeScanCancelled) {
+			throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+		}
 		current++;
 		if (current % 100 === 0 || current === total) {
 			const pct = 15 + Math.round((current / total) * 35);
@@ -159,6 +174,9 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	current = 0;
 	total = phoneFiles.length;
 	for (const file of phoneFiles) {
+		if (activeScanCancelled) {
+			throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+		}
 		current++;
 		if (current % 100 === 0 || current === total) {
 			const pct = 50 + Math.round((current / total) * 35);

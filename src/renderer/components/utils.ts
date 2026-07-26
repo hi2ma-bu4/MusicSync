@@ -360,8 +360,8 @@ export function formatDurationHHMMSS(seconds: number): string {
 // Format signed delta bytes (+1.23 GB, -45.6 MB, ±0 B)
 export function formatDeltaBytes(bytes: number): string {
 	if (bytes === 0) return "±0 B";
-	const prefix = bytes > 0 ? "+" : "";
-	return prefix + formatBytes(bytes);
+	const prefix = bytes > 0 ? "+" : "-";
+	return prefix + formatBytes(Math.abs(bytes));
 }
 
 // Format signed delta duration (+02:15:30, -00:45:00, ±00:00:00)

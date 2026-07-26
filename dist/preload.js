@@ -14,6 +14,7 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   showContextMenu: (params) => import_electron.ipcRenderer.send("show-context-menu", params),
   getUsbDevices: () => import_electron.ipcRenderer.invoke("get-usb-devices"),
   getMtpDeviceNames: () => import_electron.ipcRenderer.invoke("get-mtp-device-names"),
+  cancelActiveTask: () => import_electron.ipcRenderer.invoke("cancel-active-task"),
   onContextMenuCommand: (callback) => {
     const listener = (_event, payload) => callback(payload.command, payload.arg);
     import_electron.ipcRenderer.on("context-menu-command", listener);

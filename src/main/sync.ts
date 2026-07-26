@@ -1,10 +1,13 @@
 import fs from "node:fs";
 import path from "node:path";
+import { activeSyncCancelled, resetSyncCancelled, setProcessingRelativePath } from "./cancelState";
 import { lastScanResults } from "./scanner";
 import { getStorageWrapper } from "./storageWrapper";
 import { SyncOptions } from "./types";
 
 export async function runSync(profile: any, options: SyncOptions, event: Electron.IpcMainInvokeEvent): Promise<{ failedTrackIds: string[] }> {
+	resetSyncCancelled();
+	setProcessingRelativePath(null, null);
 	const profileId = profile.id;
 	const { copyTrackIds, moveTrackIds, deleteTrackIds } = options;
 	const scanItems = lastScanResults[profileId] || [];
@@ -22,6 +25,14 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 
 	const totalOperations = copyTrackIds.length + moveTrackIds.length + deleteTrackIds.length;
 	let completed = 0;
+
+	const totalDeletes = deleteTrackIds.length;
+	const totalMoves = moveTrackIds.length;
+	const totalCopies = copyTrackIds.length;
+
+	let deleteCompleted = 0;
+	let moveCompleted = 0;
+	let copyCompleted = 0;
 
 	const getPct = () => {
 		if (totalOperations === 0) return 100;
@@ -81,6 +92,9 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			logAndSend(`バッチ同期処理を開始します... (対象: ${ops.length}件)`, 0);
 
 			const onProgress = (msg: string, completedCount: number, totalCount: number) => {
+				if (activeSyncCancelled) {
+					throw new Error("同期処理がユーザーによりキャンセルされました。");
+				}
 				const pct = totalCount === 0 ? 0 : Math.round((completedCount / totalCount) * 90);
 				logAndSend(msg, pct);
 			};
@@ -130,6 +144,9 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			if (deleteTrackIds.length > 0) {
 				logAndSend(`比較先側の余分な曲の削除を開始します... (対象: ${deleteTrackIds.length}曲)`, getPct());
 				for (const id of deleteTrackIds) {
+					if (activeSyncCancelled) {
+						throw new Error("同期処理がユーザーによりキャンセルされました。");
+					}
 					// Periodically check connection
 					if (!(await storage.isConnected())) {
 						throw new Error("処理中に比較先との接続が切断されました。");
@@ -137,14 +154,15 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 
 					const item = scanItems.find((x) => x.id === id);
 					if (item && item.phoneTrack) {
+						deleteCompleted++;
 						try {
 							if (await storage.exists(item.phoneTrack.relativePath)) {
 								await storage.deleteFile(item.phoneTrack.relativePath);
 							}
-							logAndSend(`削除成功: ${item.phoneTrack.relativePath}`, getPct());
+							logAndSend(`削除成功(${deleteCompleted}/${totalDeletes}): ${item.phoneTrack.relativePath}`, getPct());
 						} catch (e: any) {
 							console.error(`Failed to delete file: ${item.phoneTrack.relativePath}`, e);
-							logAndSend(`削除失敗: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
+							logAndSend(`削除失敗(${deleteCompleted}/${totalDeletes}): ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
 						}
 					}
 					completed++;
@@ -155,6 +173,9 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			if (moveTrackIds.length > 0) {
 				logAndSend(`比較先側のファイルの配置再整理を開始します... (対象: ${moveTrackIds.length}曲)`, getPct());
 				for (const id of moveTrackIds) {
+					if (activeSyncCancelled) {
+						throw new Error("同期処理がユーザーによりキャンセルされました。");
+					}
 					// Periodically check connection
 					if (!(await storage.isConnected())) {
 						throw new Error("処理中に比較先との接続が切断されました。");
@@ -164,13 +185,16 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 					if (item && item.itunesTrack && item.phoneTrack) {
 						const oldRelative = item.phoneTrack.relativePath;
 						const newRelative = item.itunesTrack.relativePath;
+						moveCompleted++;
 
 						try {
 							if (await storage.exists(oldRelative)) {
+								setProcessingRelativePath(newRelative, storage);
 								// Move file using storage wrapper
 								await storage.moveFile(oldRelative, newRelative);
+								setProcessingRelativePath(null, null);
 
-								logAndSend(`移動成功: ${oldRelative} -> ${newRelative}`, getPct());
+								logAndSend(`移動成功(${moveCompleted}/${totalMoves}): ${oldRelative} -> ${newRelative}`, getPct());
 								// Update phone track info in our results
 								if (profile.storageType === "mtp") {
 									item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
@@ -186,8 +210,9 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 								failedTracksSet.add(id);
 							}
 						} catch (e: any) {
+							setProcessingRelativePath(null, null);
 							console.error(`Failed to move file: ${oldRelative}`, e);
-							logAndSend(`移動失敗: ${oldRelative} - ${e.message} (リカバリー処理のためスキップします)`, getPct());
+							logAndSend(`移動失敗(${moveCompleted}/${totalMoves}): ${oldRelative} -> ${newRelative} - ${e.message}`, getPct());
 							failedTracksSet.add(id);
 						}
 					}
@@ -199,6 +224,9 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 			if (copyTrackIds.length > 0) {
 				logAndSend(`iTunesから比較先への曲のコピーを開始します... (対象: ${copyTrackIds.length}曲)`, getPct());
 				for (const id of copyTrackIds) {
+					if (activeSyncCancelled) {
+						throw new Error("同期処理がユーザーによりキャンセルされました。");
+					}
 					// Periodically check connection
 					if (!(await storage.isConnected())) {
 						throw new Error("処理中に比較先との接続が切断されました。");
@@ -208,20 +236,24 @@ export async function runSync(profile: any, options: SyncOptions, event: Electro
 					if (item && item.itunesTrack) {
 						const sourcePath = item.itunesTrack.filePath;
 						const relative = item.itunesTrack.relativePath;
+						copyCompleted++;
 
 						try {
 							if (fs.existsSync(sourcePath)) {
+								setProcessingRelativePath(relative, storage);
 								// Copy file from local to storage using storage wrapper
 								await storage.copyFileFromLocal(sourcePath, relative);
+								setProcessingRelativePath(null, null);
 
-								logAndSend(`コピー成功: ${relative}`, getPct());
+								logAndSend(`コピー成功(${copyCompleted}/${totalCopies}): ${relative}`, getPct());
 							} else {
 								logAndSend(`エラー: コピー元ファイルが存在しません: ${relative}`, getPct());
 								failedTracksSet.add(id);
 							}
 						} catch (e: any) {
+							setProcessingRelativePath(null, null);
 							console.error(`Failed to copy file: ${relative}`, e);
-							logAndSend(`コピー失敗: ${relative} - ${e.message} (リカバリー処理のためスキップします)`, getPct());
+							logAndSend(`コピー失敗(${copyCompleted}/${totalCopies}): ${relative} - ${e.message}`, getPct());
 							failedTracksSet.add(id);
 						}
 					}

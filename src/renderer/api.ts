@@ -83,6 +83,10 @@ if (!window.api) {
 		getMtpDeviceNames: async () => {
 			return ["模擬MTPデバイス (Mock MTP Device - デバッグ用)", "Samsung Galaxy S21", "Google Pixel 6 Pro"];
 		},
+		cancelActiveTask: async () => {
+			console.log("Mock cancelActiveTask called");
+			return true;
+		},
 		onContextMenuCommand: (callback: any) => {
 			void callback;
 			return () => {};
@@ -209,8 +213,8 @@ if (!window.api) {
 			return () => {};
 		},
 		onSyncProgress: (callback: any) => {
-			setTimeout(() => callback({ status: "running", message: "コピー中...", progress: 50, logs: ["コピー成功: Dynamite.mp3"] }), 200);
-			setTimeout(() => callback({ status: "done", message: "同期完了", progress: 100, logs: ["コピー成功: Dynamite.mp3", "同期完了"] }), 500);
+			setTimeout(() => callback({ status: "running", message: "コピー中...", progress: 50, logs: ["コピー成功(1/1): Dynamite.mp3"] }), 200);
+			setTimeout(() => callback({ status: "done", message: "同期完了", progress: 100, logs: ["コピー成功(1/1): Dynamite.mp3", "同期完了"] }), 500);
 			return () => {};
 		},
 	};

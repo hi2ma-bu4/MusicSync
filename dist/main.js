@@ -13,6 +13,436 @@ var __export = (target, all) => {
     __defProp(target, name, { get: all[name], enumerable: true });
 };
 
+// src/main/cancelState.ts
+function resetScanCancelled() {
+  activeScanCancelled = false;
+}
+function setScanCancelled(val) {
+  activeScanCancelled = val;
+}
+function resetSyncCancelled() {
+  activeSyncCancelled = false;
+}
+function setSyncCancelled(val) {
+  activeSyncCancelled = val;
+}
+function setProcessingRelativePath(p, storage = null) {
+  currentProcessingRelativePath = p;
+  currentStorageWrapper = storage;
+}
+var activeScanCancelled, activeSyncCancelled, currentProcessingRelativePath, currentStorageWrapper;
+var init_cancelState = __esm({
+  "src/main/cancelState.ts"() {
+    "use strict";
+    activeScanCancelled = false;
+    activeSyncCancelled = false;
+    currentProcessingRelativePath = null;
+    currentStorageWrapper = null;
+  }
+});
+
+// src/main/utils.ts
+import { parseFile } from "music-metadata";
+import fs from "node:fs";
+import path from "node:path";
+function normText(val) {
+  if (!val) return "";
+  return String(val).trim().toLowerCase().normalize("NFKC").replace(/[\s\-_]+/g, " ");
+}
+function normTrack(val) {
+  if (!val) return "";
+  const s = String(val).trim();
+  const firstPart = s.split("/")[0].trim();
+  const num = parseInt(firstPart, 10);
+  if (!isNaN(num)) {
+    return String(num);
+  }
+  return firstPart.toLowerCase();
+}
+async function findMusicFiles(dir, baseDir = dir) {
+  const results = [];
+  let list = [];
+  try {
+    list = await fs.promises.readdir(dir, { withFileTypes: true });
+  } catch (e) {
+    console.error(`Failed to read directory: ${dir}`, e);
+    return [];
+  }
+  const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
+  for (const item of list) {
+    const resPath = path.join(dir, item.name);
+    if (item.isDirectory()) {
+      const subFiles = await findMusicFiles(resPath, baseDir);
+      results.push(...subFiles);
+    } else {
+      const ext = path.extname(item.name).toLowerCase();
+      if (validExtensions.has(ext)) {
+        const relativePath = path.relative(baseDir, resPath).replace(/\\/g, "/");
+        results.push({ filePath: resPath, relativePath });
+      }
+    }
+  }
+  return results;
+}
+async function getTrackMetadata(filePath, relativePath) {
+  try {
+    const stats = await fs.promises.stat(filePath);
+    const metadata = await parseFile(filePath, { skipCovers: false });
+    const title = metadata.common.title || path.basename(filePath, path.extname(filePath));
+    const artist = metadata.common.artist || "Unknown Artist";
+    const album = metadata.common.album || "Unknown Album";
+    let trackStr = "";
+    if (metadata.common.track && metadata.common.track.no !== null) {
+      trackStr = String(metadata.common.track.no);
+    }
+    let discStr = "";
+    if (metadata.common.disk && metadata.common.disk.no !== null) {
+      discStr = String(metadata.common.disk.no);
+    }
+    const genre = metadata.common.genre && metadata.common.genre[0] || "Unknown Genre";
+    const picture = metadata.common.picture && metadata.common.picture[0];
+    const hasCoverArt = !!picture;
+    const coverArtSize = picture ? picture.data.length : 0;
+    const albumartist = metadata.common.albumartist || "";
+    const composer = metadata.common.composer && metadata.common.composer[0] || "";
+    const duration = metadata.format.duration || 0;
+    let yearStr = "";
+    if (metadata.common.year) {
+      yearStr = String(metadata.common.year);
+    } else if (metadata.common.date) {
+      const match = metadata.common.date.match(/\d{4}/);
+      if (match) {
+        yearStr = match[0];
+      } else {
+        yearStr = metadata.common.date;
+      }
+    }
+    let commentStr = "";
+    if (metadata.common.comment && metadata.common.comment.length > 0) {
+      const c = metadata.common.comment[0];
+      if (typeof c === "string") {
+        commentStr = c;
+      } else if (c && typeof c === "object" && "text" in c) {
+        commentStr = c.text || "";
+      }
+    }
+    return {
+      id: "",
+      filePath,
+      relativePath,
+      title,
+      artist,
+      album,
+      track: trackStr,
+      genre,
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      hasCoverArt,
+      coverArtSize,
+      disc: discStr,
+      albumartist,
+      composer,
+      year: yearStr,
+      comment: commentStr,
+      duration
+    };
+  } catch (err) {
+    const stats = await fs.promises.stat(filePath);
+    return {
+      id: "",
+      filePath,
+      relativePath,
+      title: path.basename(filePath, path.extname(filePath)),
+      artist: "Unknown Artist",
+      album: "Unknown Album",
+      track: "",
+      genre: "Unknown Genre",
+      size: stats.size,
+      mtimeMs: stats.mtimeMs,
+      hasCoverArt: false,
+      coverArtSize: 0,
+      disc: "",
+      albumartist: "",
+      composer: "",
+      year: "",
+      comment: "",
+      duration: 0
+    };
+  }
+}
+var init_utils = __esm({
+  "src/main/utils.ts"() {
+    "use strict";
+  }
+});
+
+// src/main/powershell/mtp/cleanEmptyDirs.ps1
+var cleanEmptyDirs_default;
+var init_cleanEmptyDirs = __esm({
+  "src/main/powershell/mtp/cleanEmptyDirs.ps1"() {
+    cleanEmptyDirs_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$targetRootItem = Get-MtpFolderItem $phoneItem $subPath\nif (-not $targetRootItem) { exit 0 }\n\nfunction Clean-EmptyMtpFolders($folderItem) {\n    $folder = $folderItem.GetFolder\n    if (-not $folder) { return }\n\n    foreach ($item in $folder.Items()) {\n        if ($item.GetFolder) {\n            Clean-EmptyMtpFolders $item\n        }\n    }\n\n    if ($folderItem.Path -ne $targetRootItem.Path) {\n        if ($folder.Items().Count -eq 0) {\n            $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n            $null = New-Item -ItemType Directory -Path $tempDir -Force\n            $shell.NameSpace($tempDir).MoveHere($folderItem, 16 + 1024)\n            Start-Sleep -Milliseconds 150\n            Remove-Item $tempDir -Recurse -Force\n        }\n    }\n}\n\nClean-EmptyMtpFolders $targetRootItem\n"SUCCESS"\n';
+  }
+});
+
+// src/main/powershell/mtp/copyFile.ps1
+var copyFile_default;
+var init_copyFile = __esm({
+  "src/main/powershell/mtp/copyFile.ps1"() {
+    copyFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n}\n\n$destFolder = $destFolderItem.GetFolder\n$destFolder.CopyHere($localSrc, 16)\n\n$fileName = [System.IO.Path]::GetFileName($localSrc)\n$success = $false\n\n# Poll with refreshing and re-querying the target folder\nfor ($i = 0; $i -lt 50; $i++) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n    if (-not $phoneItem) {\n        $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n    }\n    $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n    if ($destFolderItem) {\n        $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n        if ($item) {\n            Start-Sleep -Milliseconds 500\n            $success = $true\n            break\n        }\n    }\n    Start-Sleep -Milliseconds 200\n}\n\nif ($success) { "SUCCESS" } else { "FAILED" }\n';
+  }
+});
+
+// src/main/powershell/mtp/deleteFile.ps1
+var deleteFile_default;
+var init_deleteFile = __esm({
+  "src/main/powershell/mtp/deleteFile.ps1"() {
+    deleteFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif ($fileItem) {\n    $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n    $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n    $tempFolder = $shell.NameSpace($tempDir)\n    $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n    for ($i = 0; $i -lt 50; $i++) {\n        if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n        Start-Sleep -Milliseconds 100\n    }\n\n    Remove-Item $tempDir -Recurse -Force\n}\n"SUCCESS"\n';
+  }
+});
+
+// src/main/powershell/mtp/executeBatchSync.ps1
+var executeBatchSync_default;
+var init_executeBatchSync = __esm({
+  "src/main/powershell/mtp/executeBatchSync.ps1"() {
+    executeBatchSync_default = '$ops = $params.operations\n\n$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) {\n    throw "Phone not found: $phoneName"\n}\n\n$consecutiveFailures = 0\n$failedTrackIds = @()\n$total = $ops.Count\n$completed = 0\n\nforeach ($op in $ops) {\n    $completed++\n    $type = $op.type\n    $trackId = $op.trackId\n    $success = $false\n    $errorMsg = ""\n\n    try {\n        if ($type -eq "delete") {\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPathInsideSub = $remoteDest\n            if ($relPathInsideSub -match "^$subPath/(.*)$") {\n                $relPathInsideSub = $Matches[1]\n            }\n            $fullPath = "$subPath/$relPathInsideSub"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullPath\n            if ($fileItem) {\n                $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n                $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n                $tempFolder = $shell.NameSpace($tempDir)\n                $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n                for ($i = 0; $i -lt 50; $i++) {\n                    if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n                    Start-Sleep -Milliseconds 50\n                }\n                Remove-Item $tempDir -Recurse -Force\n            }\n            $success = $true\n        }\n        elseif ($type -eq "move") {\n            $oldRemoteSrc = $op.oldRemoteSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D (${completed}/${total}): ${oldRemoteSrc}"\n\n            $oldRelPath = $oldRemoteSrc\n            if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }\n            $newRelPath = $remoteDest\n            if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }\n\n            $newRelDir = Split-Path $newRelPath\n            $newRelDir = $newRelDir.Replace("\\", "/")\n            if ($newRelDir -eq ".") { $newRelDir = "" }\n            $newFileName = Split-Path $newRelPath -Leaf\n            $oldFileName = Split-Path $oldRelPath -Leaf\n\n            $fullOldPath = "$subPath/$oldRelPath"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\n            if (-not $fileItem) {\n                throw "Source file not found: $fullOldPath"\n            }\n\n            $fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n            }\n\n            if ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n                $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n                Start-Sleep -Milliseconds 150\n                $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1\n            }\n\n            if ($fileItem -and $oldFileName -ne $newFileName) {\n                $fileItem.Name = $newFileName\n                Start-Sleep -Milliseconds 100\n            }\n            $success = $true\n        }\n        elseif ($type -eq "copy") {\n            $localSrc = $op.localSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPath = $remoteDest\n            if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }\n            $relativeDestDir = Split-Path $relPath\n            $relativeDestDir = $relativeDestDir.Replace("\\", "/")\n            $destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }\n\n            $fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n            }\n\n            $destFolder = $destFolderItem.GetFolder\n            $destFolder.CopyHere($localSrc, 16)\n\n            $fileName = [System.IO.Path]::GetFileName($localSrc)\n            $pollSuccess = $false\n\n            for ($i = 0; $i -lt 50; $i++) {\n                $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n                if (-not $phoneItem) {\n                    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n                }\n                $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n                if ($destFolderItem) {\n                    $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n                    if ($item) {\n                        Start-Sleep -Milliseconds 250\n                        $pollSuccess = $true\n                        break\n                    }\n                }\n                Start-Sleep -Milliseconds 100\n            }\n\n            if ($pollSuccess) {\n                $success = $true\n            }\n            else {\n                throw "Copy failed or verification timed out for: $fileName"\n            }\n        }\n    }\n    catch {\n        $errorMsg = $_.ToString()\n        $success = $false\n    }\n\n    if ($success) {\n        $consecutiveFailures = 0\n        Write-Output "PROGRESS_UPDATE:SUCCESS_OP:${trackId}"\n    }\n    else {\n        $consecutiveFailures++\n        $failedTrackIds += $trackId\n        Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"\n\n        if ($consecutiveFailures -ge 3) {\n            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:${consecutiveFailures}"\n            # Wait for Node.js reply on stdin\n            $reply = [Console]::In.ReadLine()\n            if ($reply -eq "ABORT") {\n                Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"\n                break\n            }\n            else {\n                $consecutiveFailures = 0\n            }\n        }\n    }\n}\n\nWrite-Output "JSON_RESULTS_START"\nif ($failedTrackIds.Count -eq 0) {\n    "[]"\n}\nelseif ($failedTrackIds.Count -eq 1) {\n    "[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"\n}\nelse {\n    $failedTrackIds | ConvertTo-Json -Compress\n}\nWrite-Output "JSON_RESULTS_END"\n';
+  }
+});
+
+// src/main/powershell/mtp/findMusicFiles.ps1
+var findMusicFiles_default;
+var init_findMusicFiles = __esm({
+  "src/main/powershell/mtp/findMusicFiles.ps1"() {
+    findMusicFiles_default = `$shell = New-Object -ComObject Shell.Application
+$drives = $shell.NameSpace(17)
+if (-not $drives) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if (-not $phoneItem) {
+    $phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+}
+
+if (-not $phoneItem) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$targetItem = Get-MtpFolderItem $phoneItem $subPath
+if (-not $targetItem) {
+    [Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+$global:scannedCount = 0
+function Scan-Folder($folderItem, $relPath) {
+    $folder = $folderItem.GetFolder
+    if (-not $folder) { return }
+    foreach ($item in $folder.Items()) {
+        $name = $item.Name
+        $subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
+
+        if ($item.IsFolder) {
+            Scan-Folder $item $subRelPath
+        }
+        else {
+            $ext = ""
+            if ($name -match '\\.([a-zA-Z0-9]+)$') {
+                $ext = "." + $Matches[1].ToLower()
+            }
+            if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
+                $global:scannedCount++
+                if ($global:scannedCount % 5 -eq 0) {
+                    Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
+                }
+                # Retrieve size and modification date using direct properties or GetDetailsOf fallback
+                $rawSize = $item.ExtendedProperty("System.Size")
+                if ($null -eq $rawSize) { $rawSize = $item.Size }
+                if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+
+                $size = 0
+                if ($null -ne $rawSize -and $rawSize -ne "") {
+                    try { $size = [int64]$rawSize } catch {}
+                }
+
+                if ($size -eq 0) {
+                    $sizeStr = $folder.GetDetailsOf($item, 2)
+                    if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                        $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+                        $unit = $Matches[2]
+                        if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+                        elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+                        elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+                        else { $size = [int64]$val }
+                    }
+                }
+
+                $mtimeMs = 0
+                $dateStr = $folder.GetDetailsOf($item, 3)
+                if ($dateStr) {
+                    try {
+                        $date = Get-Date $dateStr
+                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                    }
+                    catch {
+                        Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
+                    }
+                }
+                if ($mtimeMs -eq 0 -and $item.ModifyDate) {
+                    try {
+                        $date = Get-Date $item.ModifyDate
+                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                    }
+                    catch {
+                        Write-Warning "Failed to parse direct ModifyDate for $name : $_"
+                    }
+                }
+                [PSCustomObject]@{
+                    relativePath = $subRelPath
+                    size         = $size
+                    mtimeMs      = $mtimeMs
+                }
+            }
+        }
+    }
+}
+
+$results = Scan-Folder $targetItem ""
+if ($null -eq $results) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "[]"
+    Write-Output "JSON_RESULTS_END"
+}
+else {
+    Write-Output "JSON_RESULTS_START"
+    $arr = @($results)
+    if ($arr.Count -eq 1) {
+        "[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
+    }
+    else {
+        $arr | ConvertTo-Json -Compress
+    }
+    Write-Output "JSON_RESULTS_END"
+}
+`;
+  }
+});
+
+// src/main/powershell/mtp/getFileSizes.ps1
+var getFileSizes_default;
+var init_getFileSizes = __esm({
+  "src/main/powershell/mtp/getFileSizes.ps1"() {
+    getFileSizes_default = `$relativePaths = $params.relativePaths
+
+$shell = New-Object -ComObject Shell.Application
+$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+if (-not $phoneItem) {
+    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+}
+
+if (-not $phoneItem) {
+    Write-Output "JSON_RESULTS_START"
+    Write-Output "{}"
+    Write-Output "JSON_RESULTS_END"
+    exit 0
+}
+
+# Group paths by parent folder
+$grouped = @{}
+foreach ($rel in $relativePaths) {
+    $normalized = $rel.Replace("\\", "/")
+    $segments = $normalized -split "/"
+    if ($segments.Count -le 1) {
+        $parent = ""
+        $file = $normalized
+    }
+    else {
+        $parent = ($segments[0..($segments.Count - 2)] -join "/")
+        $file = $segments[-1]
+    }
+    if (-not $grouped.ContainsKey($parent)) {
+        $grouped[$parent] = @()
+    }
+    $grouped[$parent] += $file
+}
+
+$results = @{}
+foreach ($parent in $grouped.Keys) {
+    $fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
+    $folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
+    if ($folderItem) {
+        $folder = $folderItem.GetFolder
+        if ($folder) {
+            $files = $grouped[$parent]
+            foreach ($item in $folder.Items()) {
+                if ($item.Name -in $files) {
+                    $rawSize = $item.ExtendedProperty("System.Size")
+                    if ($null -eq $rawSize) { $rawSize = $item.Size }
+                    if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+
+                    $size = 0
+                    if ($null -ne $rawSize -and $rawSize -ne "") {
+                        try { $size = [int64]$rawSize } catch {}
+                    }
+
+                    if ($size -eq 0) {
+                        $sizeStr = $folder.GetDetailsOf($item, 2)
+                        if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                            $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
+                            $unit = $Matches[2]
+                            if ($unit -eq "KB") { $size = [int64]($val * 1024) }
+                            elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
+                            elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
+                            else { $size = [int64]$val }
+                        }
+                    }
+                    $fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/" + $item.Name }
+                    $results[$fullRelPath] = $size
+                }
+            }
+        }
+    }
+}
+
+Write-Output "JSON_RESULTS_START"
+$results | ConvertTo-Json -Compress
+Write-Output "JSON_RESULTS_END"
+`;
+  }
+});
+
+// src/main/powershell/mtp/getTrackMetadata.ps1
+var getTrackMetadata_default;
+var init_getTrackMetadata = __esm({
+  "src/main/powershell/mtp/getTrackMetadata.ps1"() {
+    getTrackMetadata_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 1 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $fileItem) {\n    [Console]::Error.WriteLine("[getTrackMetadata] File not found: " + $fullPath)\n    exit 1\n}\n\n$localFolder = $shell.NameSpace($tempFilePath)\n# 16: Respond with "Yes to All" to any dialogs, 1024: Disable dialog UI completely\n$localFolder.CopyHere($fileItem, 16 + 1024)\n\n$tempCreatedFile = [System.IO.Path]::Combine($tempFilePath, $fileItem.Name)\n$success = $false\nfor ($i = 0; $i -lt 100; $i++) {\n    if (Test-Path -LiteralPath $tempCreatedFile) {\n        # Short delay to ensure Windows is done writing to disk\n        Start-Sleep -Milliseconds 150\n        $success = $true\n        break\n    }\n    Start-Sleep -Milliseconds 100\n}\n\nif ($success) {\n    "SUCCESS"\n}\nelse {\n    "FAILED"\n}\n';
+  }
+});
+
+// src/main/powershell/mtp/isConnected.ps1
+var isConnected_default;
+var init_isConnected = __esm({
+  "src/main/powershell/mtp/isConnected.ps1"() {
+    isConnected_default = '$shell = New-Object -ComObject Shell.Application\n$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phone) {\n    $phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }\n';
+  }
+});
+
+// src/main/powershell/mtp/moveFile.ps1
+var moveFile_default;
+var init_moveFile = __esm({
+  "src/main/powershell/mtp/moveFile.ps1"() {
+    moveFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullOldPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\nif (-not $fileItem) { throw "Source file not found: $fullOldPath" }\n\n$fullNewDir = if ($tempFilePath -eq "" -or $tempFilePath -eq ".") { $subPath } else { "$subPath/$tempFilePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n}\n\nif ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n    $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n    Start-Sleep -Milliseconds 250\n    $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldRelativePath } | Select-Object -First 1\n}\n\nif ($fileItem -and $oldRelativePath -ne $newRelativePath) {\n    $fileItem.Name = $newRelativePath\n    Start-Sleep -Milliseconds 150\n}\n\n"SUCCESS"\n';
+  }
+});
+
 // src/libs/mtp/constants.ts
 var TYPE, CODE;
 var init_constants = __esm({
@@ -65,7 +495,7 @@ var init_is_electron = __esm({
 
 // src/libs/mtp/utils.ts
 var is_electron, is_node;
-var init_utils = __esm({
+var init_utils2 = __esm({
   "src/libs/mtp/utils.ts"() {
     "use strict";
     init_is_electron();
@@ -84,7 +514,7 @@ var init_Mtp = __esm({
   "src/libs/mtp/Mtp.ts"() {
     "use strict";
     init_constants();
-    init_utils();
+    init_utils2();
     usb = null;
     Mtp = class extends EventTarget {
       state;
@@ -359,380 +789,35 @@ var init_Mtp = __esm({
   }
 });
 
-// src/main.ts
-import { app as app3, protocol as protocol2 } from "electron";
-
-// src/main/index.ts
-import { BrowserWindow } from "electron";
-import Store from "electron-store";
-import path3 from "node:path";
-
 // src/main/storageWrapper.ts
+var storageWrapper_exports = {};
+__export(storageWrapper_exports, {
+  LocalStorageWrapper: () => LocalStorageWrapper,
+  MockMtpStorageWrapper: () => MockMtpStorageWrapper,
+  MtpStorageWrapper: () => MtpStorageWrapper,
+  MtpUserCancelledError: () => MtpUserCancelledError,
+  PowerShellMtpStorageWrapper: () => PowerShellMtpStorageWrapper,
+  activeChildProcesses: () => activeChildProcesses,
+  activeMtpWrappers: () => activeMtpWrappers,
+  cancelActiveChildProcesses: () => cancelActiveChildProcesses,
+  closeAllActiveMtpWrappers: () => closeAllActiveMtpWrappers,
+  getStorageWrapper: () => getStorageWrapper
+});
 import { dialog } from "electron";
 import fs2 from "node:fs";
 import os from "node:os";
 import path2 from "node:path";
-
-// src/main/utils.ts
-import { parseFile } from "music-metadata";
-import fs from "node:fs";
-import path from "node:path";
-function normText(val) {
-  if (!val) return "";
-  return String(val).trim().toLowerCase().normalize("NFKC").replace(/[\s\-_]+/g, " ");
-}
-function normTrack(val) {
-  if (!val) return "";
-  const s = String(val).trim();
-  const firstPart = s.split("/")[0].trim();
-  const num = parseInt(firstPart, 10);
-  if (!isNaN(num)) {
-    return String(num);
-  }
-  return firstPart.toLowerCase();
-}
-async function findMusicFiles(dir, baseDir = dir) {
-  const results = [];
-  let list = [];
-  try {
-    list = await fs.promises.readdir(dir, { withFileTypes: true });
-  } catch (e) {
-    console.error(`Failed to read directory: ${dir}`, e);
-    return [];
-  }
-  const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
-  for (const item of list) {
-    const resPath = path.join(dir, item.name);
-    if (item.isDirectory()) {
-      const subFiles = await findMusicFiles(resPath, baseDir);
-      results.push(...subFiles);
-    } else {
-      const ext = path.extname(item.name).toLowerCase();
-      if (validExtensions.has(ext)) {
-        const relativePath = path.relative(baseDir, resPath).replace(/\\/g, "/");
-        results.push({ filePath: resPath, relativePath });
-      }
+function cancelActiveChildProcesses() {
+  console.log(`[StorageWrapper] Cancelling ${activeChildProcesses.size} active child processes...`);
+  for (const child of activeChildProcesses) {
+    try {
+      child.kill();
+    } catch (e) {
+      console.error("[StorageWrapper] Failed to kill child process:", e);
     }
   }
-  return results;
+  activeChildProcesses.clear();
 }
-async function getTrackMetadata(filePath, relativePath) {
-  try {
-    const stats = await fs.promises.stat(filePath);
-    const metadata = await parseFile(filePath, { skipCovers: false });
-    const title = metadata.common.title || path.basename(filePath, path.extname(filePath));
-    const artist = metadata.common.artist || "Unknown Artist";
-    const album = metadata.common.album || "Unknown Album";
-    let trackStr = "";
-    if (metadata.common.track && metadata.common.track.no !== null) {
-      trackStr = String(metadata.common.track.no);
-    }
-    let discStr = "";
-    if (metadata.common.disk && metadata.common.disk.no !== null) {
-      discStr = String(metadata.common.disk.no);
-    }
-    const genre = metadata.common.genre && metadata.common.genre[0] || "Unknown Genre";
-    const picture = metadata.common.picture && metadata.common.picture[0];
-    const hasCoverArt = !!picture;
-    const coverArtSize = picture ? picture.data.length : 0;
-    const albumartist = metadata.common.albumartist || "";
-    const composer = metadata.common.composer && metadata.common.composer[0] || "";
-    const duration = metadata.format.duration || 0;
-    let yearStr = "";
-    if (metadata.common.year) {
-      yearStr = String(metadata.common.year);
-    } else if (metadata.common.date) {
-      const match = metadata.common.date.match(/\d{4}/);
-      if (match) {
-        yearStr = match[0];
-      } else {
-        yearStr = metadata.common.date;
-      }
-    }
-    let commentStr = "";
-    if (metadata.common.comment && metadata.common.comment.length > 0) {
-      const c = metadata.common.comment[0];
-      if (typeof c === "string") {
-        commentStr = c;
-      } else if (c && typeof c === "object" && "text" in c) {
-        commentStr = c.text || "";
-      }
-    }
-    return {
-      id: "",
-      filePath,
-      relativePath,
-      title,
-      artist,
-      album,
-      track: trackStr,
-      genre,
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      hasCoverArt,
-      coverArtSize,
-      disc: discStr,
-      albumartist,
-      composer,
-      year: yearStr,
-      comment: commentStr,
-      duration
-    };
-  } catch (err) {
-    const stats = await fs.promises.stat(filePath);
-    return {
-      id: "",
-      filePath,
-      relativePath,
-      title: path.basename(filePath, path.extname(filePath)),
-      artist: "Unknown Artist",
-      album: "Unknown Album",
-      track: "",
-      genre: "Unknown Genre",
-      size: stats.size,
-      mtimeMs: stats.mtimeMs,
-      hasCoverArt: false,
-      coverArtSize: 0,
-      disc: "",
-      albumartist: "",
-      composer: "",
-      year: "",
-      comment: "",
-      duration: 0
-    };
-  }
-}
-
-// src/main/powershell/mtp/cleanEmptyDirs.ps1
-var cleanEmptyDirs_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$targetRootItem = Get-MtpFolderItem $phoneItem $subPath\nif (-not $targetRootItem) { exit 0 }\n\nfunction Clean-EmptyMtpFolders($folderItem) {\n    $folder = $folderItem.GetFolder\n    if (-not $folder) { return }\n\n    foreach ($item in $folder.Items()) {\n        if ($item.GetFolder) {\n            Clean-EmptyMtpFolders $item\n        }\n    }\n\n    if ($folderItem.Path -ne $targetRootItem.Path) {\n        if ($folder.Items().Count -eq 0) {\n            $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n            $null = New-Item -ItemType Directory -Path $tempDir -Force\n            $shell.NameSpace($tempDir).MoveHere($folderItem, 16 + 1024)\n            Start-Sleep -Milliseconds 150\n            Remove-Item $tempDir -Recurse -Force\n        }\n    }\n}\n\nClean-EmptyMtpFolders $targetRootItem\n"SUCCESS"\n';
-
-// src/main/powershell/mtp/copyFile.ps1
-var copyFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullPath = if ($relativePath -eq "" -or $relativePath -eq ".") { $subPath } else { "$subPath/$relativePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n}\n\n$destFolder = $destFolderItem.GetFolder\n$destFolder.CopyHere($localSrc, 16)\n\n$fileName = [System.IO.Path]::GetFileName($localSrc)\n$success = $false\n\n# Poll with refreshing and re-querying the target folder\nfor ($i = 0; $i -lt 50; $i++) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n    if (-not $phoneItem) {\n        $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n    }\n    $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n    if ($destFolderItem) {\n        $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n        if ($item) {\n            Start-Sleep -Milliseconds 500\n            $success = $true\n            break\n        }\n    }\n    Start-Sleep -Milliseconds 200\n}\n\nif ($success) { "SUCCESS" } else { "FAILED" }\n';
-
-// src/main/powershell/mtp/deleteFile.ps1
-var deleteFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 0 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif ($fileItem) {\n    $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n    $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n    $tempFolder = $shell.NameSpace($tempDir)\n    $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n    for ($i = 0; $i -lt 50; $i++) {\n        if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n        Start-Sleep -Milliseconds 100\n    }\n\n    Remove-Item $tempDir -Recurse -Force\n}\n"SUCCESS"\n';
-
-// src/main/powershell/mtp/executeBatchSync.ps1
-var executeBatchSync_default = '$ops = $params.operations\n\n$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) {\n    throw "Phone not found: $phoneName"\n}\n\n$consecutiveFailures = 0\n$failedTrackIds = @()\n$total = $ops.Count\n$completed = 0\n\nforeach ($op in $ops) {\n    $completed++\n    $type = $op.type\n    $trackId = $op.trackId\n    $success = $false\n    $errorMsg = ""\n\n    try {\n        if ($type -eq "delete") {\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D ($completed/$total): $remoteDest"\n\n            $relPathInsideSub = $remoteDest\n            if ($relPathInsideSub -match "^$subPath/(.*)$") {\n                $relPathInsideSub = $Matches[1]\n            }\n            $fullPath = "$subPath/$relPathInsideSub"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullPath\n            if ($fileItem) {\n                $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n                $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n                $tempFolder = $shell.NameSpace($tempDir)\n                $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n                for ($i = 0; $i -lt 50; $i++) {\n                    if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n                    Start-Sleep -Milliseconds 50\n                }\n                Remove-Item $tempDir -Recurse -Force\n            }\n            $success = $true\n        }\n        elseif ($type -eq "move") {\n            $oldRemoteSrc = $op.oldRemoteSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D ($completed/$total): $oldRemoteSrc"\n\n            $oldRelPath = $oldRemoteSrc\n            if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }\n            $newRelPath = $remoteDest\n            if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }\n\n            $newRelDir = Split-Path $newRelPath\n            $newRelDir = $newRelDir.Replace("\\", "/")\n            if ($newRelDir -eq ".") { $newRelDir = "" }\n            $newFileName = Split-Path $newRelPath -Leaf\n            $oldFileName = Split-Path $oldRelPath -Leaf\n\n            $fullOldPath = "$subPath/$oldRelPath"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\n            if (-not $fileItem) {\n                throw "Source file not found: $fullOldPath"\n            }\n\n            $fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n            }\n\n            if ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n                $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n                Start-Sleep -Milliseconds 150\n                $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1\n            }\n\n            if ($fileItem -and $oldFileName -ne $newFileName) {\n                $fileItem.Name = $newFileName\n                Start-Sleep -Milliseconds 100\n            }\n            $success = $true\n        }\n        elseif ($type -eq "copy") {\n            $localSrc = $op.localSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D ($completed/$total): $remoteDest"\n\n            $relPath = $remoteDest\n            if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }\n            $relativeDestDir = Split-Path $relPath\n            $relativeDestDir = $relativeDestDir.Replace("\\", "/")\n            $destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }\n\n            $fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n            }\n\n            $destFolder = $destFolderItem.GetFolder\n            $destFolder.CopyHere($localSrc, 16)\n\n            $fileName = [System.IO.Path]::GetFileName($localSrc)\n            $pollSuccess = $false\n\n            for ($i = 0; $i -lt 50; $i++) {\n                $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n                if (-not $phoneItem) {\n                    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n                }\n                $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n                if ($destFolderItem) {\n                    $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n                    if ($item) {\n                        Start-Sleep -Milliseconds 250\n                        $pollSuccess = $true\n                        break\n                    }\n                }\n                Start-Sleep -Milliseconds 100\n            }\n\n            if ($pollSuccess) {\n                $success = $true\n            }\n            else {\n                throw "Copy failed or verification timed out for: $fileName"\n            }\n        }\n    }\n    catch {\n        $errorMsg = $_.ToString()\n        $success = $false\n    }\n\n    if ($success) {\n        $consecutiveFailures = 0\n        Write-Output "PROGRESS_UPDATE:SUCCESS_OP:${trackId}"\n    }\n    else {\n        $consecutiveFailures++\n        $failedTrackIds += $trackId\n        Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"\n\n        if ($consecutiveFailures -ge 3) {\n            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"\n            # Wait for Node.js reply on stdin\n            $reply = [Console]::In.ReadLine()\n            if ($reply -eq "ABORT") {\n                Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"\n                break\n            }\n            else {\n                $consecutiveFailures = 0\n            }\n        }\n    }\n}\n\nWrite-Output "JSON_RESULTS_START"\nif ($failedTrackIds.Count -eq 0) {\n    "[]"\n}\nelseif ($failedTrackIds.Count -eq 1) {\n    "[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"\n}\nelse {\n    $failedTrackIds | ConvertTo-Json -Compress\n}\nWrite-Output "JSON_RESULTS_END"\n';
-
-// src/main/powershell/mtp/findMusicFiles.ps1
-var findMusicFiles_default = `$shell = New-Object -ComObject Shell.Application
-$drives = $shell.NameSpace(17)
-if (-not $drives) {
-    Write-Output "JSON_RESULTS_START"
-    Write-Output "[]"
-    Write-Output "JSON_RESULTS_END"
-    exit 0
-}
-
-$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-if (-not $phoneItem) {
-    $phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-}
-
-if (-not $phoneItem) {
-    Write-Output "JSON_RESULTS_START"
-    Write-Output "[]"
-    Write-Output "JSON_RESULTS_END"
-    exit 0
-}
-
-$targetItem = Get-MtpFolderItem $phoneItem $subPath
-if (-not $targetItem) {
-    [Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
-    Write-Output "JSON_RESULTS_START"
-    Write-Output "[]"
-    Write-Output "JSON_RESULTS_END"
-    exit 0
-}
-
-$global:scannedCount = 0
-function Scan-Folder($folderItem, $relPath) {
-    $folder = $folderItem.GetFolder
-    if (-not $folder) { return }
-    foreach ($item in $folder.Items()) {
-        $name = $item.Name
-        $subRelPath = if ($relPath -eq "") { $name } else { "$relPath/$name" }
-
-        if ($item.IsFolder) {
-            Scan-Folder $item $subRelPath
-        }
-        else {
-            $ext = ""
-            if ($name -match '\\.([a-zA-Z0-9]+)$') {
-                $ext = "." + $Matches[1].ToLower()
-            }
-            if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
-                $global:scannedCount++
-                if ($global:scannedCount % 5 -eq 0) {
-                    Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
-                }
-                # Retrieve size and modification date using direct properties or GetDetailsOf fallback
-                $rawSize = $item.ExtendedProperty("System.Size")
-                if ($null -eq $rawSize) { $rawSize = $item.Size }
-                if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
-
-                $size = 0
-                if ($null -ne $rawSize -and $rawSize -ne "") {
-                    try { $size = [int64]$rawSize } catch {}
-                }
-
-                if ($size -eq 0) {
-                    $sizeStr = $folder.GetDetailsOf($item, 2)
-                    if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
-                        $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-                        $unit = $Matches[2]
-                        if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-                        elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-                        elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-                        else { $size = [int64]$val }
-                    }
-                }
-
-                $mtimeMs = 0
-                $dateStr = $folder.GetDetailsOf($item, 3)
-                if ($dateStr) {
-                    try {
-                        $date = Get-Date $dateStr
-                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
-                    }
-                    catch {
-                        Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
-                    }
-                }
-                if ($mtimeMs -eq 0 -and $item.ModifyDate) {
-                    try {
-                        $date = Get-Date $item.ModifyDate
-                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
-                    }
-                    catch {
-                        Write-Warning "Failed to parse direct ModifyDate for $name : $_"
-                    }
-                }
-                [PSCustomObject]@{
-                    relativePath = $subRelPath
-                    size         = $size
-                    mtimeMs      = $mtimeMs
-                }
-            }
-        }
-    }
-}
-
-$results = Scan-Folder $targetItem ""
-if ($null -eq $results) {
-    Write-Output "JSON_RESULTS_START"
-    Write-Output "[]"
-    Write-Output "JSON_RESULTS_END"
-}
-else {
-    Write-Output "JSON_RESULTS_START"
-    $arr = @($results)
-    if ($arr.Count -eq 1) {
-        "[" + ($arr[0] | ConvertTo-Json -Compress) + "]"
-    }
-    else {
-        $arr | ConvertTo-Json -Compress
-    }
-    Write-Output "JSON_RESULTS_END"
-}
-`;
-
-// src/main/powershell/mtp/getFileSizes.ps1
-var getFileSizes_default = `$relativePaths = $params.relativePaths
-
-$shell = New-Object -ComObject Shell.Application
-$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-if (-not $phoneItem) {
-    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
-}
-
-if (-not $phoneItem) {
-    Write-Output "JSON_RESULTS_START"
-    Write-Output "{}"
-    Write-Output "JSON_RESULTS_END"
-    exit 0
-}
-
-# Group paths by parent folder
-$grouped = @{}
-foreach ($rel in $relativePaths) {
-    $normalized = $rel.Replace("\\", "/")
-    $segments = $normalized -split "/"
-    if ($segments.Count -le 1) {
-        $parent = ""
-        $file = $normalized
-    }
-    else {
-        $parent = ($segments[0..($segments.Count - 2)] -join "/")
-        $file = $segments[-1]
-    }
-    if (-not $grouped.ContainsKey($parent)) {
-        $grouped[$parent] = @()
-    }
-    $grouped[$parent] += $file
-}
-
-$results = @{}
-foreach ($parent in $grouped.Keys) {
-    $fullParentPath = if ($parent -eq "") { $subPath } else { "$subPath/$parent" }
-    $folderItem = Get-MtpFolderItem $phoneItem $fullParentPath
-    if ($folderItem) {
-        $folder = $folderItem.GetFolder
-        if ($folder) {
-            $files = $grouped[$parent]
-            foreach ($item in $folder.Items()) {
-                if ($item.Name -in $files) {
-                    $rawSize = $item.ExtendedProperty("System.Size")
-                    if ($null -eq $rawSize) { $rawSize = $item.Size }
-                    if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
-
-                    $size = 0
-                    if ($null -ne $rawSize -and $rawSize -ne "") {
-                        try { $size = [int64]$rawSize } catch {}
-                    }
-
-                    if ($size -eq 0) {
-                        $sizeStr = $folder.GetDetailsOf($item, 2)
-                        if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
-                            $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
-                            $unit = $Matches[2]
-                            if ($unit -eq "KB") { $size = [int64]($val * 1024) }
-                            elseif ($unit -eq "MB") { $size = [int64]($val * 1024 * 1024) }
-                            elseif ($unit -eq "GB") { $size = [int64]($val * 1024 * 1024 * 1024) }
-                            else { $size = [int64]$val }
-                        }
-                    }
-                    $fullRelPath = if ($parent -eq "") { $item.Name } else { "$parent/" + $item.Name }
-                    $results[$fullRelPath] = $size
-                }
-            }
-        }
-    }
-}
-
-Write-Output "JSON_RESULTS_START"
-$results | ConvertTo-Json -Compress
-Write-Output "JSON_RESULTS_END"
-`;
-
-// src/main/powershell/mtp/getTrackMetadata.ps1
-var getTrackMetadata_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { exit 1 }\n\n$fullPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullPath\nif (-not $fileItem) {\n    [Console]::Error.WriteLine("[getTrackMetadata] File not found: " + $fullPath)\n    exit 1\n}\n\n$localFolder = $shell.NameSpace($tempFilePath)\n# 16: Respond with "Yes to All" to any dialogs, 1024: Disable dialog UI completely\n$localFolder.CopyHere($fileItem, 16 + 1024)\n\n$tempCreatedFile = [System.IO.Path]::Combine($tempFilePath, $fileItem.Name)\n$success = $false\nfor ($i = 0; $i -lt 100; $i++) {\n    if (Test-Path -LiteralPath $tempCreatedFile) {\n        # Short delay to ensure Windows is done writing to disk\n        Start-Sleep -Milliseconds 150\n        $success = $true\n        break\n    }\n    Start-Sleep -Milliseconds 100\n}\n\nif ($success) {\n    "SUCCESS"\n}\nelse {\n    "FAILED"\n}\n';
-
-// src/main/powershell/mtp/isConnected.ps1
-var isConnected_default = '$shell = New-Object -ComObject Shell.Application\n$phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phone) {\n    $phone = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif ($phone) { "CONNECTED" } else { "NOT_CONNECTED" }\n';
-
-// src/main/powershell/mtp/moveFile.ps1
-var moveFile_default = '$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) { throw "Phone not found" }\n\n$fullOldPath = "$subPath/$relativePath"\n$fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\nif (-not $fileItem) { throw "Source file not found: $fullOldPath" }\n\n$fullNewDir = if ($tempFilePath -eq "" -or $tempFilePath -eq ".") { $subPath } else { "$subPath/$tempFilePath" }\n$destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\nif (-not $destFolderItem) {\n    $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n}\n\nif ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n    $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n    Start-Sleep -Milliseconds 250\n    $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldRelativePath } | Select-Object -First 1\n}\n\nif ($fileItem -and $oldRelativePath -ne $newRelativePath) {\n    $fileItem.Name = $newRelativePath\n    Start-Sleep -Milliseconds 150\n}\n\n"SUCCESS"\n';
-
-// src/main/storageWrapper.ts
-var activeMtpWrappers = /* @__PURE__ */ new Set();
-var MtpUserCancelledError = class extends Error {
-  constructor(message) {
-    super(message);
-    this.name = "MtpUserCancelledError";
-  }
-};
 async function closeAllActiveMtpWrappers() {
   console.log(`[StorageWrapper] Closing all ${activeMtpWrappers.size} active MTP wrappers...`);
   for (const wrapper of activeMtpWrappers) {
@@ -859,504 +944,6 @@ async function moveFileWithRetry(source, target, retries = 3, delayMs = 1e3) {
     }
   }
 }
-var LocalStorageWrapper = class {
-  phonePath;
-  constructor(phonePath) {
-    this.phonePath = phonePath;
-  }
-  async isConnected() {
-    return fs2.existsSync(this.phonePath);
-  }
-  async exists(relativePath) {
-    const targetPath = path2.join(this.phonePath, relativePath);
-    return fs2.existsSync(targetPath);
-  }
-  async findMusicFiles(onProgress) {
-    void onProgress;
-    return findMusicFiles(this.phonePath, this.phonePath);
-  }
-  async getTrackMetadata(filePath, relativePath) {
-    return getTrackMetadata(filePath, relativePath);
-  }
-  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
-    const targetPath = path2.join(this.phonePath, remoteDestRelativePath);
-    const targetDir = path2.dirname(targetPath);
-    await fs2.promises.mkdir(targetDir, { recursive: true });
-    await copyFileWithRetry(localSrc, targetPath);
-  }
-  async moveFile(oldRelativePath, newRelativePath) {
-    const oldPath = path2.join(this.phonePath, oldRelativePath);
-    const newPath = path2.join(this.phonePath, newRelativePath);
-    const targetDir = path2.dirname(newPath);
-    await fs2.promises.mkdir(targetDir, { recursive: true });
-    await moveFileWithRetry(oldPath, newPath);
-  }
-  async deleteFile(relativePath) {
-    const targetPath = path2.join(this.phonePath, relativePath);
-    if (fs2.existsSync(targetPath)) {
-      await fs2.promises.unlink(targetPath);
-    }
-  }
-  async cleanEmptyDirs() {
-    const clean = async (dir) => {
-      try {
-        const list = await fs2.promises.readdir(dir, { withFileTypes: true });
-        for (const item of list) {
-          if (item.isDirectory()) {
-            const sub = path2.join(dir, item.name);
-            await clean(sub);
-          }
-        }
-        if (dir !== this.phonePath) {
-          const files = await fs2.promises.readdir(dir);
-          if (files.length === 0) {
-            await fs2.promises.rmdir(dir);
-          }
-        }
-      } catch (e) {
-        console.warn(`Failed to clean empty directory recursively in ${dir}:`, e);
-      }
-    };
-    await clean(this.phonePath);
-  }
-};
-var MockMtpStorageWrapper = class {
-  mockFiles = /* @__PURE__ */ new Map();
-  subPath;
-  constructor(subPath) {
-    this.subPath = subPath || "Music";
-    this.mockFiles.set(`${this.subPath}/The Weeknd/After Hours/03 Blinding Lights.mp3`, {
-      size: 45e5,
-      mtimeMs: Date.now() - 36e5,
-      metadata: {
-        title: "Blinding Lights",
-        artist: "The Weeknd",
-        album: "After Hours",
-        track: "3",
-        genre: "R&B",
-        disc: "1",
-        hasCoverArt: true,
-        coverArtSize: 5e4,
-        duration: 200
-      }
-    });
-    this.mockFiles.set(`${this.subPath}/Lil Nas X/Old Town Road.mp3`, {
-      size: 3e6,
-      mtimeMs: Date.now() - 72e5,
-      metadata: {
-        title: "Old Town Road",
-        artist: "Lil Nas X",
-        album: "7 EP",
-        track: "1",
-        genre: "Country",
-        disc: "1",
-        hasCoverArt: false,
-        coverArtSize: 0,
-        duration: 154
-      }
-    });
-  }
-  async isConnected() {
-    return true;
-  }
-  async exists(relativePath) {
-    return this.mockFiles.has(relativePath);
-  }
-  async findMusicFiles(onProgress) {
-    void onProgress;
-    const results = [];
-    for (const [key, val] of this.mockFiles.entries()) {
-      results.push({
-        filePath: `mock_mtp://${key}`,
-        relativePath: key,
-        size: val.size,
-        mtimeMs: val.mtimeMs
-      });
-    }
-    return results;
-  }
-  async getTrackMetadata(filePath, relativePath) {
-    const file = this.mockFiles.get(relativePath);
-    if (file) {
-      return {
-        id: `phone_${relativePath}`,
-        filePath,
-        relativePath,
-        title: file.metadata.title || "Unknown Title",
-        artist: file.metadata.artist || "Unknown Artist",
-        album: file.metadata.album || "Unknown Album",
-        track: file.metadata.track || "",
-        genre: file.metadata.genre || "Unknown Genre",
-        size: file.size,
-        mtimeMs: file.mtimeMs,
-        hasCoverArt: file.metadata.hasCoverArt || false,
-        coverArtSize: file.metadata.coverArtSize || 0,
-        disc: file.metadata.disc || "1",
-        albumartist: file.metadata.albumartist || "",
-        composer: file.metadata.composer || "",
-        year: file.metadata.year || "",
-        comment: file.metadata.comment || "",
-        duration: file.metadata.duration || 0
-      };
-    }
-    return {
-      id: `phone_${relativePath}`,
-      filePath,
-      relativePath,
-      title: path2.basename(relativePath, path2.extname(relativePath)),
-      artist: "Unknown Artist",
-      album: "Unknown Album",
-      track: "",
-      genre: "Unknown Genre",
-      size: 0,
-      mtimeMs: Date.now(),
-      hasCoverArt: false,
-      coverArtSize: 0,
-      duration: 0
-    };
-  }
-  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
-    try {
-      const meta = await getTrackMetadata(localSrc, remoteDestRelativePath);
-      const stats = await fs2.promises.stat(localSrc);
-      this.mockFiles.set(remoteDestRelativePath, {
-        size: stats.size,
-        mtimeMs: stats.mtimeMs,
-        metadata: meta
-      });
-    } catch (e) {
-      this.mockFiles.set(remoteDestRelativePath, {
-        size: 1e5,
-        mtimeMs: Date.now(),
-        metadata: {
-          title: path2.basename(remoteDestRelativePath, path2.extname(remoteDestRelativePath))
-        }
-      });
-    }
-  }
-  async moveFile(oldRelativePath, newRelativePath) {
-    const file = this.mockFiles.get(oldRelativePath);
-    if (file) {
-      this.mockFiles.delete(oldRelativePath);
-      this.mockFiles.set(newRelativePath, file);
-    }
-  }
-  async deleteFile(relativePath) {
-    this.mockFiles.delete(relativePath);
-  }
-  async cleanEmptyDirs() {
-  }
-};
-var MtpStorageWrapper = class {
-  vendorId;
-  productId;
-  subPath;
-  mtpInstance = null;
-  fileMap = /* @__PURE__ */ new Map();
-  // relativePath -> objectHandle
-  profileId;
-  // Dynamic, adaptive delay parameters
-  currentDelayMs = 20;
-  minDelayMs = 5;
-  maxDelayMs = 200;
-  constructor(vendorId, productId, subPath, profileId) {
-    this.vendorId = vendorId;
-    this.productId = productId;
-    this.subPath = subPath || "Music";
-    this.profileId = profileId;
-    activeMtpWrappers.add(this);
-  }
-  async disconnect() {
-    if (this.mtpInstance) {
-      console.log(`[StorageWrapper] Disconnecting MTP Instance for VID: ${this.vendorId}, PID: ${this.productId}`);
-      try {
-        await this.mtpInstance.close();
-      } catch (e) {
-        console.error("[StorageWrapper] Error closing MTP Instance:", e);
-      } finally {
-        this.mtpInstance = null;
-      }
-    }
-  }
-  async connectMtp(attemptReconnect = false) {
-    if (attemptReconnect) {
-      await this.disconnect();
-    }
-    if (this.mtpInstance) return this.mtpInstance;
-    let vId = this.vendorId;
-    let pId = this.productId;
-    const connectWithSpecificDevice = async (v, p) => {
-      const MtpClass = (await Promise.resolve().then(() => (init_Mtp(), Mtp_exports))).default;
-      const mtp = new MtpClass(v, p);
-      return new Promise((resolve, reject) => {
-        const onReady = async () => {
-          try {
-            await mtp.openSession();
-            this.mtpInstance = mtp;
-            resolve(mtp);
-          } catch (e) {
-            reject(e);
-          }
-        };
-        const onError = (err) => {
-          reject(new Error(`MTP connection error: ${err?.message || "Unknown error"}`));
-        };
-        mtp.addEventListener("ready", onReady);
-        mtp.addEventListener("error", onError);
-        setTimeout(() => {
-          reject(new Error("MTP connection timed out."));
-        }, 1e4);
-      });
-    };
-    let lastError = null;
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      try {
-        return await connectWithSpecificDevice(vId, pId);
-      } catch (e) {
-        lastError = e;
-        console.warn(`[StorageWrapper] Connection attempt ${attempt}/3 failed: ${e.message}`);
-        if (attempt < 3) {
-          await new Promise((r) => setTimeout(r, 1e3));
-        }
-      }
-    }
-    console.error(`[StorageWrapper] All 3 automatic connection attempts failed. Prompting user...`);
-    const selected = await promptDeviceSelection(vId, pId, this.profileId);
-    if (selected) {
-      this.vendorId = selected.vendorId;
-      this.productId = selected.productId;
-      try {
-        return await connectWithSpecificDevice(selected.vendorId, selected.productId);
-      } catch (e) {
-        throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u518D\u8A66\u884C\u30A8\u30E9\u30FC: ${e.message}`);
-      }
-    } else {
-      const errorMsg = lastError ? ` \u8A73\u7D30: ${lastError.message}` : "";
-      throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u9078\u629E\u307E\u305F\u306F\u518D\u8A66\u884C\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002${errorMsg}`);
-    }
-  }
-  async isConnected() {
-    try {
-      const mtp = await this.connectMtp();
-      return !!mtp;
-    } catch (e) {
-      return false;
-    }
-  }
-  async exists(relativePath) {
-    await this.findMusicFiles();
-    return this.fileMap.has(relativePath);
-  }
-  async applyAdaptiveDelay(success) {
-    if (success) {
-      this.currentDelayMs = Math.max(this.minDelayMs, this.currentDelayMs - 2);
-    } else {
-      this.currentDelayMs = Math.min(this.maxDelayMs, this.currentDelayMs + 30);
-    }
-    if (this.currentDelayMs > 0) {
-      await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
-    }
-  }
-  async findMusicFiles(onProgress) {
-    const mtp = await this.connectMtp();
-    const handles = await mtp.getObjectHandles();
-    const results = [];
-    this.fileMap.clear();
-    const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
-    let failureCount = 0;
-    let lastFailedIndex = -1;
-    for (let i = 0; i < handles.length; i++) {
-      const handle = handles[i];
-      let success = false;
-      let attempts = 0;
-      if (onProgress && i % 50 === 0) {
-        onProgress(`\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (${i}/${handles.length})`);
-      }
-      while (!success && attempts < 3) {
-        attempts++;
-        try {
-          if (this.currentDelayMs > 0) {
-            await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
-          }
-          const fileName = await mtp.getFileName(handle);
-          const ext = path2.extname(fileName).toLowerCase();
-          if (validExtensions.has(ext)) {
-            const relativePath = path2.join(this.subPath, fileName).replace(/\\/g, "/");
-            this.fileMap.set(relativePath, handle);
-            results.push({
-              filePath: `mtp://${this.vendorId}/${this.productId}/${handle}`,
-              relativePath,
-              size: 1e6,
-              // Default fallback size
-              mtimeMs: Date.now()
-              // Default fallback mtime
-            });
-          }
-          success = true;
-          await this.applyAdaptiveDelay(true);
-          if (lastFailedIndex !== i) {
-            failureCount = 0;
-          }
-        } catch (e) {
-          if (e instanceof MtpUserCancelledError) {
-            throw e;
-          }
-          console.warn(`[findMusicFiles] Error for object handle ${handle} (attempt ${attempts}): ${e.message}`);
-          await this.applyAdaptiveDelay(false);
-          if (e.message.includes("Cancelled") || e.message.includes("transfer") || e.message.includes("device")) {
-            console.log("[findMusicFiles] Connection problem detected. Reconnecting MTP...");
-            try {
-              await this.connectMtp(true);
-            } catch (reconnectErr) {
-              if (reconnectErr instanceof MtpUserCancelledError) {
-                throw reconnectErr;
-              }
-              console.error("[findMusicFiles] Reconnection failed:", reconnectErr);
-            }
-          }
-        }
-      }
-      if (!success) {
-        if (lastFailedIndex === i - 1) {
-          failureCount++;
-        } else {
-          failureCount = 1;
-        }
-        lastFailedIndex = i;
-        console.error(`[findMusicFiles] Failed to read file info for object handle ${handle} after 3 attempts. Consecutive failed indices: ${failureCount}`);
-        if (failureCount >= 3) {
-          await this.disconnect();
-          throw new Error(`\u9023\u7D9A\u3057\u30663\u500B\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u8AAD\u307F\u8FBC\u307F\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u51E6\u7406\u3092\u4E2D\u65AD\u3057\u307E\u3059\u3002\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
-        }
-      }
-    }
-    return results;
-  }
-  async runWithRetryAndReconnect(operation) {
-    let attempts = 0;
-    while (attempts < 3) {
-      attempts++;
-      try {
-        const mtp = await this.connectMtp(attempts > 1);
-        if (this.currentDelayMs > 0) {
-          await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
-        }
-        const result = await operation(mtp);
-        await this.applyAdaptiveDelay(true);
-        return result;
-      } catch (e) {
-        if (e instanceof MtpUserCancelledError) {
-          throw e;
-        }
-        console.error(`[MtpStorageWrapper] Operation failed on attempt ${attempts}/3: ${e.message}`);
-        await this.applyAdaptiveDelay(false);
-        if (attempts === 3) {
-          await this.disconnect();
-          throw e;
-        }
-        await this.disconnect();
-      }
-    }
-    throw new Error("MTP operation failed after retries.");
-  }
-  async getTrackMetadata(filePath, relativePath) {
-    const handle = this.fileMap.get(relativePath);
-    if (handle === void 0) {
-      throw new Error(`File not found on MTP device: ${relativePath}`);
-    }
-    return this.runWithRetryAndReconnect(async (mtp) => {
-      const fileName = await mtp.getFileName(handle);
-      const tempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp");
-      if (!fs2.existsSync(tempDir)) {
-        fs2.mkdirSync(tempDir, { recursive: true });
-      }
-      const tempFilePath = path2.join(tempDir, `${handle}_${fileName}`);
-      try {
-        const fileData = await mtp.getFile(handle, fileName);
-        await fs2.promises.writeFile(tempFilePath, Buffer.from(fileData));
-        const meta = await getTrackMetadata(tempFilePath, relativePath);
-        meta.filePath = filePath;
-        return meta;
-      } finally {
-        if (fs2.existsSync(tempFilePath)) {
-          try {
-            await fs2.promises.unlink(tempFilePath);
-          } catch (e) {
-            console.error("[StorageWrapper] Failed to clean up temp file:", e);
-          }
-        }
-      }
-    });
-  }
-  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
-    const fileData = await fs2.promises.readFile(localSrc);
-    const fileName = path2.basename(remoteDestRelativePath);
-    await this.runWithRetryAndReconnect(async (mtp) => {
-      if (typeof mtp.sendFile === "function") {
-        await mtp.sendFile(fileData, fileName);
-      } else {
-        console.log(`Writing file ${fileName} to MTP device via bulk transfer packets...`);
-        const sendObjectCmd = {
-          type: 1,
-          // Command Block
-          code: 4109,
-          // SendObject
-          payload: []
-        };
-        const container = mtp.buildContainerPacket(sendObjectCmd);
-        await mtp.write(container);
-        await mtp.write(fileData.buffer);
-        const response = await mtp.read();
-        console.log("SendObject MTP response:", response);
-      }
-    });
-  }
-  async moveFile(oldRelativePath, newRelativePath) {
-    const handle = this.fileMap.get(oldRelativePath);
-    if (handle === void 0) return;
-    const fileData = await this.runWithRetryAndReconnect(async (mtp) => {
-      const fileName2 = await mtp.getFileName(handle);
-      return await mtp.getFile(handle, fileName2);
-    });
-    const fileName = path2.basename(newRelativePath);
-    await this.runWithRetryAndReconnect(async (mtp) => {
-      if (typeof mtp.sendFile === "function") {
-        await mtp.sendFile(fileData, fileName);
-      } else {
-        console.log(`Writing moved file ${fileName} to MTP device via bulk transfer packets...`);
-        const sendObjectCmd = {
-          type: 1,
-          code: 4109,
-          payload: []
-        };
-        const container = mtp.buildContainerPacket(sendObjectCmd);
-        await mtp.write(container);
-        await mtp.write(fileData.buffer);
-        const response = await mtp.read();
-        console.log("SendObject (moved) MTP response:", response);
-      }
-    });
-    await this.deleteFile(oldRelativePath);
-  }
-  async deleteFile(relativePath) {
-    const handle = this.fileMap.get(relativePath);
-    if (handle === void 0) return;
-    await this.runWithRetryAndReconnect(async (mtp) => {
-      const deleteObjectCmd = {
-        type: 1,
-        code: 4107,
-        // DeleteObject
-        payload: [handle]
-      };
-      await mtp.write(mtp.buildContainerPacket(deleteObjectCmd));
-      const response = await mtp.read();
-      console.log("DeleteObject response:", response);
-    });
-    this.fileMap.delete(relativePath);
-  }
-  async cleanEmptyDirs() {
-  }
-};
 async function createTempPs1AndParams(scriptBody, params) {
   const rand = Math.random().toString(36).substring(2, 10);
   const paramsPath = path2.join(os.tmpdir(), `musicsync_params_${rand}.json`);
@@ -1541,6 +1128,7 @@ async function runPowerShellFileCommand(scriptPath, onProgressLine) {
   const { spawn } = await import("node:child_process");
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+    activeChildProcesses.add(child);
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -1561,6 +1149,7 @@ async function runPowerShellFileCommand(scriptPath, onProgressLine) {
       stderr += chunk;
     });
     child.on("close", (code) => {
+      activeChildProcesses.delete(child);
       if (bufferLine && onProgressLine) {
         onProgressLine(bufferLine);
       }
@@ -1580,6 +1169,7 @@ async function runPowerShellFileInteractive(scriptPath, onProgressLine) {
   const { spawn } = await import("node:child_process");
   return new Promise((resolve, reject) => {
     const child = spawn("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-File", scriptPath]);
+    activeChildProcesses.add(child);
     let stdout = "";
     let stderr = "";
     child.stdout.setEncoding("utf8");
@@ -1603,6 +1193,7 @@ async function runPowerShellFileInteractive(scriptPath, onProgressLine) {
       stderr += chunk;
     });
     child.on("close", (code) => {
+      activeChildProcesses.delete(child);
       if (bufferLine && onProgressLine) {
         onProgressLine(bufferLine, writeStdin);
       }
@@ -1615,302 +1206,6 @@ async function runPowerShellFileInteractive(scriptPath, onProgressLine) {
     });
   });
 }
-var PowerShellMtpStorageWrapper = class {
-  deviceName;
-  subPath;
-  fileMap = /* @__PURE__ */ new Map();
-  constructor(deviceName, subPath) {
-    this.deviceName = deviceName || "Mock Device";
-    this.subPath = subPath || "Music";
-  }
-  getRelPathInsideSub(p) {
-    const normalized = p.replace(/\\/g, "/");
-    const prefix = this.subPath + "/";
-    if (normalized.startsWith(prefix)) {
-      return normalized.substring(prefix.length);
-    }
-    return normalized;
-  }
-  async isConnected() {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    try {
-      const res = await runPowerShellWithParams(isConnected_default, { deviceName: this.deviceName });
-      return res.trim() === "CONNECTED";
-    } catch (e) {
-      console.error("[PowerShellMtp] isConnected failed:", e);
-      return false;
-    }
-  }
-  async exists(relativePath) {
-    if (this.fileMap.size === 0) {
-      await this.findMusicFiles();
-    }
-    const rel = this.getRelPathInsideSub(relativePath);
-    const fullRel = `${this.subPath}/${rel}`.replace(/\\/g, "/");
-    return this.fileMap.has(fullRel);
-  }
-  async findMusicFiles(onProgress) {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    try {
-      const progressHandler = (line) => {
-        const trimmed = line.trim();
-        if (trimmed.startsWith("PROGRESS_UPDATE:") && onProgress) {
-          onProgress(trimmed.substring("PROGRESS_UPDATE:".length));
-        }
-      };
-      const rawStdout = await runPowerShellWithParams(findMusicFiles_default, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
-      let jsonPart = "[]";
-      const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
-      const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
-      if (startIndex !== -1 && endIndex !== -1) {
-        jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
-      } else {
-        jsonPart = rawStdout.trim();
-      }
-      const parsed = JSON.parse(jsonPart || "[]");
-      let rawList = [];
-      if (Array.isArray(parsed)) {
-        rawList = parsed;
-      } else if (parsed && parsed.value !== void 0 && Array.isArray(parsed.value)) {
-        rawList = parsed.value;
-      } else if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
-        if (parsed.relativePath !== void 0) {
-          rawList = [parsed];
-        }
-      }
-      this.fileMap.clear();
-      const results = [];
-      for (const item of rawList) {
-        if (!item || !item.relativePath) {
-          continue;
-        }
-        const relativePath = `${this.subPath}/${item.relativePath}`.replace(/\\/g, "/");
-        const size = parseInt(item.size, 10) || 0;
-        const mtimeMs = parseInt(item.mtimeMs, 10) || Date.now();
-        this.fileMap.set(relativePath, { size, mtimeMs });
-        results.push({
-          filePath: `mtp_powershell://${encodeURIComponent(this.deviceName)}/${relativePath}`,
-          relativePath,
-          size,
-          mtimeMs
-        });
-      }
-      return results;
-    } catch (e) {
-      console.error("[PowerShellMtp] findMusicFiles error:", e);
-      throw e;
-    }
-  }
-  async getTrackMetadata(filePath, relativePath) {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    const randSuffix = Math.random().toString(36).substring(2, 10);
-    const trackTempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp", randSuffix);
-    if (!fs2.existsSync(trackTempDir)) {
-      fs2.mkdirSync(trackTempDir, { recursive: true });
-    }
-    const relPathInsideSub = this.getRelPathInsideSub(relativePath);
-    try {
-      const res = await runPowerShellWithParams(getTrackMetadata_default, {
-        deviceName: this.deviceName,
-        subPath: this.subPath,
-        relativePath: relPathInsideSub,
-        tempFilePath: trackTempDir
-      });
-      if (res.trim() !== "SUCCESS") {
-        throw new Error(`Failed to download file from MTP for metadata parsing: ${relativePath}`);
-      }
-      const filesInTemp = await fs2.promises.readdir(trackTempDir);
-      if (filesInTemp.length === 0) {
-        throw new Error(`Temp folder is empty. File was not downloaded: ${relativePath}`);
-      }
-      const downloadedFileName = filesInTemp[0];
-      const actualDownloadedFilePath = path2.join(trackTempDir, downloadedFileName);
-      const meta = await getTrackMetadata(actualDownloadedFilePath, relativePath);
-      meta.filePath = filePath;
-      return meta;
-    } finally {
-      if (fs2.existsSync(trackTempDir)) {
-        try {
-          const files = await fs2.promises.readdir(trackTempDir);
-          for (const file of files) {
-            await fs2.promises.unlink(path2.join(trackTempDir, file));
-          }
-          await fs2.promises.rmdir(trackTempDir);
-        } catch (e) {
-          console.error("[PowerShellMtp] Failed to delete trackTempDir:", e);
-        }
-      }
-    }
-  }
-  async copyFileFromLocal(localSrc, remoteDestRelativePath) {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    const relPathInsideSub = this.getRelPathInsideSub(remoteDestRelativePath);
-    const relativeDestDir = path2.dirname(relPathInsideSub).replace(/\\/g, "/");
-    const destDirInSub = relativeDestDir === "." ? "" : relativeDestDir;
-    const res = await runPowerShellWithParams(copyFile_default, {
-      deviceName: this.deviceName,
-      subPath: this.subPath,
-      localSrc,
-      relativePath: destDirInSub
-    });
-    if (res.trim() !== "SUCCESS") {
-      throw new Error(`Failed to copy file to MTP device: ${remoteDestRelativePath}`);
-    }
-  }
-  async moveFile(oldRelativePath, newRelativePath) {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    const oldRelPathInsideSub = this.getRelPathInsideSub(oldRelativePath);
-    const newRelPathInsideSub = this.getRelPathInsideSub(newRelativePath);
-    const newRelDirInsideSub = path2.dirname(newRelPathInsideSub).replace(/\\/g, "/");
-    const newFileName = path2.basename(newRelPathInsideSub);
-    const oldFileName = path2.basename(oldRelPathInsideSub);
-    const res = await runPowerShellWithParams(moveFile_default, {
-      deviceName: this.deviceName,
-      subPath: this.subPath,
-      oldRelativePath: oldFileName,
-      newRelativePath: newFileName,
-      relativePath: oldRelPathInsideSub,
-      tempFilePath: newRelDirInsideSub
-    });
-    if (res.trim() !== "SUCCESS") {
-      throw new Error(`Failed to move file: ${oldRelativePath} -> ${newRelativePath}`);
-    }
-  }
-  async deleteFile(relativePath) {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    const relPathInsideSub = this.getRelPathInsideSub(relativePath);
-    await runPowerShellWithParams(deleteFile_default, {
-      deviceName: this.deviceName,
-      subPath: this.subPath,
-      relativePath: relPathInsideSub
-    });
-    this.fileMap.delete(relativePath);
-  }
-  async cleanEmptyDirs() {
-    if (process.platform !== "win32") {
-      throw new Error("PowerShell MTP is only supported on Windows.");
-    }
-    await runPowerShellWithParams(cleanEmptyDirs_default, {
-      deviceName: this.deviceName,
-      subPath: this.subPath
-    });
-  }
-  async executeBatchSync(ops, onProgress, onConsecutiveFailures) {
-    if (process.platform !== "win32") {
-      console.log("[PowerShellMtp] executeBatchSync: simulated fallback mode on macOS/Linux.");
-      const failedTrackIds = [];
-      const total2 = ops.length;
-      for (let i = 0; i < total2; i++) {
-        const op = ops[i];
-        if (onProgress) {
-          onProgress(`[Mock] Processing ${op.type} for ${op.trackId}`, i + 1, total2);
-        }
-        await new Promise((resolve) => setTimeout(resolve, 50));
-      }
-      return { failedTrackIds };
-    }
-    const total = ops.length;
-    let completed = 0;
-    const progressHandler = (line, writeStdin) => {
-      const trimmed = line.trim();
-      if (trimmed.startsWith("PROGRESS_UPDATE:STATUS:")) {
-        const msg = trimmed.substring("PROGRESS_UPDATE:STATUS:".length);
-        if (onProgress) {
-          onProgress(msg, completed, total);
-        }
-      } else if (trimmed.startsWith("PROGRESS_UPDATE:SUCCESS_OP:")) {
-        completed++;
-      } else if (trimmed.startsWith("PROGRESS_UPDATE:FAILED_OP:")) {
-        completed++;
-        const parts = trimmed.substring("PROGRESS_UPDATE:FAILED_OP:".length).split(":");
-        const errorMsg = parts.slice(1).join(":");
-        if (onProgress) {
-          onProgress(`\u51E6\u7406\u5931\u6557: ${completed}/${total} (${errorMsg})`, completed, total);
-        }
-      } else if (trimmed.startsWith("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:")) {
-        const failedCount = parseInt(trimmed.substring("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:".length), 10);
-        if (onConsecutiveFailures) {
-          onConsecutiveFailures(failedCount).then((shouldContinue) => {
-            if (shouldContinue) {
-              writeStdin("CONTINUE\r\n");
-            } else {
-              writeStdin("ABORT\r\n");
-            }
-          });
-        } else {
-          writeStdin("CONTINUE\r\n");
-        }
-      }
-    };
-    try {
-      const rawStdout = await runPowerShellInteractive(
-        executeBatchSync_default,
-        {
-          deviceName: this.deviceName,
-          subPath: this.subPath,
-          operations: ops
-        },
-        progressHandler
-      );
-      let jsonPart = "[]";
-      const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
-      const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
-      if (startIndex !== -1 && endIndex !== -1) {
-        jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
-      } else {
-        jsonPart = rawStdout.trim();
-      }
-      const parsed = JSON.parse(jsonPart || "[]");
-      const failedTrackIds = Array.isArray(parsed) ? parsed : [parsed];
-      return { failedTrackIds };
-    } catch (e) {
-      console.error("[PowerShellMtp] executeBatchSync error:", e);
-      throw e;
-    }
-  }
-  async getFileSizes(relativePaths) {
-    if (process.platform !== "win32") {
-      console.log("[PowerShellMtp] getFileSizes: simulated fallback mode on macOS/Linux.");
-      const mockSizes = {};
-      relativePaths.forEach((rel) => {
-        mockSizes[rel] = 1e6;
-      });
-      return mockSizes;
-    }
-    try {
-      const rawStdout = await runPowerShellWithParams(getFileSizes_default, {
-        deviceName: this.deviceName,
-        subPath: this.subPath,
-        relativePaths
-      });
-      let jsonPart = "{}";
-      const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
-      const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
-      if (startIndex !== -1 && endIndex !== -1) {
-        jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
-      } else {
-        jsonPart = rawStdout.trim();
-      }
-      const parsed = JSON.parse(jsonPart || "{}");
-      return parsed;
-    } catch (e) {
-      console.error("[PowerShellMtp] getFileSizes error:", e);
-      return {};
-    }
-  }
-};
 function getStorageWrapper(profile) {
   if (!profile) {
     throw new Error("No active profile provided");
@@ -1933,8 +1228,840 @@ function getStorageWrapper(profile) {
   console.log(`[StorageWrapper] Initializing Local File Storage Wrapper for Path: ${profile.phonePath}`);
   return new LocalStorageWrapper(profile.phonePath);
 }
+var activeMtpWrappers, activeChildProcesses, MtpUserCancelledError, LocalStorageWrapper, MockMtpStorageWrapper, MtpStorageWrapper, PowerShellMtpStorageWrapper;
+var init_storageWrapper = __esm({
+  "src/main/storageWrapper.ts"() {
+    "use strict";
+    init_cancelState();
+    init_utils();
+    init_cleanEmptyDirs();
+    init_copyFile();
+    init_deleteFile();
+    init_executeBatchSync();
+    init_findMusicFiles();
+    init_getFileSizes();
+    init_getTrackMetadata();
+    init_isConnected();
+    init_moveFile();
+    activeMtpWrappers = /* @__PURE__ */ new Set();
+    activeChildProcesses = /* @__PURE__ */ new Set();
+    MtpUserCancelledError = class extends Error {
+      constructor(message) {
+        super(message);
+        this.name = "MtpUserCancelledError";
+      }
+    };
+    LocalStorageWrapper = class {
+      phonePath;
+      constructor(phonePath) {
+        this.phonePath = phonePath;
+      }
+      async isConnected() {
+        return fs2.existsSync(this.phonePath);
+      }
+      async exists(relativePath) {
+        const targetPath = path2.join(this.phonePath, relativePath);
+        return fs2.existsSync(targetPath);
+      }
+      async findMusicFiles(onProgress) {
+        void onProgress;
+        return findMusicFiles(this.phonePath, this.phonePath);
+      }
+      async getTrackMetadata(filePath, relativePath) {
+        return getTrackMetadata(filePath, relativePath);
+      }
+      async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+        const targetPath = path2.join(this.phonePath, remoteDestRelativePath);
+        const targetDir = path2.dirname(targetPath);
+        await fs2.promises.mkdir(targetDir, { recursive: true });
+        await copyFileWithRetry(localSrc, targetPath);
+      }
+      async moveFile(oldRelativePath, newRelativePath) {
+        const oldPath = path2.join(this.phonePath, oldRelativePath);
+        const newPath = path2.join(this.phonePath, newRelativePath);
+        const targetDir = path2.dirname(newPath);
+        await fs2.promises.mkdir(targetDir, { recursive: true });
+        await moveFileWithRetry(oldPath, newPath);
+      }
+      async deleteFile(relativePath) {
+        const targetPath = path2.join(this.phonePath, relativePath);
+        if (fs2.existsSync(targetPath)) {
+          await fs2.promises.unlink(targetPath);
+        }
+      }
+      async cleanEmptyDirs() {
+        const clean = async (dir) => {
+          try {
+            const list = await fs2.promises.readdir(dir, { withFileTypes: true });
+            for (const item of list) {
+              if (item.isDirectory()) {
+                const sub = path2.join(dir, item.name);
+                await clean(sub);
+              }
+            }
+            if (dir !== this.phonePath) {
+              const files = await fs2.promises.readdir(dir);
+              if (files.length === 0) {
+                await fs2.promises.rmdir(dir);
+              }
+            }
+          } catch (e) {
+            console.warn(`Failed to clean empty directory recursively in ${dir}:`, e);
+          }
+        };
+        await clean(this.phonePath);
+      }
+    };
+    MockMtpStorageWrapper = class {
+      mockFiles = /* @__PURE__ */ new Map();
+      subPath;
+      constructor(subPath) {
+        this.subPath = subPath || "Music";
+        this.mockFiles.set(`${this.subPath}/The Weeknd/After Hours/03 Blinding Lights.mp3`, {
+          size: 45e5,
+          mtimeMs: Date.now() - 36e5,
+          metadata: {
+            title: "Blinding Lights",
+            artist: "The Weeknd",
+            album: "After Hours",
+            track: "3",
+            genre: "R&B",
+            disc: "1",
+            hasCoverArt: true,
+            coverArtSize: 5e4,
+            duration: 200
+          }
+        });
+        this.mockFiles.set(`${this.subPath}/Lil Nas X/Old Town Road.mp3`, {
+          size: 3e6,
+          mtimeMs: Date.now() - 72e5,
+          metadata: {
+            title: "Old Town Road",
+            artist: "Lil Nas X",
+            album: "7 EP",
+            track: "1",
+            genre: "Country",
+            disc: "1",
+            hasCoverArt: false,
+            coverArtSize: 0,
+            duration: 154
+          }
+        });
+      }
+      async isConnected() {
+        return true;
+      }
+      async exists(relativePath) {
+        return this.mockFiles.has(relativePath);
+      }
+      async findMusicFiles(onProgress) {
+        void onProgress;
+        const results = [];
+        for (const [key, val] of this.mockFiles.entries()) {
+          results.push({
+            filePath: `mock_mtp://${key}`,
+            relativePath: key,
+            size: val.size,
+            mtimeMs: val.mtimeMs
+          });
+        }
+        return results;
+      }
+      async getTrackMetadata(filePath, relativePath) {
+        const file = this.mockFiles.get(relativePath);
+        if (file) {
+          return {
+            id: `phone_${relativePath}`,
+            filePath,
+            relativePath,
+            title: file.metadata.title || "Unknown Title",
+            artist: file.metadata.artist || "Unknown Artist",
+            album: file.metadata.album || "Unknown Album",
+            track: file.metadata.track || "",
+            genre: file.metadata.genre || "Unknown Genre",
+            size: file.size,
+            mtimeMs: file.mtimeMs,
+            hasCoverArt: file.metadata.hasCoverArt || false,
+            coverArtSize: file.metadata.coverArtSize || 0,
+            disc: file.metadata.disc || "1",
+            albumartist: file.metadata.albumartist || "",
+            composer: file.metadata.composer || "",
+            year: file.metadata.year || "",
+            comment: file.metadata.comment || "",
+            duration: file.metadata.duration || 0
+          };
+        }
+        return {
+          id: `phone_${relativePath}`,
+          filePath,
+          relativePath,
+          title: path2.basename(relativePath, path2.extname(relativePath)),
+          artist: "Unknown Artist",
+          album: "Unknown Album",
+          track: "",
+          genre: "Unknown Genre",
+          size: 0,
+          mtimeMs: Date.now(),
+          hasCoverArt: false,
+          coverArtSize: 0,
+          duration: 0
+        };
+      }
+      async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+        try {
+          const meta = await getTrackMetadata(localSrc, remoteDestRelativePath);
+          const stats = await fs2.promises.stat(localSrc);
+          this.mockFiles.set(remoteDestRelativePath, {
+            size: stats.size,
+            mtimeMs: stats.mtimeMs,
+            metadata: meta
+          });
+        } catch (e) {
+          this.mockFiles.set(remoteDestRelativePath, {
+            size: 1e5,
+            mtimeMs: Date.now(),
+            metadata: {
+              title: path2.basename(remoteDestRelativePath, path2.extname(remoteDestRelativePath))
+            }
+          });
+        }
+      }
+      async moveFile(oldRelativePath, newRelativePath) {
+        const file = this.mockFiles.get(oldRelativePath);
+        if (file) {
+          this.mockFiles.delete(oldRelativePath);
+          this.mockFiles.set(newRelativePath, file);
+        }
+      }
+      async deleteFile(relativePath) {
+        this.mockFiles.delete(relativePath);
+      }
+      async cleanEmptyDirs() {
+      }
+    };
+    MtpStorageWrapper = class {
+      vendorId;
+      productId;
+      subPath;
+      mtpInstance = null;
+      fileMap = /* @__PURE__ */ new Map();
+      // relativePath -> objectHandle
+      profileId;
+      // Dynamic, adaptive delay parameters
+      currentDelayMs = 20;
+      minDelayMs = 5;
+      maxDelayMs = 200;
+      constructor(vendorId, productId, subPath, profileId) {
+        this.vendorId = vendorId;
+        this.productId = productId;
+        this.subPath = subPath || "Music";
+        this.profileId = profileId;
+        activeMtpWrappers.add(this);
+      }
+      async disconnect() {
+        if (this.mtpInstance) {
+          console.log(`[StorageWrapper] Disconnecting MTP Instance for VID: ${this.vendorId}, PID: ${this.productId}`);
+          try {
+            await this.mtpInstance.close();
+          } catch (e) {
+            console.error("[StorageWrapper] Error closing MTP Instance:", e);
+          } finally {
+            this.mtpInstance = null;
+          }
+        }
+      }
+      async connectMtp(attemptReconnect = false) {
+        if (attemptReconnect) {
+          await this.disconnect();
+        }
+        if (this.mtpInstance) return this.mtpInstance;
+        let vId = this.vendorId;
+        let pId = this.productId;
+        const connectWithSpecificDevice = async (v, p) => {
+          const MtpClass = (await Promise.resolve().then(() => (init_Mtp(), Mtp_exports))).default;
+          const mtp = new MtpClass(v, p);
+          return new Promise((resolve, reject) => {
+            const onReady = async () => {
+              try {
+                await mtp.openSession();
+                this.mtpInstance = mtp;
+                resolve(mtp);
+              } catch (e) {
+                reject(e);
+              }
+            };
+            const onError = (err) => {
+              reject(new Error(`MTP connection error: ${err?.message || "Unknown error"}`));
+            };
+            mtp.addEventListener("ready", onReady);
+            mtp.addEventListener("error", onError);
+            setTimeout(() => {
+              reject(new Error("MTP connection timed out."));
+            }, 1e4);
+          });
+        };
+        let lastError = null;
+        for (let attempt = 1; attempt <= 3; attempt++) {
+          try {
+            return await connectWithSpecificDevice(vId, pId);
+          } catch (e) {
+            lastError = e;
+            console.warn(`[StorageWrapper] Connection attempt ${attempt}/3 failed: ${e.message}`);
+            if (attempt < 3) {
+              await new Promise((r) => setTimeout(r, 1e3));
+            }
+          }
+        }
+        console.error(`[StorageWrapper] All 3 automatic connection attempts failed. Prompting user...`);
+        const selected = await promptDeviceSelection(vId, pId, this.profileId);
+        if (selected) {
+          this.vendorId = selected.vendorId;
+          this.productId = selected.productId;
+          try {
+            return await connectWithSpecificDevice(selected.vendorId, selected.productId);
+          } catch (e) {
+            throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u518D\u8A66\u884C\u30A8\u30E9\u30FC: ${e.message}`);
+          }
+        } else {
+          const errorMsg = lastError ? ` \u8A73\u7D30: ${lastError.message}` : "";
+          throw new MtpUserCancelledError(`MTP\u63A5\u7D9A\u306B\u5931\u6557\u3057\u307E\u3057\u305F\u3002\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u9078\u629E\u307E\u305F\u306F\u518D\u8A66\u884C\u304C\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002${errorMsg}`);
+        }
+      }
+      async isConnected() {
+        try {
+          const mtp = await this.connectMtp();
+          return !!mtp;
+        } catch (e) {
+          return false;
+        }
+      }
+      async exists(relativePath) {
+        await this.findMusicFiles();
+        return this.fileMap.has(relativePath);
+      }
+      async applyAdaptiveDelay(success) {
+        if (success) {
+          this.currentDelayMs = Math.max(this.minDelayMs, this.currentDelayMs - 2);
+        } else {
+          this.currentDelayMs = Math.min(this.maxDelayMs, this.currentDelayMs + 30);
+        }
+        if (this.currentDelayMs > 0) {
+          await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+        }
+      }
+      async findMusicFiles(onProgress) {
+        const mtp = await this.connectMtp();
+        const handles = await mtp.getObjectHandles();
+        const results = [];
+        this.fileMap.clear();
+        const validExtensions = /* @__PURE__ */ new Set([".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma"]);
+        let failureCount = 0;
+        let lastFailedIndex = -1;
+        for (let i = 0; i < handles.length; i++) {
+          const handle = handles[i];
+          let success = false;
+          let attempts = 0;
+          if (onProgress && i % 50 === 0) {
+            onProgress(`\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (${i}/${handles.length})`);
+          }
+          while (!success && attempts < 3) {
+            attempts++;
+            try {
+              if (this.currentDelayMs > 0) {
+                await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+              }
+              const fileName = await mtp.getFileName(handle);
+              const ext = path2.extname(fileName).toLowerCase();
+              if (validExtensions.has(ext)) {
+                const relativePath = path2.join(this.subPath, fileName).replace(/\\/g, "/");
+                this.fileMap.set(relativePath, handle);
+                results.push({
+                  filePath: `mtp://${this.vendorId}/${this.productId}/${handle}`,
+                  relativePath,
+                  size: 1e6,
+                  // Default fallback size
+                  mtimeMs: Date.now()
+                  // Default fallback mtime
+                });
+              }
+              success = true;
+              await this.applyAdaptiveDelay(true);
+              if (lastFailedIndex !== i) {
+                failureCount = 0;
+              }
+            } catch (e) {
+              if (e instanceof MtpUserCancelledError) {
+                throw e;
+              }
+              console.warn(`[findMusicFiles] Error for object handle ${handle} (attempt ${attempts}): ${e.message}`);
+              await this.applyAdaptiveDelay(false);
+              if (e.message.includes("Cancelled") || e.message.includes("transfer") || e.message.includes("device")) {
+                console.log("[findMusicFiles] Connection problem detected. Reconnecting MTP...");
+                try {
+                  await this.connectMtp(true);
+                } catch (reconnectErr) {
+                  if (reconnectErr instanceof MtpUserCancelledError) {
+                    throw reconnectErr;
+                  }
+                  console.error("[findMusicFiles] Reconnection failed:", reconnectErr);
+                }
+              }
+            }
+          }
+          if (!success) {
+            if (lastFailedIndex === i - 1) {
+              failureCount++;
+            } else {
+              failureCount = 1;
+            }
+            lastFailedIndex = i;
+            console.error(`[findMusicFiles] Failed to read file info for object handle ${handle} after 3 attempts. Consecutive failed indices: ${failureCount}`);
+            if (failureCount >= 3) {
+              await this.disconnect();
+              throw new Error(`\u9023\u7D9A\u3057\u30663\u500B\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u8AAD\u307F\u8FBC\u307F\u306B\u5931\u6557\u3057\u305F\u305F\u3081\u3001\u51E6\u7406\u3092\u4E2D\u65AD\u3057\u307E\u3059\u3002\u63A5\u7D9A\u3092\u78BA\u8A8D\u3057\u3066\u304F\u3060\u3055\u3044\u3002`);
+            }
+          }
+        }
+        return results;
+      }
+      async runWithRetryAndReconnect(operation) {
+        let attempts = 0;
+        while (attempts < 3) {
+          attempts++;
+          try {
+            const mtp = await this.connectMtp(attempts > 1);
+            if (this.currentDelayMs > 0) {
+              await new Promise((resolve) => setTimeout(resolve, this.currentDelayMs));
+            }
+            const result = await operation(mtp);
+            await this.applyAdaptiveDelay(true);
+            return result;
+          } catch (e) {
+            if (e instanceof MtpUserCancelledError) {
+              throw e;
+            }
+            console.error(`[MtpStorageWrapper] Operation failed on attempt ${attempts}/3: ${e.message}`);
+            await this.applyAdaptiveDelay(false);
+            if (attempts === 3) {
+              await this.disconnect();
+              throw e;
+            }
+            await this.disconnect();
+          }
+        }
+        throw new Error("MTP operation failed after retries.");
+      }
+      async getTrackMetadata(filePath, relativePath) {
+        const handle = this.fileMap.get(relativePath);
+        if (handle === void 0) {
+          throw new Error(`File not found on MTP device: ${relativePath}`);
+        }
+        return this.runWithRetryAndReconnect(async (mtp) => {
+          const fileName = await mtp.getFileName(handle);
+          const tempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp");
+          if (!fs2.existsSync(tempDir)) {
+            fs2.mkdirSync(tempDir, { recursive: true });
+          }
+          const tempFilePath = path2.join(tempDir, `${handle}_${fileName}`);
+          try {
+            const fileData = await mtp.getFile(handle, fileName);
+            await fs2.promises.writeFile(tempFilePath, Buffer.from(fileData));
+            const meta = await getTrackMetadata(tempFilePath, relativePath);
+            meta.filePath = filePath;
+            return meta;
+          } finally {
+            if (fs2.existsSync(tempFilePath)) {
+              try {
+                await fs2.promises.unlink(tempFilePath);
+              } catch (e) {
+                console.error("[StorageWrapper] Failed to clean up temp file:", e);
+              }
+            }
+          }
+        });
+      }
+      async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+        const fileData = await fs2.promises.readFile(localSrc);
+        const fileName = path2.basename(remoteDestRelativePath);
+        await this.runWithRetryAndReconnect(async (mtp) => {
+          if (typeof mtp.sendFile === "function") {
+            await mtp.sendFile(fileData, fileName);
+          } else {
+            console.log(`Writing file ${fileName} to MTP device via bulk transfer packets...`);
+            const sendObjectCmd = {
+              type: 1,
+              // Command Block
+              code: 4109,
+              // SendObject
+              payload: []
+            };
+            const container = mtp.buildContainerPacket(sendObjectCmd);
+            await mtp.write(container);
+            await mtp.write(fileData.buffer);
+            const response = await mtp.read();
+            console.log("SendObject MTP response:", response);
+          }
+        });
+      }
+      async moveFile(oldRelativePath, newRelativePath) {
+        const handle = this.fileMap.get(oldRelativePath);
+        if (handle === void 0) return;
+        const fileData = await this.runWithRetryAndReconnect(async (mtp) => {
+          const fileName2 = await mtp.getFileName(handle);
+          return await mtp.getFile(handle, fileName2);
+        });
+        const fileName = path2.basename(newRelativePath);
+        await this.runWithRetryAndReconnect(async (mtp) => {
+          if (typeof mtp.sendFile === "function") {
+            await mtp.sendFile(fileData, fileName);
+          } else {
+            console.log(`Writing moved file ${fileName} to MTP device via bulk transfer packets...`);
+            const sendObjectCmd = {
+              type: 1,
+              code: 4109,
+              payload: []
+            };
+            const container = mtp.buildContainerPacket(sendObjectCmd);
+            await mtp.write(container);
+            await mtp.write(fileData.buffer);
+            const response = await mtp.read();
+            console.log("SendObject (moved) MTP response:", response);
+          }
+        });
+        await this.deleteFile(oldRelativePath);
+      }
+      async deleteFile(relativePath) {
+        const handle = this.fileMap.get(relativePath);
+        if (handle === void 0) return;
+        await this.runWithRetryAndReconnect(async (mtp) => {
+          const deleteObjectCmd = {
+            type: 1,
+            code: 4107,
+            // DeleteObject
+            payload: [handle]
+          };
+          await mtp.write(mtp.buildContainerPacket(deleteObjectCmd));
+          const response = await mtp.read();
+          console.log("DeleteObject response:", response);
+        });
+        this.fileMap.delete(relativePath);
+      }
+      async cleanEmptyDirs() {
+      }
+    };
+    PowerShellMtpStorageWrapper = class {
+      deviceName;
+      subPath;
+      fileMap = /* @__PURE__ */ new Map();
+      constructor(deviceName, subPath) {
+        this.deviceName = deviceName || "Mock Device";
+        this.subPath = subPath || "Music";
+      }
+      getRelPathInsideSub(p) {
+        const normalized = p.replace(/\\/g, "/");
+        const prefix = this.subPath + "/";
+        if (normalized.startsWith(prefix)) {
+          return normalized.substring(prefix.length);
+        }
+        return normalized;
+      }
+      async isConnected() {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        try {
+          const res = await runPowerShellWithParams(isConnected_default, { deviceName: this.deviceName });
+          return res.trim() === "CONNECTED";
+        } catch (e) {
+          console.error("[PowerShellMtp] isConnected failed:", e);
+          return false;
+        }
+      }
+      async exists(relativePath) {
+        if (this.fileMap.size === 0) {
+          await this.findMusicFiles();
+        }
+        const rel = this.getRelPathInsideSub(relativePath);
+        const fullRel = `${this.subPath}/${rel}`.replace(/\\/g, "/");
+        return this.fileMap.has(fullRel);
+      }
+      async findMusicFiles(onProgress) {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        try {
+          const progressHandler = (line) => {
+            const trimmed = line.trim();
+            if (trimmed.startsWith("PROGRESS_UPDATE:") && onProgress) {
+              onProgress(trimmed.substring("PROGRESS_UPDATE:".length));
+            }
+          };
+          const rawStdout = await runPowerShellWithParams(findMusicFiles_default, { deviceName: this.deviceName, subPath: this.subPath }, progressHandler);
+          let jsonPart = "[]";
+          const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+          const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+          if (startIndex !== -1 && endIndex !== -1) {
+            jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+          } else {
+            jsonPart = rawStdout.trim();
+          }
+          const parsed = JSON.parse(jsonPart || "[]");
+          let rawList = [];
+          if (Array.isArray(parsed)) {
+            rawList = parsed;
+          } else if (parsed && parsed.value !== void 0 && Array.isArray(parsed.value)) {
+            rawList = parsed.value;
+          } else if (parsed && typeof parsed === "object" && Object.keys(parsed).length > 0) {
+            if (parsed.relativePath !== void 0) {
+              rawList = [parsed];
+            }
+          }
+          this.fileMap.clear();
+          const results = [];
+          for (const item of rawList) {
+            if (!item || !item.relativePath) {
+              continue;
+            }
+            const relativePath = `${this.subPath}/${item.relativePath}`.replace(/\\/g, "/");
+            const size = parseInt(item.size, 10) || 0;
+            const mtimeMs = parseInt(item.mtimeMs, 10) || Date.now();
+            this.fileMap.set(relativePath, { size, mtimeMs });
+            results.push({
+              filePath: `mtp_powershell://${encodeURIComponent(this.deviceName)}/${relativePath}`,
+              relativePath,
+              size,
+              mtimeMs
+            });
+          }
+          return results;
+        } catch (e) {
+          console.error("[PowerShellMtp] findMusicFiles error:", e);
+          throw e;
+        }
+      }
+      async getTrackMetadata(filePath, relativePath) {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        const randSuffix = Math.random().toString(36).substring(2, 10);
+        const trackTempDir = path2.join(os.tmpdir(), "musicsync-mtp-temp", randSuffix);
+        if (!fs2.existsSync(trackTempDir)) {
+          fs2.mkdirSync(trackTempDir, { recursive: true });
+        }
+        const relPathInsideSub = this.getRelPathInsideSub(relativePath);
+        try {
+          const res = await runPowerShellWithParams(getTrackMetadata_default, {
+            deviceName: this.deviceName,
+            subPath: this.subPath,
+            relativePath: relPathInsideSub,
+            tempFilePath: trackTempDir
+          });
+          if (res.trim() !== "SUCCESS") {
+            throw new Error(`Failed to download file from MTP for metadata parsing: ${relativePath}`);
+          }
+          const filesInTemp = await fs2.promises.readdir(trackTempDir);
+          if (filesInTemp.length === 0) {
+            throw new Error(`Temp folder is empty. File was not downloaded: ${relativePath}`);
+          }
+          const downloadedFileName = filesInTemp[0];
+          const actualDownloadedFilePath = path2.join(trackTempDir, downloadedFileName);
+          const meta = await getTrackMetadata(actualDownloadedFilePath, relativePath);
+          meta.filePath = filePath;
+          return meta;
+        } finally {
+          if (fs2.existsSync(trackTempDir)) {
+            try {
+              const files = await fs2.promises.readdir(trackTempDir);
+              for (const file of files) {
+                await fs2.promises.unlink(path2.join(trackTempDir, file));
+              }
+              await fs2.promises.rmdir(trackTempDir);
+            } catch (e) {
+              console.error("[PowerShellMtp] Failed to delete trackTempDir:", e);
+            }
+          }
+        }
+      }
+      async copyFileFromLocal(localSrc, remoteDestRelativePath) {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        const relPathInsideSub = this.getRelPathInsideSub(remoteDestRelativePath);
+        const relativeDestDir = path2.dirname(relPathInsideSub).replace(/\\/g, "/");
+        const destDirInSub = relativeDestDir === "." ? "" : relativeDestDir;
+        const res = await runPowerShellWithParams(copyFile_default, {
+          deviceName: this.deviceName,
+          subPath: this.subPath,
+          localSrc,
+          relativePath: destDirInSub
+        });
+        if (res.trim() !== "SUCCESS") {
+          throw new Error(`Failed to copy file to MTP device: ${remoteDestRelativePath}`);
+        }
+      }
+      async moveFile(oldRelativePath, newRelativePath) {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        const oldRelPathInsideSub = this.getRelPathInsideSub(oldRelativePath);
+        const newRelPathInsideSub = this.getRelPathInsideSub(newRelativePath);
+        const newRelDirInsideSub = path2.dirname(newRelPathInsideSub).replace(/\\/g, "/");
+        const newFileName = path2.basename(newRelPathInsideSub);
+        const oldFileName = path2.basename(oldRelPathInsideSub);
+        const res = await runPowerShellWithParams(moveFile_default, {
+          deviceName: this.deviceName,
+          subPath: this.subPath,
+          oldRelativePath: oldFileName,
+          newRelativePath: newFileName,
+          relativePath: oldRelPathInsideSub,
+          tempFilePath: newRelDirInsideSub
+        });
+        if (res.trim() !== "SUCCESS") {
+          throw new Error(`Failed to move file: ${oldRelativePath} -> ${newRelativePath}`);
+        }
+      }
+      async deleteFile(relativePath) {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        const relPathInsideSub = this.getRelPathInsideSub(relativePath);
+        await runPowerShellWithParams(deleteFile_default, {
+          deviceName: this.deviceName,
+          subPath: this.subPath,
+          relativePath: relPathInsideSub
+        });
+        this.fileMap.delete(relativePath);
+      }
+      async cleanEmptyDirs() {
+        if (process.platform !== "win32") {
+          throw new Error("PowerShell MTP is only supported on Windows.");
+        }
+        await runPowerShellWithParams(cleanEmptyDirs_default, {
+          deviceName: this.deviceName,
+          subPath: this.subPath
+        });
+      }
+      async executeBatchSync(ops, onProgress, onConsecutiveFailures) {
+        if (process.platform !== "win32") {
+          console.log("[PowerShellMtp] executeBatchSync: simulated fallback mode on macOS/Linux.");
+          const failedTrackIds = [];
+          const total2 = ops.length;
+          for (let i = 0; i < total2; i++) {
+            const op = ops[i];
+            if (onProgress) {
+              onProgress(`[Mock] Processing ${op.type} for ${op.trackId}`, i + 1, total2);
+            }
+            await new Promise((resolve) => setTimeout(resolve, 50));
+          }
+          return { failedTrackIds };
+        }
+        const total = ops.length;
+        let completed = 0;
+        const progressHandler = (line, writeStdin) => {
+          const trimmed = line.trim();
+          if (trimmed.startsWith("PROGRESS_UPDATE:STATUS:")) {
+            const msg = trimmed.substring("PROGRESS_UPDATE:STATUS:".length);
+            const currentOp = ops[completed];
+            if (currentOp && (currentOp.type === "copy" || currentOp.type === "move")) {
+              setProcessingRelativePath(currentOp.remoteDest || null, this);
+            }
+            if (onProgress) {
+              onProgress(msg, completed, total);
+            }
+          } else if (trimmed.startsWith("PROGRESS_UPDATE:SUCCESS_OP:")) {
+            setProcessingRelativePath(null, null);
+            completed++;
+          } else if (trimmed.startsWith("PROGRESS_UPDATE:FAILED_OP:")) {
+            setProcessingRelativePath(null, null);
+            completed++;
+            const parts = trimmed.substring("PROGRESS_UPDATE:FAILED_OP:".length).split(":");
+            const errorMsg = parts.slice(1).join(":");
+            if (onProgress) {
+              onProgress(`\u51E6\u7406\u5931\u6557: ${completed}/${total} (${errorMsg})`, completed, total);
+            }
+          } else if (trimmed.startsWith("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:")) {
+            const failedCount = parseInt(trimmed.substring("PROGRESS_UPDATE:CONSECUTIVE_FAILURES:".length), 10);
+            if (onConsecutiveFailures) {
+              onConsecutiveFailures(failedCount).then((shouldContinue) => {
+                if (shouldContinue) {
+                  writeStdin("CONTINUE\r\n");
+                } else {
+                  writeStdin("ABORT\r\n");
+                }
+              });
+            } else {
+              writeStdin("CONTINUE\r\n");
+            }
+          }
+        };
+        try {
+          const rawStdout = await runPowerShellInteractive(
+            executeBatchSync_default,
+            {
+              deviceName: this.deviceName,
+              subPath: this.subPath,
+              operations: ops
+            },
+            progressHandler
+          );
+          let jsonPart = "[]";
+          const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+          const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+          if (startIndex !== -1 && endIndex !== -1) {
+            jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+          } else {
+            jsonPart = rawStdout.trim();
+          }
+          const parsed = JSON.parse(jsonPart || "[]");
+          const failedTrackIds = Array.isArray(parsed) ? parsed : [parsed];
+          return { failedTrackIds };
+        } catch (e) {
+          console.error("[PowerShellMtp] executeBatchSync error:", e);
+          throw e;
+        }
+      }
+      async getFileSizes(relativePaths) {
+        if (process.platform !== "win32") {
+          console.log("[PowerShellMtp] getFileSizes: simulated fallback mode on macOS/Linux.");
+          const mockSizes = {};
+          relativePaths.forEach((rel) => {
+            mockSizes[rel] = 1e6;
+          });
+          return mockSizes;
+        }
+        try {
+          const rawStdout = await runPowerShellWithParams(getFileSizes_default, {
+            deviceName: this.deviceName,
+            subPath: this.subPath,
+            relativePaths
+          });
+          let jsonPart = "{}";
+          const startIndex = rawStdout.indexOf("JSON_RESULTS_START");
+          const endIndex = rawStdout.indexOf("JSON_RESULTS_END");
+          if (startIndex !== -1 && endIndex !== -1) {
+            jsonPart = rawStdout.substring(startIndex + "JSON_RESULTS_START".length, endIndex).trim();
+          } else {
+            jsonPart = rawStdout.trim();
+          }
+          const parsed = JSON.parse(jsonPart || "{}");
+          return parsed;
+        } catch (e) {
+          console.error("[PowerShellMtp] getFileSizes error:", e);
+          return {};
+        }
+      }
+    };
+  }
+});
+
+// src/main.ts
+import { app as app3, protocol as protocol2 } from "electron";
 
 // src/main/index.ts
+init_storageWrapper();
+import { BrowserWindow } from "electron";
+import Store from "electron-store";
+import path3 from "node:path";
 function createWindow() {
   const win = new BrowserWindow({
     width: 1200,
@@ -1975,7 +2102,13 @@ import { Readable } from "node:stream";
 // src/shared/constants.ts
 var DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "\u3001", "\uFF0F"];
 
+// src/main/ipc.ts
+init_cancelState();
+
 // src/main/scanner.ts
+init_cancelState();
+init_storageWrapper();
+init_utils();
 import { app, dialog as dialog2 } from "electron";
 import fs3 from "node:fs";
 import path4 from "node:path";
@@ -2037,6 +2170,7 @@ function saveCache(profileId, suffix, cache) {
   }
 }
 async function runScan(profile, event) {
+  resetScanCancelled();
   const profileId = profile.id;
   const sendProgress = (step, message, progress, details) => {
     event.sender.send("scan-progress", { step, message, progress, ...details });
@@ -2047,10 +2181,19 @@ async function runScan(profile, event) {
   }
   sendProgress("itunes_list", "iTunes\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 5);
   const itunesFiles = await findMusicFiles(profile.itunesPath);
+  if (activeScanCancelled) {
+    throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+  }
   sendProgress("phone_list", "\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u691C\u7D22\u4E2D...", 15);
   const phoneFiles = await storage.findMusicFiles((msg) => {
+    if (activeScanCancelled) {
+      throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+    }
     sendProgress("phone_list", msg, 15);
   });
+  if (activeScanCancelled) {
+    throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+  }
   const itunesCache = loadCache(profileId, "itunes");
   const phoneCache = loadCache(profileId, "phone");
   const buildSecondaryIndex = (cache) => {
@@ -2072,6 +2215,9 @@ async function runScan(profile, event) {
   let current = 0;
   let total = itunesFiles.length;
   for (const file of itunesFiles) {
+    if (activeScanCancelled) {
+      throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+    }
     current++;
     if (current % 100 === 0 || current === total) {
       const pct = 15 + Math.round(current / total * 35);
@@ -2107,6 +2253,9 @@ async function runScan(profile, event) {
   current = 0;
   total = phoneFiles.length;
   for (const file of phoneFiles) {
+    if (activeScanCancelled) {
+      throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+    }
     current++;
     if (current % 100 === 0 || current === total) {
       const pct = 50 + Math.round(current / total * 35);
@@ -2303,9 +2452,13 @@ async function runScan(profile, event) {
 }
 
 // src/main/sync.ts
+init_cancelState();
 import fs4 from "node:fs";
 import path5 from "node:path";
+init_storageWrapper();
 async function runSync(profile, options, event) {
+  resetSyncCancelled();
+  setProcessingRelativePath(null, null);
   const profileId = profile.id;
   const { copyTrackIds, moveTrackIds, deleteTrackIds } = options;
   const scanItems = lastScanResults[profileId] || [];
@@ -2320,6 +2473,12 @@ async function runSync(profile, options, event) {
   };
   const totalOperations = copyTrackIds.length + moveTrackIds.length + deleteTrackIds.length;
   let completed = 0;
+  const totalDeletes = deleteTrackIds.length;
+  const totalMoves = moveTrackIds.length;
+  const totalCopies = copyTrackIds.length;
+  let deleteCompleted = 0;
+  let moveCompleted = 0;
+  let copyCompleted = 0;
   const getPct = () => {
     if (totalOperations === 0) return 100;
     return Math.round(completed / totalOperations * 100);
@@ -2365,6 +2524,9 @@ async function runSync(profile, options, event) {
       }
       logAndSend(`\u30D0\u30C3\u30C1\u540C\u671F\u51E6\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${ops.length}\u4EF6)`, 0);
       const onProgress = (msg, completedCount, totalCount) => {
+        if (activeSyncCancelled) {
+          throw new Error("\u540C\u671F\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+        }
         const pct = totalCount === 0 ? 0 : Math.round(completedCount / totalCount * 90);
         logAndSend(msg, pct);
       };
@@ -2408,19 +2570,23 @@ async function runSync(profile, options, event) {
       if (deleteTrackIds.length > 0) {
         logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u4F59\u5206\u306A\u66F2\u306E\u524A\u9664\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${deleteTrackIds.length}\u66F2)`, getPct());
         for (const id of deleteTrackIds) {
+          if (activeSyncCancelled) {
+            throw new Error("\u540C\u671F\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+          }
           if (!await storage.isConnected()) {
             throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           }
           const item = scanItems.find((x) => x.id === id);
           if (item && item.phoneTrack) {
+            deleteCompleted++;
             try {
               if (await storage.exists(item.phoneTrack.relativePath)) {
                 await storage.deleteFile(item.phoneTrack.relativePath);
               }
-              logAndSend(`\u524A\u9664\u6210\u529F: ${item.phoneTrack.relativePath}`, getPct());
+              logAndSend(`\u524A\u9664\u6210\u529F(${deleteCompleted}/${totalDeletes}): ${item.phoneTrack.relativePath}`, getPct());
             } catch (e) {
               console.error(`Failed to delete file: ${item.phoneTrack.relativePath}`, e);
-              logAndSend(`\u524A\u9664\u5931\u6557: ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
+              logAndSend(`\u524A\u9664\u5931\u6557(${deleteCompleted}/${totalDeletes}): ${item.phoneTrack.relativePath} - ${e.message}`, getPct());
             }
           }
           completed++;
@@ -2429,6 +2595,9 @@ async function runSync(profile, options, event) {
       if (moveTrackIds.length > 0) {
         logAndSend(`\u6BD4\u8F03\u5148\u5074\u306E\u30D5\u30A1\u30A4\u30EB\u306E\u914D\u7F6E\u518D\u6574\u7406\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${moveTrackIds.length}\u66F2)`, getPct());
         for (const id of moveTrackIds) {
+          if (activeSyncCancelled) {
+            throw new Error("\u540C\u671F\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+          }
           if (!await storage.isConnected()) {
             throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           }
@@ -2436,10 +2605,13 @@ async function runSync(profile, options, event) {
           if (item && item.itunesTrack && item.phoneTrack) {
             const oldRelative = item.phoneTrack.relativePath;
             const newRelative = item.itunesTrack.relativePath;
+            moveCompleted++;
             try {
               if (await storage.exists(oldRelative)) {
+                setProcessingRelativePath(newRelative, storage);
                 await storage.moveFile(oldRelative, newRelative);
-                logAndSend(`\u79FB\u52D5\u6210\u529F: ${oldRelative} -> ${newRelative}`, getPct());
+                setProcessingRelativePath(null, null);
+                logAndSend(`\u79FB\u52D5\u6210\u529F(${moveCompleted}/${totalMoves}): ${oldRelative} -> ${newRelative}`, getPct());
                 if (profile.storageType === "mtp") {
                   item.phoneTrack.filePath = `mtp://${profile.usbVendorId}/${profile.usbProductId}/${newRelative}`;
                 } else if (profile.storageType === "mtp_powershell") {
@@ -2454,8 +2626,9 @@ async function runSync(profile, options, event) {
                 failedTracksSet.add(id);
               }
             } catch (e) {
+              setProcessingRelativePath(null, null);
               console.error(`Failed to move file: ${oldRelative}`, e);
-              logAndSend(`\u79FB\u52D5\u5931\u6557: ${oldRelative} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
+              logAndSend(`\u79FB\u52D5\u5931\u6557(${moveCompleted}/${totalMoves}): ${oldRelative} -> ${newRelative} - ${e.message}`, getPct());
               failedTracksSet.add(id);
             }
           }
@@ -2465,6 +2638,9 @@ async function runSync(profile, options, event) {
       if (copyTrackIds.length > 0) {
         logAndSend(`iTunes\u304B\u3089\u6BD4\u8F03\u5148\u3078\u306E\u66F2\u306E\u30B3\u30D4\u30FC\u3092\u958B\u59CB\u3057\u307E\u3059... (\u5BFE\u8C61: ${copyTrackIds.length}\u66F2)`, getPct());
         for (const id of copyTrackIds) {
+          if (activeSyncCancelled) {
+            throw new Error("\u540C\u671F\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+          }
           if (!await storage.isConnected()) {
             throw new Error("\u51E6\u7406\u4E2D\u306B\u6BD4\u8F03\u5148\u3068\u306E\u63A5\u7D9A\u304C\u5207\u65AD\u3055\u308C\u307E\u3057\u305F\u3002");
           }
@@ -2472,17 +2648,21 @@ async function runSync(profile, options, event) {
           if (item && item.itunesTrack) {
             const sourcePath = item.itunesTrack.filePath;
             const relative = item.itunesTrack.relativePath;
+            copyCompleted++;
             try {
               if (fs4.existsSync(sourcePath)) {
+                setProcessingRelativePath(relative, storage);
                 await storage.copyFileFromLocal(sourcePath, relative);
-                logAndSend(`\u30B3\u30D4\u30FC\u6210\u529F: ${relative}`, getPct());
+                setProcessingRelativePath(null, null);
+                logAndSend(`\u30B3\u30D4\u30FC\u6210\u529F(${copyCompleted}/${totalCopies}): ${relative}`, getPct());
               } else {
                 logAndSend(`\u30A8\u30E9\u30FC: \u30B3\u30D4\u30FC\u5143\u30D5\u30A1\u30A4\u30EB\u304C\u5B58\u5728\u3057\u307E\u305B\u3093: ${relative}`, getPct());
                 failedTracksSet.add(id);
               }
             } catch (e) {
+              setProcessingRelativePath(null, null);
               console.error(`Failed to copy file: ${relative}`, e);
-              logAndSend(`\u30B3\u30D4\u30FC\u5931\u6557: ${relative} - ${e.message} (\u30EA\u30AB\u30D0\u30EA\u30FC\u51E6\u7406\u306E\u305F\u3081\u30B9\u30AD\u30C3\u30D7\u3057\u307E\u3059)`, getPct());
+              logAndSend(`\u30B3\u30D4\u30FC\u5931\u6557(${copyCompleted}/${totalCopies}): ${relative} - ${e.message}`, getPct());
               failedTracksSet.add(id);
             }
           }
@@ -2966,6 +3146,29 @@ function registerIpcHandlers() {
       return [];
     }
   });
+  ipcMain.handle("cancel-active-task", async () => {
+    console.log("[IPC] cancel-active-task requested!");
+    setScanCancelled(true);
+    setSyncCancelled(true);
+    const { cancelActiveChildProcesses: cancelActiveChildProcesses2 } = await Promise.resolve().then(() => (init_storageWrapper(), storageWrapper_exports));
+    cancelActiveChildProcesses2();
+    if (currentProcessingRelativePath && currentStorageWrapper) {
+      const rel = currentProcessingRelativePath;
+      const storage = currentStorageWrapper;
+      console.log(`[IPC] Cleaning up potentially incomplete file: ${rel}`);
+      setTimeout(async () => {
+        try {
+          if (await storage.exists(rel)) {
+            await storage.deleteFile(rel);
+            console.log(`[IPC] Successfully cleaned up file: ${rel}`);
+          }
+        } catch (e) {
+          console.error(`[IPC] Cleanup of incomplete file failed: ${rel}`, e);
+        }
+      }, 500);
+    }
+    return true;
+  });
   ipcMain.handle("start-scan", async (event, profileId) => {
     const profiles = store.get("profiles", []);
     const profile = profiles.find((p) => p.id === profileId);
@@ -3141,6 +3344,7 @@ function registerIpcHandlers() {
 }
 
 // src/main.ts
+init_storageWrapper();
 protocol2.registerSchemesAsPrivileged([
   {
     scheme: "media",

@@ -4,6 +4,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { Readable } from "node:stream";
 import { DEFAULT_DELIMITERS } from "../shared/constants";
+import { currentProcessingRelativePath, currentStorageWrapper, setScanCancelled, setSyncCancelled } from "./cancelState";
 import { lastScanResults, runScan } from "./scanner";
 import { runSync } from "./sync";
 
@@ -470,6 +471,36 @@ export function registerIpcHandlers() {
 			console.error("[get-mtp-device-names] Unexpected error:", e);
 			return [];
 		}
+	});
+
+	ipcMain.handle("cancel-active-task", async () => {
+		console.log("[IPC] cancel-active-task requested!");
+		setScanCancelled(true);
+		setSyncCancelled(true);
+
+		// Kill active child processes (PowerShell)
+		const { cancelActiveChildProcesses } = await import("./storageWrapper");
+		cancelActiveChildProcesses();
+
+		// Clean up currently processing corrupted/incomplete file if copying or moving
+		if (currentProcessingRelativePath && currentStorageWrapper) {
+			const rel = currentProcessingRelativePath;
+			const storage = currentStorageWrapper;
+			console.log(`[IPC] Cleaning up potentially incomplete file: ${rel}`);
+			// Run cleanup with a slight timeout to allow handles to release
+			setTimeout(async () => {
+				try {
+					if (await storage.exists(rel)) {
+						await storage.deleteFile(rel);
+						console.log(`[IPC] Successfully cleaned up file: ${rel}`);
+					}
+				} catch (e: any) {
+					console.error(`[IPC] Cleanup of incomplete file failed: ${rel}`, e);
+				}
+			}, 500);
+		}
+
+		return true;
 	});
 
 	ipcMain.handle("start-scan", async (event, profileId: string) => {

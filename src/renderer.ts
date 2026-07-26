@@ -86,6 +86,7 @@ const elLblProgressTime = document.getElementById("lbl-progress-time")!;
 const elProgressBarFill = document.getElementById("progress-bar-fill")!;
 const elProgressLogs = document.getElementById("progress-logs")!;
 const elBtnProgressClose = document.getElementById("btn-progress-close") as HTMLButtonElement;
+const elBtnProgressCancel = document.getElementById("btn-progress-cancel") as HTMLButtonElement;
 
 let progressStartTime = 0;
 
@@ -1103,10 +1104,10 @@ function setupEventListeners() {
 		elModalSettings.classList.remove("hidden");
 	});
 
-	elBtnScan.addEventListener("click", async () => {
+	async function executeScan(forceBypassConfirm = false) {
 		if (!state.currentProfileId) return;
 
-		if (!elBtnSyncExec.disabled) {
+		if (!forceBypassConfirm && !elBtnSyncExec.disabled) {
 			const confirmed = await showCustomConfirm("比較の再実行確認", "同期可能な変更がありますが、本当に再比較を実行しますか？（現在の選択状態はリセットされます）");
 			if (!confirmed) return;
 		}
@@ -1119,6 +1120,9 @@ function setupEventListeners() {
 		elProgressBarFill.style.width = "0%";
 		elProgressLogs.innerHTML = "";
 		elBtnProgressClose.disabled = true;
+		elBtnProgressClose.classList.add("hidden");
+		elBtnProgressCancel.disabled = false;
+		elBtnProgressCancel.classList.remove("hidden");
 		elModalProgress.classList.remove("hidden");
 
 		const cancelProgress = api.onScanProgress((progress: any) => {
@@ -1175,9 +1179,17 @@ function setupEventListeners() {
 		} catch (e: any) {
 			console.error("Error during scan:", e);
 			cancelProgress();
-			await showCustomAlert("スキャンエラー", "スキャン中にエラーが発生しました: " + e.message);
+			if (e.message && e.message.includes("キャンセル")) {
+				await showCustomAlert("処理中断", "比較処理を中断しました。");
+			} else {
+				await showCustomAlert("スキャンエラー", "スキャン中にエラーが発生しました: " + e.message);
+			}
 			elModalProgress.classList.add("hidden");
 		}
+	}
+
+	elBtnScan.addEventListener("click", () => {
+		executeScan(false);
 	});
 
 	elBtnSyncExec.addEventListener("click", () => {
@@ -1195,8 +1207,15 @@ function setupEventListeners() {
 
 		let deltaSize = 0;
 		let deltaDuration = 0;
+		let currentPhoneSize = 0;
+		let currentPhoneDuration = 0;
 
 		state.scannedTracks.forEach((t) => {
+			if (t.status !== "missing") {
+				currentPhoneSize += t.phoneTrack?.size ?? 0;
+				currentPhoneDuration += t.phoneTrack?.duration ?? 0;
+			}
+
 			if (t.status === "missing" && state.checkedCopyTrackIds.has(t.id)) {
 				deltaSize += t.itunesTrack?.size ?? 0;
 				deltaDuration += t.itunesTrack?.duration ?? 0;
@@ -1213,8 +1232,11 @@ function setupEventListeners() {
 			}
 		});
 
-		document.getElementById("lbl-confirm-delta-size")!.textContent = formatDeltaBytes(deltaSize);
-		document.getElementById("lbl-confirm-delta-duration")!.textContent = formatDeltaDurationHHMMSS(deltaDuration);
+		const afterPhoneSize = Math.max(0, currentPhoneSize + deltaSize);
+		const afterPhoneDuration = Math.max(0, currentPhoneDuration + deltaDuration);
+
+		document.getElementById("lbl-confirm-delta-size")!.innerHTML = `${formatDeltaBytes(deltaSize)} <span class="text-[10px] text-gray-400 font-sans ml-1">(増減後: ${formatBytes(afterPhoneSize)})</span>`;
+		document.getElementById("lbl-confirm-delta-duration")!.innerHTML = `${formatDeltaDurationHHMMSS(deltaDuration)} <span class="text-[10px] text-gray-400 font-sans ml-1">(増減後: ${formatDurationHHMMSS(afterPhoneDuration)})</span>`;
 
 		const pathsMismatchedSelected = state.scannedTracks.filter((t) => (t.status === "missing" || t.status === "updated" || t.status === "synced") && t.pathMismatch && (state.checkedCopyTrackIds.has(t.id) || state.checkedMoveTrackIds.has(t.id)));
 
@@ -1242,7 +1264,20 @@ function setupEventListeners() {
 
 	elBtnProgressClose.addEventListener("click", () => {
 		elModalProgress.classList.add("hidden");
-		elBtnScan.click();
+		executeScan(true);
+	});
+
+	elBtnProgressCancel.addEventListener("click", async () => {
+		const confirmed = await showCustomConfirm("処理の中断", "現在実行中の処理を中断してもよろしいですか？");
+		if (confirmed) {
+			elBtnProgressCancel.disabled = true;
+			elLblProgressStatus.textContent = "処理を中断中...";
+			await api.cancelActiveTask();
+			// Re-enable close button and hide cancel button
+			elBtnProgressClose.disabled = false;
+			elBtnProgressClose.classList.remove("hidden");
+			elBtnProgressCancel.classList.add("hidden");
+		}
 	});
 
 	let searchDebounceTimeout: any = null;
@@ -1635,6 +1670,9 @@ function startSyncExecution() {
 	elProgressBarFill.style.width = "0%";
 	elProgressLogs.innerHTML = "";
 	elBtnProgressClose.disabled = true;
+	elBtnProgressClose.classList.add("hidden");
+	elBtnProgressCancel.disabled = false;
+	elBtnProgressCancel.classList.remove("hidden");
 	elModalProgress.classList.remove("hidden");
 
 	const copyTrackIds = Array.from(state.checkedCopyTrackIds);
@@ -1652,9 +1690,13 @@ function startSyncExecution() {
 				const logItem = document.createElement("div");
 				logItem.className = "py-0.5 border-b border-gray-800 text-gray-300 font-mono select-text";
 
-				if (log.includes("成功")) logItem.classList.add("text-green-400");
-				else if (log.includes("失敗") || log.includes("エラー")) logItem.classList.add("text-red-400");
-				else if (log.includes("警告")) logItem.classList.add("text-amber-400");
+				if (/^(コピー成功|移動成功|削除成功|整合性チェック成功)/.test(log)) {
+					logItem.classList.add("text-green-400");
+				} else if (/^(コピー失敗|移動失敗|削除失敗|エラー|致命的なエラー|⚠️)/.test(log)) {
+					logItem.classList.add("text-red-400");
+				} else if (/^(警告)/.test(log)) {
+					logItem.classList.add("text-amber-400");
+				}
 
 				logItem.textContent = log;
 				elProgressLogs.appendChild(logItem);
@@ -1664,6 +1706,8 @@ function startSyncExecution() {
 
 		if (progress.status === "done" || progress.status === "error") {
 			elBtnProgressClose.disabled = false;
+			elBtnProgressClose.classList.remove("hidden");
+			elBtnProgressCancel.classList.add("hidden");
 		}
 	});
 
@@ -1682,17 +1726,27 @@ function startSyncExecution() {
 				if (isMock) {
 					setTimeout(() => {
 						elBtnProgressClose.disabled = false;
+						elBtnProgressClose.classList.remove("hidden");
+						elBtnProgressCancel.classList.add("hidden");
 					}, 600);
 				} else {
 					elBtnProgressClose.disabled = false;
+					elBtnProgressClose.classList.remove("hidden");
+					elBtnProgressCancel.classList.add("hidden");
 				}
 			}
 		})
 		.catch(async (e: any) => {
 			console.error("Error during sync execution:", e);
 			cancelProgress();
-			await showCustomAlert("同期エラー", "同期処理中に重大なエラーが発生しました: " + e.message);
-			elModalProgress.classList.add("hidden");
+			elBtnProgressClose.disabled = false;
+			elBtnProgressClose.classList.remove("hidden");
+			elBtnProgressCancel.classList.add("hidden");
+			if (e.message && e.message.includes("キャンセル")) {
+				await showCustomAlert("処理中断", "同期処理を中断しました。書き込み途中の破損ファイルがある場合は自動クリーンアップされます。");
+			} else {
+				await showCustomAlert("同期エラー", "同期処理中に重大なエラーが発生しました: " + e.message);
+			}
 		});
 }
 
@@ -1763,6 +1817,8 @@ function showRetryFailedModal(failedTrackIds: string[], originalCopyTrackIds: st
 	const onCancel = () => {
 		elModalRetryFailedConfirm.classList.add("hidden");
 		elBtnProgressClose.disabled = false;
+		elBtnProgressClose.classList.remove("hidden");
+		elBtnProgressCancel.classList.add("hidden");
 	};
 	elBtnRetryFailedCancel.onclick = onCancel;
 

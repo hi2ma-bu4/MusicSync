@@ -24,7 +24,7 @@ foreach ($op in $ops) {
     try {
         if ($type -eq "delete") {
             $remoteDest = $op.remoteDest
-            Write-Output "PROGRESS_UPDATE:STATUS:削除中 ($completed/$total): $remoteDest"
+            Write-Output "PROGRESS_UPDATE:STATUS:削除中 (${completed}/${total}): ${remoteDest}"
 
             $relPathInsideSub = $remoteDest
             if ($relPathInsideSub -match "^$subPath/(.*)$") {
@@ -50,7 +50,7 @@ foreach ($op in $ops) {
         elseif ($type -eq "move") {
             $oldRemoteSrc = $op.oldRemoteSrc
             $remoteDest = $op.remoteDest
-            Write-Output "PROGRESS_UPDATE:STATUS:配置整理中 ($completed/$total): $oldRemoteSrc"
+            Write-Output "PROGRESS_UPDATE:STATUS:配置整理中 (${completed}/${total}): ${oldRemoteSrc}"
 
             $oldRelPath = $oldRemoteSrc
             if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }
@@ -90,7 +90,7 @@ foreach ($op in $ops) {
         elseif ($type -eq "copy") {
             $localSrc = $op.localSrc
             $remoteDest = $op.remoteDest
-            Write-Output "PROGRESS_UPDATE:STATUS:コピー中 ($completed/$total): $remoteDest"
+            Write-Output "PROGRESS_UPDATE:STATUS:コピー中 (${completed}/${total}): ${remoteDest}"
 
             $relPath = $remoteDest
             if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }
@@ -151,7 +151,7 @@ foreach ($op in $ops) {
         Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"
 
         if ($consecutiveFailures -ge 3) {
-            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:$consecutiveFailures"
+            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:${consecutiveFailures}"
             # Wait for Node.js reply on stdin
             $reply = [Console]::In.ReadLine()
             if ($reply -eq "ABORT") {

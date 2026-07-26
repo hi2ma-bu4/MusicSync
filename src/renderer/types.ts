@@ -80,6 +80,7 @@ export interface WindowAPI {
 	showContextMenu: (params: any) => void;
 	getUsbDevices: () => Promise<{ vendorId: number; productId: number; name: string }[]>;
 	getMtpDeviceNames: () => Promise<string[]>;
+	cancelActiveTask: () => Promise<boolean>;
 	onContextMenuCommand: (callback: (command: string, arg: string) => void) => () => void;
 	startScan: (profileId: string) => Promise<void>;
 	getScanResult: (profileId: string) => Promise<ScanResultItem[]>;
