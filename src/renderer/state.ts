@@ -13,6 +13,12 @@ export const state = {
 	currentSettings: {} as Settings,
 	activeTab: "artist" as "artist" | "album" | "genre" | "track",
 	searchQuery: "",
+	tabScrollPositions: {
+		artist: 0,
+		album: 0,
+		genre: 0,
+		track: 0,
+	} as Record<string, number>,
 
 	// Scanned results
 	scannedTracks: [] as ScanResultItem[],

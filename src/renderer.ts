@@ -618,10 +618,17 @@ function renderActiveView() {
 
 	if (state.activeTab === "track") {
 		elTreeContainer.classList.add("hidden");
+		elTreeContainer.innerHTML = ""; // Clear inactive tree container DOM
+		elTreeContainer.onscroll = null; // Clear tree container scroll listener
 		elTrackContainer.classList.remove("hidden");
+		if (state.tabScrollPositions.track) {
+			vsViewport.scrollTop = state.tabScrollPositions.track;
+		}
 	} else {
 		elTreeContainer.classList.remove("hidden");
 		elTrackContainer.classList.add("hidden");
+		vsCanvas.style.height = "0px"; // Clear inactive track container DOM
+		vsContent.innerHTML = "";
 	}
 
 	if (state.activeTab === "artist") renderArtistView(elTreeContainer, callbacks);
@@ -1131,6 +1138,7 @@ function setupEventListeners() {
 
 	vsViewport.addEventListener("scroll", () => {
 		if (state.activeTab === "track") {
+			state.tabScrollPositions.track = vsViewport.scrollTop;
 			renderVirtualTracks(vsViewport, vsCanvas, vsContent, {
 				updateSummaryBar,
 				updateMasterCheckboxState,

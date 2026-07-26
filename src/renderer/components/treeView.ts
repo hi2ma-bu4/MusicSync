@@ -27,21 +27,86 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 	});
 }
 
+export function restoreScrollPosition(container: HTMLElement, targetScrollTop: number) {
+	if (!targetScrollTop) return;
+	let attempts = 0;
+	const attemptRestore = () => {
+		container.scrollTop = targetScrollTop;
+		if (container.scrollTop === targetScrollTop || attempts > 20) {
+			return;
+		}
+		attempts++;
+		requestAnimationFrame(attemptRestore);
+	};
+	requestAnimationFrame(attemptRestore);
+}
+
 // Synchronizes and updates all checkbox elements (tracks, discs, albums, artists, genres) in the tree view to match the state
 export function updateAllTreeCheckboxes() {
-	// 1. Sync all track checkboxes
+	// 1. Build high-performance lookup indexes for track ID and parent groupings
+	const trackMap = new Map<string, any>();
+	const artistMap = new Map<string, any[]>();
+	const artistAlbumMap = new Map<string, any[]>();
+	const albumMap = new Map<string, any[]>();
+	const genreMap = new Map<string, any[]>();
+	const discMap = new Map<string, any[]>();
+
+	state.filteredTracks.forEach((t) => {
+		trackMap.set(t.id, t);
+
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (!meta) return;
+
+		// 1. Artist and Artist-Album mappings
+		const artistName = meta.artist || "Unknown Artist";
+		const splitNames = splitAndNormalizeArtist(artistName, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+		splitNames.forEach((name) => {
+			const normalizedArtist = normalizeArtistForIntegration(name);
+
+			if (!artistMap.has(normalizedArtist)) artistMap.set(normalizedArtist, []);
+			artistMap.get(normalizedArtist)!.push(t);
+
+			if (meta.album) {
+				const artistAlbumKey = `${normalizedArtist}_${meta.album}`;
+				if (!artistAlbumMap.has(artistAlbumKey)) artistAlbumMap.set(artistAlbumKey, []);
+				artistAlbumMap.get(artistAlbumKey)!.push(t);
+			}
+		});
+
+		// 2. Album mapping
+		if (meta.album) {
+			if (!albumMap.has(meta.album)) albumMap.set(meta.album, []);
+			albumMap.get(meta.album)!.push(t);
+		}
+
+		// 3. Genre mapping
+		const genreName = meta.genre || "Unknown Genre";
+		if (!genreMap.has(genreName)) genreMap.set(genreName, []);
+		genreMap.get(genreName)!.push(t);
+
+		// 4. Disc mapping
+		if (meta.album) {
+			const discNum = parseInt(meta.disc || "1", 10) || 1;
+			const discKey = `${meta.album}_${discNum}`;
+			if (!discMap.has(discKey)) discMap.set(discKey, []);
+			discMap.get(discKey)!.push(t);
+		}
+	});
+
+	// 2. Sync all track checkboxes
 	const trackInputs = document.querySelectorAll(`input[id^="chk-track-"]`);
 	trackInputs.forEach((el: any) => {
 		// Since the ID format can be either `chk-track-${albumKey}-${t.id}` or `chk-track-${albumKey}-${discNum}-${t.id}`,
 		// we should retrieve the actual track ID from the end.
-		// Since `t.id` is a UUID or unique string, we can search for it in state.filteredTracks
-		const track = state.filteredTracks.find((t) => el.id.endsWith("-" + t.id));
+		const parts = el.id.split("-");
+		const trackId = parts[parts.length - 1];
+		const track = trackMap.get(trackId);
 		if (track) {
 			el.checked = isTrackChecked(track);
 		}
 	});
 
-	// 2. Sync all disc, album, genre, and artist checkboxes directly from the filteredTracks state
+	// 3. Sync all disc, album, genre, and artist checkboxes directly from the index Maps
 	const parentInputs = document.querySelectorAll(`input[id^="chk-"]:not([id^="chk-track-"])`);
 	parentInputs.forEach((el: any) => {
 		const dataType = el.getAttribute("data-type");
@@ -53,53 +118,33 @@ export function updateAllTreeCheckboxes() {
 			const artistName = el.getAttribute("data-artist");
 			if (artistName) {
 				const normalizedTarget = normalizeArtistForIntegration(artistName);
-				tracks = state.filteredTracks.filter((t) => {
-					const meta = t.itunesTrack || t.phoneTrack;
-					if (!meta) return false;
-					const splitNames = splitAndNormalizeArtist(meta.artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
-					return splitNames.some((name) => normalizeArtistForIntegration(name) === normalizedTarget);
-				});
+				tracks = artistMap.get(normalizedTarget) || [];
 			}
 		} else if (dataType === "artistalbum") {
 			const artistName = el.getAttribute("data-artist");
 			const albumName = el.getAttribute("data-album");
 			if (artistName && albumName) {
 				const normalizedTarget = normalizeArtistForIntegration(artistName);
-				tracks = state.filteredTracks.filter((t) => {
-					const meta = t.itunesTrack || t.phoneTrack;
-					if (!meta || meta.album !== albumName) return false;
-					const splitNames = splitAndNormalizeArtist(meta.artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
-					return splitNames.some((name) => normalizeArtistForIntegration(name) === normalizedTarget);
-				});
+				const artistAlbumKey = `${normalizedTarget}_${albumName}`;
+				tracks = artistAlbumMap.get(artistAlbumKey) || [];
 			}
 		} else if (dataType === "album") {
 			const albumName = el.getAttribute("data-album");
 			if (albumName) {
-				tracks = state.filteredTracks.filter((t) => {
-					const meta = t.itunesTrack || t.phoneTrack;
-					return meta && meta.album === albumName;
-				});
+				tracks = albumMap.get(albumName) || [];
 			}
 		} else if (dataType === "genre") {
 			const genreName = el.getAttribute("data-genre");
 			if (genreName) {
-				tracks = state.filteredTracks.filter((t) => {
-					const meta = t.itunesTrack || t.phoneTrack;
-					const gName = (meta && meta.genre) || "Unknown Genre";
-					return gName === genreName;
-				});
+				tracks = genreMap.get(genreName) || [];
 			}
 		} else if (dataType === "disc") {
 			const albumName = el.getAttribute("data-album");
 			const discVal = el.getAttribute("data-disc");
 			if (albumName && discVal) {
 				const discNum = parseInt(discVal, 10) || 1;
-				tracks = state.filteredTracks.filter((t) => {
-					const meta = t.itunesTrack || t.phoneTrack;
-					if (!meta || meta.album !== albumName) return false;
-					const tDisc = parseInt(meta.disc || "1", 10) || 1;
-					return tDisc === discNum;
-				});
+				const discKey = `${albumName}_${discNum}`;
+				tracks = discMap.get(discKey) || [];
 			}
 		}
 
@@ -592,6 +637,8 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 
 export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	container.innerHTML = "";
+	container.onscroll = null;
+
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当する曲がありません</p>';
 		return;
@@ -722,10 +769,21 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
 		}
 	});
+
+	// Restore scroll position reliably
+	if (state.tabScrollPositions.artist) {
+		restoreScrollPosition(container, state.tabScrollPositions.artist);
+	}
+
+	container.onscroll = () => {
+		state.tabScrollPositions.artist = container.scrollTop;
+	};
 }
 
 export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	container.innerHTML = "";
+	container.onscroll = null;
+
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当するアルバムがありません</p>';
 		return;
@@ -835,10 +893,21 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
 		}
 	});
+
+	// Restore scroll position reliably
+	if (state.tabScrollPositions.album) {
+		restoreScrollPosition(container, state.tabScrollPositions.album);
+	}
+
+	container.onscroll = () => {
+		state.tabScrollPositions.album = container.scrollTop;
+	};
 }
 
 export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 	container.innerHTML = "";
+	container.onscroll = null;
+
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当するジャンルがありません</p>';
 		return;
@@ -939,4 +1008,13 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			renderAlbumTracks(elChildren, genreTracks, genreKey, cb);
 		}
 	});
+
+	// Restore scroll position reliably
+	if (state.tabScrollPositions.genre) {
+		restoreScrollPosition(container, state.tabScrollPositions.genre);
+	}
+
+	container.onscroll = () => {
+		state.tabScrollPositions.genre = container.scrollTop;
+	};
 }
