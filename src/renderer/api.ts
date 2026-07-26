@@ -196,6 +196,10 @@ if (!window.api) {
 			// デバッグ用フォールバック処理 (サムネイル画像モック)
 			return null;
 		},
+		copyAlbumArt: async (_profileId: string, _albumName: string) => {
+			console.log("Mock copyAlbumArt:", _profileId, _albumName);
+			return true;
+		},
 		onScanProgress: (callback: any) => {
 			setTimeout(() => callback({ step: "itunes_list", message: "iTunesフォルダを検索中...", progress: 10 }), 100);
 			setTimeout(() => callback({ step: "itunes_parse", message: "iTunesの曲情報を解析中...", progress: 40 }), 300);

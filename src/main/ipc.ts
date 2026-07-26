@@ -1,4 +1,4 @@
-import { app, dialog, ipcMain, Menu, MenuItem, protocol, shell } from "electron";
+import { app, clipboard, dialog, ipcMain, Menu, MenuItem, nativeImage, protocol, shell } from "electron";
 import Store from "electron-store";
 import fs from "node:fs";
 import path from "node:path";
@@ -319,12 +319,23 @@ export function registerIpcHandlers() {
 					}),
 				);
 			} else if (params.album) {
-				menu.append(
-					new MenuItem({
-						label: "アルバム詳細情報を表示",
-						click: () => sendCommand("show-album-detail", params.album!),
-					}),
-				);
+				// If right-clicked on the album art inside the Detail Modal
+				if ((params as any).isDetailArt) {
+					menu.append(
+						new MenuItem({
+							label: "アルバムアートをコピー",
+							click: () => sendCommand("copy-album-art-command", params.album!),
+						}),
+					);
+				} else {
+					// Otherwise, it is the album row in the tree view
+					menu.append(
+						new MenuItem({
+							label: "アルバム詳細情報を表示",
+							click: () => sendCommand("show-album-detail", params.album!),
+						}),
+					);
+				}
 			}
 
 			const win = (event as any).sender.getOwnerBrowserWindow();
@@ -528,6 +539,90 @@ export function registerIpcHandlers() {
 		} catch (e) {
 			console.error("Failed to get or generate thumbnail", e);
 			return null;
+		}
+	});
+
+	ipcMain.handle("copy-album-art", async (_event, profileId: string, albumName: string) => {
+		try {
+			if (!profileId || !albumName) return false;
+
+			// Find track in scan results
+			const results = lastScanResults[profileId] || [];
+			const trackItem = results.find((t) => {
+				const meta = t.itunesTrack || t.phoneTrack;
+				return meta && meta.album === albumName && meta.hasCoverArt;
+			});
+
+			if (!trackItem) {
+				return false;
+			}
+
+			const track = trackItem.itunesTrack || trackItem.phoneTrack;
+			if (!track || !fs.existsSync(track.filePath)) return false;
+
+			const { parseFile } = await import("music-metadata");
+			const metadata = await parseFile(track.filePath, { skipCovers: false });
+			const picture = metadata.common.picture && metadata.common.picture[0];
+			if (!picture) {
+				return false;
+			}
+
+			// Determine actual embedded image extension
+			let ext = "png";
+			if (picture.format) {
+				if (picture.format.includes("jpeg") || picture.format.includes("jpg")) {
+					ext = "jpg";
+				} else if (picture.format.includes("png")) {
+					ext = "png";
+				} else if (picture.format.includes("gif")) {
+					ext = "gif";
+				} else if (picture.format.includes("webp")) {
+					ext = "webp";
+				} else if (picture.format.includes("bmp")) {
+					ext = "bmp";
+				}
+			}
+
+			// Clean albumName for use as filename (strip invalid OS characters)
+			// Windows invalid characters: \ / : * ? " < > |
+			// Let's replace any invalid characters with underscores
+			const safeFilename = albumName.replace(/[\\/:*?"<>|]/g, "_");
+			const filename = `${safeFilename}.${ext}`;
+
+			const tempDir = path.join(app.getPath("userData"), "caches", "temp_copies");
+			if (!fs.existsSync(tempDir)) {
+				fs.mkdirSync(tempDir, { recursive: true });
+			}
+
+			const filePath = path.join(tempDir, filename);
+			fs.writeFileSync(filePath, Buffer.from(picture.data));
+
+			// Copy to clipboard
+			const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+
+			// Clear first
+			clipboard.clear();
+
+			// 1. Write the NativeImage to clipboard
+			clipboard.write({
+				image: img,
+				text: filePath, // Fallback text as path
+			});
+
+			// 2. Add platform-specific file path copy descriptors so it can be pasted as file in Windows Explorer or macOS Finder
+			if (process.platform === "win32") {
+				// Windows explorer looks for 'FileNameW' (UNICODE null-terminated path)
+				clipboard.writeBuffer("FileNameW", Buffer.concat([Buffer.from(filePath, "ucs2"), Buffer.from([0, 0])]));
+			} else if (process.platform === "darwin") {
+				// macOS Finder looks for 'public.file-url'
+				const fileUrl = `file://${filePath}`;
+				clipboard.writeBuffer("public.file-url", Buffer.from(fileUrl, "utf-8"));
+			}
+
+			return true;
+		} catch (e) {
+			console.error("Failed to copy album art", e);
+			return false;
 		}
 	});
 }

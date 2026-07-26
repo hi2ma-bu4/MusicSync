@@ -4,8 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-B6GSgKid.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-mEquZCjw.css">
+  <script type="module" crossorigin src="./assets/js/index-BcwyWEhN.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-DK41xIjo.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.6</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.7</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -769,7 +769,7 @@
 				<!-- Core Meta Info (Shared) -->
 				<div class="flex gap-4 items-start bg-gray-900/40 p-3 rounded border border-gray-750">
 					<!-- Album Art -->
-					<div class="w-20 h-20 rounded bg-gray-850 border border-gray-750 flex items-center justify-center shrink-0 overflow-hidden shadow-md relative">
+					<div id="detail-album-art-container" tabindex="0" class="w-20 h-20 rounded bg-gray-850 border border-gray-750 flex items-center justify-center shrink-0 overflow-hidden shadow-md relative cursor-pointer focus:ring-2 focus:ring-indigo-500 focus:outline-none transition" title="クリックして選択、Ctrl+Cでコピー可能">
 						<img id="detail-album-art" class="w-full h-full object-cover hidden" src="" alt="">
 						<i id="detail-art-placeholder" class="icon-music text-gray-500 text-2xl"></i>
 					</div>

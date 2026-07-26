@@ -1966,7 +1966,7 @@ function createWindow() {
 }
 
 // src/main/ipc.ts
-import { app as app2, dialog as dialog3, ipcMain, Menu, MenuItem, protocol, shell } from "electron";
+import { app as app2, clipboard, dialog as dialog3, ipcMain, Menu, MenuItem, nativeImage, protocol, shell } from "electron";
 import Store2 from "electron-store";
 import fs5 from "node:fs";
 import path6 from "node:path";
@@ -2829,12 +2829,21 @@ function registerIpcHandlers() {
           })
         );
       } else if (params.album) {
-        menu.append(
-          new MenuItem({
-            label: "\u30A2\u30EB\u30D0\u30E0\u8A73\u7D30\u60C5\u5831\u3092\u8868\u793A",
-            click: () => sendCommand("show-album-detail", params.album)
-          })
-        );
+        if (params.isDetailArt) {
+          menu.append(
+            new MenuItem({
+              label: "\u30A2\u30EB\u30D0\u30E0\u30A2\u30FC\u30C8\u3092\u30B3\u30D4\u30FC",
+              click: () => sendCommand("copy-album-art-command", params.album)
+            })
+          );
+        } else {
+          menu.append(
+            new MenuItem({
+              label: "\u30A2\u30EB\u30D0\u30E0\u8A73\u7D30\u60C5\u5831\u3092\u8868\u793A",
+              click: () => sendCommand("show-album-detail", params.album)
+            })
+          );
+        }
       }
       const win = event.sender.getOwnerBrowserWindow();
       if (win) {
@@ -2991,7 +3000,7 @@ function registerIpcHandlers() {
       }
       if (needRegenerate) {
         const { parseFile: parseFile2 } = await import("music-metadata");
-        const { nativeImage } = await import("electron");
+        const { nativeImage: nativeImage2 } = await import("electron");
         if (!fs5.existsSync(track.filePath)) {
           return null;
         }
@@ -3000,7 +3009,7 @@ function registerIpcHandlers() {
         if (!picture) {
           return null;
         }
-        const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+        const img = nativeImage2.createFromBuffer(Buffer.from(picture.data));
         const resized = img.resize({ width: 150, height: 150, quality: "better" });
         const pngBuf = resized.toPNG();
         fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
@@ -3011,6 +3020,66 @@ function registerIpcHandlers() {
     } catch (e) {
       console.error("Failed to get or generate thumbnail", e);
       return null;
+    }
+  });
+  ipcMain.handle("copy-album-art", async (_event, profileId, albumName) => {
+    try {
+      if (!profileId || !albumName) return false;
+      const results = lastScanResults[profileId] || [];
+      const trackItem = results.find((t) => {
+        const meta = t.itunesTrack || t.phoneTrack;
+        return meta && meta.album === albumName && meta.hasCoverArt;
+      });
+      if (!trackItem) {
+        return false;
+      }
+      const track = trackItem.itunesTrack || trackItem.phoneTrack;
+      if (!track || !fs5.existsSync(track.filePath)) return false;
+      const { parseFile: parseFile2 } = await import("music-metadata");
+      const metadata = await parseFile2(track.filePath, { skipCovers: false });
+      const picture = metadata.common.picture && metadata.common.picture[0];
+      if (!picture) {
+        return false;
+      }
+      let ext = "png";
+      if (picture.format) {
+        if (picture.format.includes("jpeg") || picture.format.includes("jpg")) {
+          ext = "jpg";
+        } else if (picture.format.includes("png")) {
+          ext = "png";
+        } else if (picture.format.includes("gif")) {
+          ext = "gif";
+        } else if (picture.format.includes("webp")) {
+          ext = "webp";
+        } else if (picture.format.includes("bmp")) {
+          ext = "bmp";
+        }
+      }
+      const safeFilename = albumName.replace(/[\\/:*?"<>|]/g, "_");
+      const filename = `${safeFilename}.${ext}`;
+      const tempDir = path6.join(app2.getPath("userData"), "caches", "temp_copies");
+      if (!fs5.existsSync(tempDir)) {
+        fs5.mkdirSync(tempDir, { recursive: true });
+      }
+      const filePath = path6.join(tempDir, filename);
+      fs5.writeFileSync(filePath, Buffer.from(picture.data));
+      const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+      clipboard.clear();
+      clipboard.write({
+        image: img,
+        text: filePath
+        // Fallback text as path
+      });
+      if (process.platform === "win32") {
+        clipboard.writeBuffer("FileNameW", Buffer.concat([Buffer.from(filePath, "ucs2"), Buffer.from([0, 0])]));
+      } else if (process.platform === "darwin") {
+        const fileUrl = `file://${filePath}`;
+        clipboard.writeBuffer("public.file-url", Buffer.from(fileUrl, "utf-8"));
+      }
+      return true;
+    } catch (e) {
+      console.error("Failed to copy album art", e);
+      return false;
     }
   });
 }

@@ -153,6 +153,21 @@ async function init() {
 			}
 		} else if (command === "show-album-detail") {
 			showDetailedModal("album", arg);
+		} else if (command === "copy-album-art-command") {
+			if (state.currentProfileId && arg) {
+				api.copyAlbumArt(state.currentProfileId, arg).then((success) => {
+					if (success) {
+						const artContainer = document.getElementById("detail-album-art-container");
+						if (artContainer) {
+							const originalBorder = artContainer.style.borderColor;
+							artContainer.style.borderColor = "#6366f1"; // Highlight with indigo ring color
+							setTimeout(() => {
+								artContainer.style.borderColor = originalBorder;
+							}, 500);
+						}
+					}
+				});
+			}
 		} else {
 			navigateToSuggestion(command === "jump-artist" ? "artist" : command === "jump-album" ? "album" : "genre", arg);
 		}
@@ -2278,6 +2293,12 @@ function toggleLoopMode() {
 function showDetailedModal(type: "track" | "album", data: any) {
 	const modal = document.getElementById("modal-detail")!;
 	const titleEl = document.getElementById("detail-modal-title")!;
+
+	// Clone/replace container to clean up previous listeners *before* querying inner elements
+	const artContainer = document.getElementById("detail-album-art-container")!;
+	const artContainerClone = artContainer.cloneNode(true) as HTMLDivElement;
+	artContainer.parentNode!.replaceChild(artContainerClone, artContainer);
+
 	const artImg = document.getElementById("detail-album-art") as HTMLImageElement;
 	const artPlaceholder = document.getElementById("detail-art-placeholder")!;
 
@@ -2415,8 +2436,10 @@ function showDetailedModal(type: "track" | "album", data: any) {
 
 		// Enable/Disable explorer buttons
 		// If path is empty, or not technically representable (like mock mtp or simulated mtp targets where physical file opening isn't possible), disable it
+		const activeProfile = state.profiles.find((p) => p.id === state.currentProfileId);
+		const storageType = activeProfile ? activeProfile.storageType || "local" : "local";
 		const canShowItunes = !!itunesPathExists;
-		const canShowPhone = !!(phonePathExists && state.profiles.find((p) => p.id === state.currentProfileId)?.storageType === "local");
+		const canShowPhone = !!(phonePathExists && storageType === "local");
 
 		btnItunesExplorer.disabled = !canShowItunes;
 		btnPhoneExplorer.disabled = !canShowPhone;
@@ -2543,6 +2566,40 @@ function showDetailedModal(type: "track" | "album", data: any) {
 		txtSize.value = formatBytes(totalSize);
 		txtDuration.value = formatDurationHHMMSS(totalDuration);
 	}
+
+	// Setup Copy album art functionality
+	const triggerCopy = async () => {
+		// Only copy if art is actually shown (not placeholder)
+		if (artImg.classList.contains("hidden")) return;
+		const targetAlbum = txtAlbumName.value;
+		if (targetAlbum && state.currentProfileId) {
+			const success = await api.copyAlbumArt(state.currentProfileId, targetAlbum);
+			if (success) {
+				// Show custom feedback or status notification
+				const originalBorder = artContainerClone.style.borderColor;
+				artContainerClone.style.borderColor = "#6366f1"; // Highlight with indigo ring color
+				setTimeout(() => {
+					artContainerClone.style.borderColor = originalBorder;
+				}, 500);
+			}
+		}
+	};
+
+	artContainerClone.addEventListener("keydown", (e: KeyboardEvent) => {
+		if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "c") {
+			e.preventDefault();
+			triggerCopy();
+		}
+	});
+
+	artContainerClone.addEventListener("contextmenu", (e: MouseEvent) => {
+		e.preventDefault();
+		// Show customized context menu to copy the image
+		api.showContextMenu({
+			album: txtAlbumName.value,
+			isDetailArt: true,
+		});
+	});
 
 	btnClose.onclick = () => {
 		modal.classList.add("hidden");
