@@ -229,7 +229,7 @@ export function registerIpcHandlers() {
 				);
 			}
 
-			if (params.artistSelectionState || params.albumSelectionState) {
+			if (params.albumSelectionState) {
 				menu.append(new MenuItem({ type: "separator" }));
 			}
 
@@ -310,7 +310,9 @@ export function registerIpcHandlers() {
 			}
 
 			// Add Detailed Information MenuItem at the bottom
-			menu.append(new MenuItem({ type: "separator" }));
+			if (params.trackId || params.album) {
+				menu.append(new MenuItem({ type: "separator" }));
+			}
 			if (params.trackId) {
 				menu.append(
 					new MenuItem({
@@ -600,23 +602,64 @@ export function registerIpcHandlers() {
 			// Copy to clipboard
 			const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
 
-			// Clear first
-			clipboard.clear();
-
-			// 1. Write the NativeImage to clipboard
-			clipboard.write({
-				image: img,
-				text: filePath, // Fallback text as path
-			});
-
-			// 2. Add platform-specific file path copy descriptors so it can be pasted as file in Windows Explorer or macOS Finder
 			if (process.platform === "win32") {
-				// Windows explorer looks for 'FileNameW' (UNICODE null-terminated path)
-				clipboard.writeBuffer("FileNameW", Buffer.concat([Buffer.from(filePath, "ucs2"), Buffer.from([0, 0])]));
-			} else if (process.platform === "darwin") {
-				// macOS Finder looks for 'public.file-url'
-				const fileUrl = `file://${filePath}`;
-				clipboard.writeBuffer("public.file-url", Buffer.from(fileUrl, "utf-8"));
+				const { execFile } = await import("node:child_process");
+				// Use PowerShell to write both standard image and file drop list formats simultaneously into the clipboard
+				const scriptText = `
+					[Console]::OutputEncoding = [System.Text.Encoding]::UTF8
+					Add-Type -AssemblyName System.Windows.Forms
+					Add-Type -AssemblyName System.Drawing
+					try {
+						$file = "${filePath.replace(/\\/g, "\\\\")}"
+						$dataObject = New-Object System.Windows.Forms.DataObject
+
+						# 1. Set File Drop List (so Windows Explorer can paste it as a file)
+						$fileList = New-Object System.Collections.Specialized.StringCollection
+						$fileList.Add($file) | Out-Null
+						$dataObject.SetFileDropList($fileList)
+
+						# 2. Set Image (so Paint, Discord, Photoshop can paste it as pixels)
+						$img = [System.Drawing.Image]::FromFile($file)
+						$dataObject.SetImage($img)
+
+						# 3. Set Clipboard
+						[System.Windows.Forms.Clipboard]::SetDataObject($dataObject, $true)
+						$img.Dispose()
+						Write-Host "SUCCESS"
+					} catch {
+						Write-Host "ERROR: $_"
+					}
+				`;
+				const scriptBuffer = Buffer.from(scriptText, "utf16le");
+				const base64Script = scriptBuffer.toString("base64");
+
+				await new Promise<void>((resolve, reject) => {
+					execFile("powershell.exe", ["-NoProfile", "-ExecutionPolicy", "Bypass", "-EncodedCommand", base64Script], { encoding: "utf8" }, (error, stdout, stderr) => {
+						if (error) {
+							console.error("PowerShell clipboard copy failed:", stderr || error.message);
+							reject(error);
+						} else {
+							resolve();
+						}
+					});
+				});
+			} else {
+				// macOS / Linux fallback
+				// Clear first
+				clipboard.clear();
+
+				// 1. Write the NativeImage to clipboard
+				clipboard.write({
+					image: img,
+					text: filePath, // Fallback text as path
+				});
+
+				// 2. Add platform-specific file path copy descriptors so it can be pasted as file in Finder
+				if (process.platform === "darwin") {
+					// macOS Finder looks for 'public.file-url'
+					const fileUrl = `file://${filePath}`;
+					clipboard.writeBuffer("public.file-url", Buffer.from(fileUrl, "utf-8"));
+				}
 			}
 
 			return true;
