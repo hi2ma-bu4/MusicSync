@@ -2699,7 +2699,22 @@ function registerIpcHandlers() {
         );
         menu.append(new MenuItem({ type: "separator" }));
       }
-      if (params.artistSelectionState) {
+      if (params.genreSelectionState) {
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u9078\u629E",
+            enabled: params.genreSelectionState.canSelectAll,
+            click: () => sendCommand("select-all-genre", params.genre)
+          })
+        );
+        menu.append(
+          new MenuItem({
+            label: "\u3059\u3079\u3066\u89E3\u9664",
+            enabled: params.genreSelectionState.canDeselectAll,
+            click: () => sendCommand("deselect-all-genre", params.genre)
+          })
+        );
+      } else if (params.artistSelectionState) {
         menu.append(
           new MenuItem({
             label: "\u3059\u3079\u3066\u9078\u629E",
@@ -2783,7 +2798,7 @@ function registerIpcHandlers() {
           })
         );
       }
-      if (params.genre) {
+      if (params.genre && !params.genreSelectionState) {
         menu.append(
           new MenuItem({
             label: `\u30B8\u30E3\u30F3\u30EB\u300C${params.genre}\u300D\u306E\u66F2\u3092\u8868\u793A`,

@@ -30,6 +30,7 @@ const elActiveWorkspace = document.getElementById("active-workspace")!;
 const elPromptToScanView = document.getElementById("prompt-to-scan-view")!;
 
 const elTxtSearch = document.getElementById("txt-search") as HTMLInputElement;
+const elBtnSearchClear = document.getElementById("btn-search-clear") as HTMLButtonElement;
 const elSearchCombobox = document.getElementById("search-combobox")!;
 const elBtnScan = document.getElementById("btn-scan") as HTMLButtonElement;
 const elBtnSyncExec = document.getElementById("btn-sync-exec") as HTMLButtonElement;
@@ -187,6 +188,20 @@ async function init() {
 		} else if (command === "deselect-all-album") {
 			pushHistoryState();
 			const tracks = getAlbumTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, false));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "select-all-genre") {
+			pushHistoryState();
+			const tracks = getGenreTracks(arg);
+			tracks.forEach((t) => setTrackCheckedState(t, true));
+			updateAllTreeCheckboxes();
+			updateSummaryBar();
+			updateMasterCheckboxState();
+		} else if (command === "deselect-all-genre") {
+			pushHistoryState();
+			const tracks = getGenreTracks(arg);
 			tracks.forEach((t) => setTrackCheckedState(t, false));
 			updateAllTreeCheckboxes();
 			updateSummaryBar();
@@ -653,56 +668,63 @@ function renderSearchCombobox() {
 }
 
 function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", targetName: string) {
-	// 1. Preserve search input and query, just hide combobox
+	// Clear search query on jump navigation
+	elTxtSearch.value = "";
+	state.searchQuery = "";
+	elBtnSearchClear.classList.add("hidden");
 	elSearchCombobox.classList.add("hidden");
 
-	if (state.searchQuery) {
-		addSearchHistory(state.searchQuery);
-	}
+	// Reset stored scroll positions to avoid scroll restore conflicts on jump target
+	state.tabScrollPositions[tabId] = 0;
+
+	// Reset filter and render instantly so the element exists on screen
+	applyFilterAndRender();
 
 	// 2. Switch tab and auto-expand target group
 	if (tabId === "artist") {
-		const artistKey = getSafeId("artist", targetName);
+		// Try to find normalized artist key in all tracks
+		let normalizedKey = normalizeArtistForIntegration(targetName);
+		const artistKey = getSafeId("artist", normalizedKey);
 		state.expandedGroups.add(artistKey);
 		switchTab("artist");
-		// 3. Scroll to target element
+		// 3. Scroll to target element instantly
 		setTimeout(() => {
 			const el = document.getElementById(`hdr-${artistKey}`);
 			if (el) {
-				el.scrollIntoView({ behavior: "smooth", block: "center" });
+				el.scrollIntoView({ behavior: "auto", block: "center" });
 			}
-		}, 100);
+		}, 50);
 	} else if (tabId === "album") {
 		const albumKey = getSafeId("album", targetName);
 		state.expandedGroups.add(albumKey);
 		switchTab("album");
-		// 3. Scroll to target element
+		// 3. Scroll to target element instantly
 		setTimeout(() => {
 			const el = document.getElementById(`hdr-${albumKey}`);
 			if (el) {
-				el.scrollIntoView({ behavior: "smooth", block: "center" });
+				el.scrollIntoView({ behavior: "auto", block: "center" });
 			}
-		}, 100);
+		}, 50);
 	} else if (tabId === "genre") {
 		const genreKey = getSafeId("genre", targetName);
 		state.expandedGroups.add(genreKey);
 		switchTab("genre");
-		// 3. Scroll to target element
+		// 3. Scroll to target element instantly
 		setTimeout(() => {
 			const el = document.getElementById(`hdr-${genreKey}`);
 			if (el) {
-				el.scrollIntoView({ behavior: "smooth", block: "center" });
+				el.scrollIntoView({ behavior: "auto", block: "center" });
 			}
-		}, 100);
+		}, 50);
 	} else if (tabId === "track") {
 		switchTab("track");
-		// 3. Scroll to target item index in the virtual scroll viewport
+		// 3. Scroll to target item index in the virtual scroll viewport instantly
 		setTimeout(() => {
 			const idx = state.filteredTracks.findIndex((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
 			if (idx !== -1) {
 				vsViewport.scrollTop = idx * 30; // Row height is 30px
 			}
-		}, 100);
+		}, 50);
 	}
 }
 (window as any).navigateToSuggestion = navigateToSuggestion;
@@ -845,16 +867,36 @@ function updateMasterCheckboxState() {
 function applyFilterAndRender() {
 	let tracks = state.scannedTracks;
 
-	// 1. Filter by search query
+	// 1. Filter by search query based on active tab
 	if (state.searchQuery !== "") {
 		const qNorm = normalizeForSearch(state.searchQuery);
 		tracks = tracks.filter((t) => {
 			const meta = t.itunesTrack || t.phoneTrack;
 			if (!meta) return false;
-			const titleNorm = normalizeForSearch(meta.title || "");
-			const artistNorm = normalizeForSearch(meta.artist || "");
-			const albumNorm = normalizeForSearch(meta.album || "");
-			return titleNorm.includes(qNorm) || artistNorm.includes(qNorm) || albumNorm.includes(qNorm);
+
+			if (state.activeTab === "artist") {
+				const artist = meta.artist || "";
+				// Check split artists
+				const splitNames = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+				const matchedAnySplit = splitNames.some((name) => {
+					const normSplit = normalizeForSearch(name);
+					return normSplit.includes(qNorm);
+				});
+				if (matchedAnySplit) return true;
+
+				const artistNorm = normalizeForSearch(artist);
+				return artistNorm.includes(qNorm);
+			} else if (state.activeTab === "album") {
+				const albumNorm = normalizeForSearch(meta.album || "");
+				return albumNorm.includes(qNorm);
+			} else if (state.activeTab === "genre") {
+				const genreNorm = normalizeForSearch(meta.genre || "");
+				return genreNorm.includes(qNorm);
+			} else if (state.activeTab === "track") {
+				const titleNorm = normalizeForSearch(meta.title || "");
+				return titleNorm.includes(qNorm);
+			}
+			return false;
 		});
 	}
 
@@ -888,6 +930,13 @@ function getAlbumTracks(albumName: string): any[] {
 	return state.filteredTracks.filter((t) => {
 		const meta = t.itunesTrack || t.phoneTrack;
 		return meta && meta.album === albumName;
+	});
+}
+
+function getGenreTracks(genreName: string): any[] {
+	return state.filteredTracks.filter((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		return meta && meta.genre === genreName;
 	});
 }
 
@@ -1197,6 +1246,7 @@ function setupEventListeners() {
 	});
 
 	let searchDebounceTimeout: any = null;
+	let isComposing = false;
 
 	const showPredictionsIfQuery = () => {
 		const query = elTxtSearch.value.trim().toLowerCase();
@@ -1208,12 +1258,55 @@ function setupEventListeners() {
 		}
 	};
 
-	elTxtSearch.addEventListener("input", () => {
+	elBtnSearchClear.addEventListener("click", (e) => {
+		e.stopPropagation();
+		elTxtSearch.value = "";
+		state.searchQuery = "";
+		elBtnSearchClear.classList.add("hidden");
+		elSearchCombobox.classList.add("hidden");
+		applyFilterAndRender();
+	});
+
+	elTxtSearch.addEventListener("compositionstart", () => {
+		isComposing = true;
+	});
+
+	elTxtSearch.addEventListener("compositionend", () => {
+		isComposing = false;
+		// Immediately fire query update on composition end
 		const query = elTxtSearch.value.trim().toLowerCase();
 		state.searchQuery = query;
 
-		// Show search/loading indicator immediately in prediction box if at least 1 character is entered
 		if (query.length >= 1) {
+			elBtnSearchClear.classList.remove("hidden");
+		} else {
+			elBtnSearchClear.classList.add("hidden");
+		}
+
+		if (searchDebounceTimeout) {
+			clearTimeout(searchDebounceTimeout);
+		}
+
+		applyFilterAndRender();
+		if (state.searchQuery.length >= 1) {
+			renderSearchCombobox();
+			addSearchHistory(state.searchQuery);
+		} else {
+			renderSearchHistory();
+		}
+	});
+
+	elTxtSearch.addEventListener("input", () => {
+		if (isComposing) {
+			// Do absolutely nothing during IME composition
+			return;
+		}
+
+		const query = elTxtSearch.value.trim().toLowerCase();
+		state.searchQuery = query;
+
+		if (query.length >= 1) {
+			elBtnSearchClear.classList.remove("hidden");
 			elSearchCombobox.innerHTML = `
 				<div class="flex items-center justify-center space-x-2 py-4 text-gray-400 font-medium">
 					<i class="icon-refresh-cw animate-spin text-indigo-400"></i>
@@ -1222,6 +1315,7 @@ function setupEventListeners() {
 			`;
 			elSearchCombobox.classList.remove("hidden");
 		} else {
+			elBtnSearchClear.classList.add("hidden");
 			renderSearchHistory();
 		}
 
@@ -1230,6 +1324,7 @@ function setupEventListeners() {
 		}
 
 		searchDebounceTimeout = setTimeout(() => {
+			if (isComposing) return;
 			applyFilterAndRender();
 			if (state.searchQuery.length >= 1) {
 				renderSearchCombobox();
@@ -1443,6 +1538,7 @@ function setupEventListeners() {
 		const trackRow = (e.target as HTMLElement).closest(".context-track");
 		const albumRow = (e.target as HTMLElement).closest(".context-album");
 		const artistRow = (e.target as HTMLElement).closest(".context-artist");
+		const genreRow = (e.target as HTMLElement).closest(".context-genre");
 
 		if (trackRow) {
 			e.preventDefault();
@@ -1507,6 +1603,21 @@ function setupEventListeners() {
 					canDeselectAll: !artistNoneChecked,
 					canSelectAllAlbums: !albumsAllChecked,
 					canDeselectAllAlbums: !albumsNoneChecked,
+				},
+			});
+		} else if (genreRow) {
+			e.preventDefault();
+			const genreName = genreRow.getAttribute("data-genre") || "";
+
+			const genreTracks = getGenreTracks(genreName);
+			const genreAllChecked = genreTracks.length > 0 && genreTracks.every((t) => isTrackChecked(t));
+			const genreNoneChecked = genreTracks.length > 0 && genreTracks.every((t) => !isTrackChecked(t));
+
+			api.showContextMenu({
+				genre: genreName,
+				genreSelectionState: {
+					canSelectAll: !genreAllChecked,
+					canDeselectAll: !genreNoneChecked,
 				},
 			});
 		}

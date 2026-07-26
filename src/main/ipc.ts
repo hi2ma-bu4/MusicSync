@@ -164,6 +164,10 @@ export function registerIpcHandlers() {
 					canSelectAllAlbums: boolean;
 					canDeselectAllAlbums: boolean;
 				};
+				genreSelectionState?: {
+					canSelectAll: boolean;
+					canDeselectAll: boolean;
+				};
 			},
 		) => {
 			const menu = new Menu();
@@ -182,7 +186,22 @@ export function registerIpcHandlers() {
 				menu.append(new MenuItem({ type: "separator" }));
 			}
 
-			if (params.artistSelectionState) {
+			if (params.genreSelectionState) {
+				menu.append(
+					new MenuItem({
+						label: "すべて選択",
+						enabled: params.genreSelectionState.canSelectAll,
+						click: () => sendCommand("select-all-genre", params.genre!),
+					}),
+				);
+				menu.append(
+					new MenuItem({
+						label: "すべて解除",
+						enabled: params.genreSelectionState.canDeselectAll,
+						click: () => sendCommand("deselect-all-genre", params.genre!),
+					}),
+				);
+			} else if (params.artistSelectionState) {
 				menu.append(
 					new MenuItem({
 						label: "すべて選択",
@@ -270,7 +289,7 @@ export function registerIpcHandlers() {
 				);
 			}
 
-			if (params.genre) {
+			if (params.genre && !params.genreSelectionState) {
 				menu.append(
 					new MenuItem({
 						label: `ジャンル「${params.genre}」の曲を表示`,

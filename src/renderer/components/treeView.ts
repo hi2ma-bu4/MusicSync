@@ -938,7 +938,8 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		const isGenreOpen = state.expandedGroups.has(genreKey);
 
 		const div = document.createElement("div");
-		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2";
+		div.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-genre";
+		div.setAttribute("data-genre", genreName);
 
 		div.innerHTML = `
 			<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${genreKey}" tabindex="0">

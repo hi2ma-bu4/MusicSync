@@ -4,8 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-Cnkcn-hX.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-DBUN3mFD.css">
+  <script type="module" crossorigin src="./assets/js/index-CEWLrA2f.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-BBHNaLZj.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.9</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.10</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -224,13 +224,17 @@
 					</div>
 
 					<!-- Search Box -->
-					<div class="relative w-48 sm:w-64">
+					<div class="relative w-48 sm:w-64 flex items-center">
 						<span class="absolute inset-y-0 left-0 pl-2.5 flex items-center text-gray-400 pointer-events-none">
 							<i class="icon-search text-xs"></i>
 						</span>
-						<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-3 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
+						<input id="txt-search" type="text" placeholder="キーワードで絞り込み..." class="w-full bg-gray-700 text-white pl-7 pr-8 py-1 rounded border border-gray-650 focus:outline-none focus:border-indigo-500 text-xxs transition">
+						<!-- Clear Button (X) -->
+						<button id="btn-search-clear" type="button" class="absolute right-2 text-gray-400 hover:text-white transition focus:outline-none hidden cursor-pointer">
+							<i class="icon-trash-2 text-[10px]"></i>
+						</button>
 						<!-- Combobox suggestion dropdown -->
-						<div id="search-combobox" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl py-2 z-50 text-xxs hidden max-h-96 overflow-y-auto">
+						<div id="search-combobox" class="absolute right-0 top-full mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl py-2 z-50 text-xxs hidden max-h-96 overflow-y-auto">
 							<!-- Dynamic suggestions rendered here -->
 						</div>
 					</div>
