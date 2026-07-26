@@ -81,9 +81,54 @@ const elModalProgress = document.getElementById("modal-progress")!;
 const elProgressModalTitle = document.getElementById("progress-modal-title")!;
 const elLblProgressStatus = document.getElementById("lbl-progress-status")!;
 const elLblProgressPct = document.getElementById("lbl-progress-pct")!;
+const elLblProgressTime = document.getElementById("lbl-progress-time")!;
 const elProgressBarFill = document.getElementById("progress-bar-fill")!;
 const elProgressLogs = document.getElementById("progress-logs")!;
 const elBtnProgressClose = document.getElementById("btn-progress-close") as HTMLButtonElement;
+
+let progressStartTime = 0;
+
+function formatTimeEstimation(seconds: number): string {
+	if (seconds <= 0 || isNaN(seconds) || !isFinite(seconds)) {
+		return "0秒";
+	}
+	const h = Math.floor(seconds / 3600);
+	const m = Math.floor((seconds % 3600) / 60);
+	const s = Math.floor(seconds % 60);
+
+	const parts: string[] = [];
+	if (h > 0) parts.push(`${h}時間`);
+	if (m > 0) parts.push(`${m}分`);
+	if (s > 0 || parts.length === 0) parts.push(`${s}秒`);
+
+	return parts.join("");
+}
+
+function updateProgressTimeAndPct(progressPct: number) {
+	elLblProgressPct.textContent = `${progressPct}%`;
+	if (!elLblProgressTime) return;
+
+	if (progressPct <= 0) {
+		elLblProgressTime.textContent = "";
+		return;
+	}
+
+	const elapsedMs = Date.now() - progressStartTime;
+	const elapsedSec = Math.floor(elapsedMs / 1000);
+
+	if (progressPct >= 100) {
+		elLblProgressTime.textContent = `経過時間: ${formatTimeEstimation(elapsedSec)}`;
+		return;
+	}
+
+	const estimatedTotalSec = elapsedSec / (progressPct / 100);
+	const remainingSec = Math.max(0, Math.floor(estimatedTotalSec - elapsedSec));
+
+	const elapsedStr = formatTimeEstimation(elapsedSec);
+	const remainingStr = formatTimeEstimation(remainingSec);
+
+	elLblProgressTime.textContent = `経過: ${elapsedStr} / 残り: ${remainingStr}`;
+}
 
 const vsViewport = document.getElementById("virtual-scroll-viewport")!;
 const vsCanvas = document.getElementById("virtual-scroll-canvas")!;
@@ -240,10 +285,64 @@ function selectProfile(id: string) {
 	elTxtSearch.value = "";
 	state.searchQuery = "";
 
+	// Restore tab sort rules
+	if (p.tabSortRules) {
+		state.tabSortRules = JSON.parse(JSON.stringify(p.tabSortRules));
+	} else {
+		state.tabSortRules = {
+			artist: [
+				{ field: "artist", direction: "asc" },
+				{ field: "album", direction: "asc" },
+				{ field: "track", direction: "asc" },
+			],
+			album: [
+				{ field: "album", direction: "asc" },
+				{ field: "track", direction: "asc" },
+			],
+			genre: [
+				{ field: "genre", direction: "asc" },
+				{ field: "artist", direction: "asc" },
+				{ field: "album", direction: "asc" },
+				{ field: "track", direction: "asc" },
+			],
+			track: [
+				{ field: "track", direction: "asc" },
+				{ field: "artist", direction: "asc" },
+				{ field: "album", direction: "asc" },
+			],
+		};
+	}
+
+	// Restore playback settings
+	if (p.playMode) {
+		loopMode = p.playMode;
+	} else {
+		loopMode = "once";
+	}
+	updateLoopModeUI();
+
+	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
+	const tooltip = document.getElementById("player-volume-tooltip")!;
+	if (volumeInput) {
+		const vol = p.playVolume !== undefined ? p.playVolume : 1;
+		volumeInput.value = String(vol);
+		if (audioElement) {
+			audioElement.volume = vol;
+		}
+		updateVolumeIconUI(vol);
+		if (tooltip) {
+			tooltip.textContent = String(Math.round(vol * 100));
+		}
+	}
+
 	switchTab("artist");
 }
 
 function switchTab(tabId: "artist" | "album" | "genre" | "track") {
+	if (state.activeTab) {
+		state.tabSortRules[state.activeTab] = JSON.parse(JSON.stringify(state.sortRules));
+	}
+
 	state.activeTab = tabId;
 	elLblActiveTab.textContent = {
 		artist: "アーティスト",
@@ -251,6 +350,9 @@ function switchTab(tabId: "artist" | "album" | "genre" | "track") {
 		genre: "ジャンル",
 		track: "個別曲",
 	}[tabId];
+
+	state.sortRules = JSON.parse(JSON.stringify(state.tabSortRules[tabId] || []));
+	renderSortRules();
 
 	const tabBtns = [
 		{ id: "artist", el: elTabArtist },
@@ -277,8 +379,7 @@ function switchTab(tabId: "artist" | "album" | "genre" | "track") {
 		elTrackContainer.classList.add("hidden");
 	}
 
-	renderActiveView();
-	updateMasterCheckboxState();
+	applyFilterAndRender();
 }
 
 import { normalizeForSearch } from "./renderer/components/utils";
@@ -829,6 +930,7 @@ function setupEventListeners() {
 	btnSortAddRule.addEventListener("click", (e) => {
 		e.stopPropagation();
 		state.sortRules.push({ field: "title", direction: "asc" });
+		saveProfileTabSortRules();
 		renderSortRules();
 		applyFilterAndRender();
 	});
@@ -836,9 +938,51 @@ function setupEventListeners() {
 	btnSortClear.addEventListener("click", (e) => {
 		e.stopPropagation();
 		state.sortRules = [];
+		saveProfileTabSortRules();
 		renderSortRules();
 		applyFilterAndRender();
 	});
+
+	const btnSortSaveDefault = document.getElementById("btn-sort-save-default");
+	if (btnSortSaveDefault) {
+		btnSortSaveDefault.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (!state.currentProfileId) return;
+			const p = state.profiles.find((x) => x.id === state.currentProfileId);
+			if (!p) return;
+
+			if (!p.defaultSortRules) {
+				p.defaultSortRules = {};
+			}
+			p.defaultSortRules[state.activeTab] = JSON.parse(JSON.stringify(state.sortRules));
+
+			api.saveProfile(p).then((updatedProfiles) => {
+				state.profiles = updatedProfiles;
+				showCustomAlert("デフォルトソート保存", `${elLblActiveTab.textContent}タブの現在のソート設定をデフォルトとして保存しました。`);
+			});
+		});
+	}
+
+	const btnSortRestoreDefault = document.getElementById("btn-sort-restore-default");
+	if (btnSortRestoreDefault) {
+		btnSortRestoreDefault.addEventListener("click", (e) => {
+			e.stopPropagation();
+			if (!state.currentProfileId) return;
+			const p = state.profiles.find((x) => x.id === state.currentProfileId);
+			if (!p) return;
+
+			const defaultRules = p.defaultSortRules && p.defaultSortRules[state.activeTab];
+			if (defaultRules) {
+				state.sortRules = JSON.parse(JSON.stringify(defaultRules));
+				saveProfileTabSortRules();
+				renderSortRules();
+				applyFilterAndRender();
+				showCustomAlert("デフォルトソート復元", `${elLblActiveTab.textContent}タブのデフォルトソート設定を適用しました。`);
+			} else {
+				showCustomAlert("デフォルト復元", "このタブのデフォルトソート設定がまだ保存されていません。");
+			}
+		});
+	}
 
 	elBtnProfileDropdown.addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -921,6 +1065,8 @@ function setupEventListeners() {
 		elProgressModalTitle.textContent = "ライブラリを解析中...";
 		elLblProgressStatus.textContent = "比較処理を開始しています...";
 		elLblProgressPct.textContent = "0%";
+		elLblProgressTime.textContent = "";
+		progressStartTime = Date.now();
 		elProgressBarFill.style.width = "0%";
 		elProgressLogs.innerHTML = "";
 		elBtnProgressClose.disabled = true;
@@ -928,7 +1074,7 @@ function setupEventListeners() {
 
 		const cancelProgress = api.onScanProgress((progress: any) => {
 			elLblProgressStatus.textContent = progress.message || "処理中...";
-			elLblProgressPct.textContent = `${progress.progress}%`;
+			updateProgressTimeAndPct(progress.progress);
 			elProgressBarFill.style.width = `${progress.progress}%`;
 
 			const logItem = document.createElement("div");
@@ -1147,6 +1293,14 @@ function setupEventListeners() {
 	});
 
 	window.addEventListener("keydown", (e) => {
+		if (e.key === "Escape") {
+			const modalDetail = document.getElementById("modal-detail");
+			if (modalDetail && !modalDetail.classList.contains("hidden")) {
+				modalDetail.classList.add("hidden");
+				return;
+			}
+		}
+
 		const activeEl = document.activeElement;
 		if (activeEl && (activeEl.tagName === "INPUT" || activeEl.tagName === "TEXTAREA")) {
 			return;
@@ -1365,6 +1519,8 @@ function startSyncExecution() {
 	elProgressModalTitle.textContent = "同期実行処理中...";
 	elLblProgressStatus.textContent = "同期処理を実行しています...";
 	elLblProgressPct.textContent = "0%";
+	elLblProgressTime.textContent = "";
+	progressStartTime = Date.now();
 	elProgressBarFill.style.width = "0%";
 	elProgressLogs.innerHTML = "";
 	elBtnProgressClose.disabled = true;
@@ -1376,7 +1532,7 @@ function startSyncExecution() {
 
 	const cancelProgress = api.onSyncProgress((progress: any) => {
 		elLblProgressStatus.textContent = progress.message;
-		elLblProgressPct.textContent = `${progress.progress}%`;
+		updateProgressTimeAndPct(progress.progress);
 		elProgressBarFill.style.width = `${progress.progress}%`;
 
 		elProgressLogs.innerHTML = "";
@@ -1597,6 +1753,7 @@ function renderSortRules() {
 		});
 		selField.addEventListener("change", () => {
 			rule.field = selField.value;
+			saveProfileTabSortRules();
 			applyFilterAndRender();
 		});
 		row.appendChild(selField);
@@ -1618,6 +1775,7 @@ function renderSortRules() {
 
 		selDir.addEventListener("change", () => {
 			rule.direction = selDir.value as "asc" | "desc";
+			saveProfileTabSortRules();
 			applyFilterAndRender();
 		});
 		row.appendChild(selDir);
@@ -1634,6 +1792,7 @@ function renderSortRules() {
 			const tmp = state.sortRules[idx];
 			state.sortRules[idx] = state.sortRules[idx - 1];
 			state.sortRules[idx - 1] = tmp;
+			saveProfileTabSortRules();
 			renderSortRules();
 			applyFilterAndRender();
 		});
@@ -1647,6 +1806,7 @@ function renderSortRules() {
 			const tmp = state.sortRules[idx];
 			state.sortRules[idx] = state.sortRules[idx + 1];
 			state.sortRules[idx + 1] = tmp;
+			saveProfileTabSortRules();
 			renderSortRules();
 			applyFilterAndRender();
 		});
@@ -1661,6 +1821,7 @@ function renderSortRules() {
 		btnDel.addEventListener("click", (e) => {
 			e.stopPropagation();
 			state.sortRules.splice(idx, 1);
+			saveProfileTabSortRules();
 			renderSortRules();
 			applyFilterAndRender();
 		});
@@ -1786,6 +1947,19 @@ function addSearchHistory(query: string) {
 	});
 }
 
+function saveProfileTabSortRules() {
+	if (!state.currentProfileId) return;
+	const p = state.profiles.find((x) => x.id === state.currentProfileId);
+	if (!p) return;
+
+	state.tabSortRules[state.activeTab] = JSON.parse(JSON.stringify(state.sortRules));
+	p.tabSortRules = JSON.parse(JSON.stringify(state.tabSortRules));
+
+	api.saveProfile(p).then((updatedProfiles) => {
+		state.profiles = updatedProfiles;
+	});
+}
+
 // ==========================================
 // 【プレビュー・プレイヤー機能 / PREVIEW PLAYER CONTROLLER】
 // ==========================================
@@ -1852,6 +2026,10 @@ function setupPlayerEventListeners() {
 			}
 		});
 
+		volumeInput.addEventListener("change", () => {
+			saveProfilePlaybackSettings();
+		});
+
 		btnVolume.addEventListener("click", (e) => {
 			e.stopPropagation();
 			popover.classList.toggle("hidden");
@@ -1876,6 +2054,41 @@ function setupPlayerEventListeners() {
 	}
 
 	setupLongPressHandlers();
+
+	const showPlayerContextMenu = (e: MouseEvent) => {
+		if (!currentPlayingTrack) return;
+		e.preventDefault();
+
+		const meta = currentPlayingTrack.itunesTrack || currentPlayingTrack.phoneTrack;
+		if (!meta) return;
+
+		const trackId = currentPlayingTrack.id;
+		const title = meta.title || "";
+		const artist = meta.artist || "";
+		const album = meta.album || "";
+		const genre = meta.genre || "";
+
+		const artists = splitAndNormalizeArtist(artist, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+
+		api.showContextMenu({
+			trackId,
+			title,
+			artist,
+			artists,
+			album,
+			genre,
+			itunesFilePath: currentPlayingTrack.itunesTrack?.filePath,
+			phoneFilePath: currentPlayingTrack.phoneTrack?.filePath,
+		});
+	};
+
+	const playerArtContainer = document.getElementById("player-album-art-container");
+	const playerTitle = document.getElementById("player-title");
+	const playerArtist = document.getElementById("player-artist");
+
+	if (playerArtContainer) playerArtContainer.addEventListener("contextmenu", showPlayerContextMenu);
+	if (playerTitle) playerTitle.addEventListener("contextmenu", showPlayerContextMenu);
+	if (playerArtist) playerArtist.addEventListener("contextmenu", showPlayerContextMenu);
 }
 
 function setupLongPressHandlers() {
@@ -2276,23 +2489,49 @@ function updatePlayPauseButtonUI() {
 	}
 }
 
-function toggleLoopMode() {
-	const btnLoop = document.getElementById("btn-player-loop")!;
-	const iconLoop = document.getElementById("icon-player-loop")!;
+function saveProfilePlaybackSettings() {
+	if (!state.currentProfileId) return;
+	const p = state.profiles.find((x) => x.id === state.currentProfileId);
+	if (!p) return;
+
+	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
+	const vol = volumeInput ? parseFloat(volumeInput.value) : 1;
+
+	p.playMode = loopMode;
+	p.playVolume = vol;
+
+	api.saveProfile(p).then((updatedProfiles) => {
+		state.profiles = updatedProfiles;
+	});
+}
+
+function updateLoopModeUI() {
+	const btnLoop = document.getElementById("btn-player-loop");
+	const iconLoop = document.getElementById("icon-player-loop");
+	if (!btnLoop || !iconLoop) return;
 
 	if (loopMode === "once") {
-		loopMode = "loop";
-		iconLoop.className = "icon-repeat-1 text-xs text-indigo-400";
-		btnLoop.title = "1曲リピート再生中";
-	} else if (loopMode === "loop") {
-		loopMode = "advance";
-		iconLoop.className = "icon-repeat text-xs text-indigo-400";
-		btnLoop.title = "リスト順次再生中";
-	} else {
-		loopMode = "once";
 		iconLoop.className = "icon-repeat-off text-xs text-gray-400";
 		btnLoop.title = "1曲再生して停止";
+	} else if (loopMode === "loop") {
+		iconLoop.className = "icon-repeat-1 text-xs text-indigo-400";
+		btnLoop.title = "1曲リピート再生中";
+	} else if (loopMode === "advance") {
+		iconLoop.className = "icon-repeat text-xs text-indigo-400";
+		btnLoop.title = "リスト順次再生中";
 	}
+}
+
+function toggleLoopMode() {
+	if (loopMode === "once") {
+		loopMode = "loop";
+	} else if (loopMode === "loop") {
+		loopMode = "advance";
+	} else {
+		loopMode = "once";
+	}
+	updateLoopModeUI();
+	saveProfilePlaybackSettings();
 }
 
 // ==========================================

@@ -38,7 +38,7 @@
 					</div>
 
 					<!-- Album Art -->
-					<div class="w-7 h-7 rounded bg-gray-850 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative">
+					<div id="player-album-art-container" class="w-7 h-7 rounded bg-gray-850 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative cursor-pointer">
 						<img id="player-album-art" class="w-full h-full object-cover hidden" src="" alt="">
 						<i id="player-art-placeholder" class="icon-music text-gray-500 text-xs"></i>
 					</div>
@@ -194,12 +194,18 @@
 
 						<!-- Notion-like Sort Dropdown Panel -->
 						<div id="sort-dropdown-panel" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl p-3 z-50 text-xxs hidden flex-col space-y-2.5">
-							<div class="flex items-center justify-between border-b border-gray-700 pb-1.5">
-								<span class="font-bold text-gray-300 flex items-center space-x-1">
+							<div class="flex items-center justify-between border-b border-gray-700 pb-1.5 gap-2">
+								<span class="font-bold text-gray-300 flex items-center space-x-1 shrink-0">
 									<i class="icon-sliders"></i>
 									<span>並び替え条件の優先順位</span>
 								</span>
-								<button id="btn-sort-clear" class="text-gray-500 hover:text-red-400 transition text-[10px]">クリア</button>
+								<div class="flex items-center space-x-1 text-[9px] shrink-0">
+									<button id="btn-sort-save-default" class="text-indigo-400 hover:text-indigo-300 transition cursor-pointer" title="現在の設定をタブのデフォルトとしてプロファイルに保存">デフォルト保存</button>
+									<span class="text-gray-650">|</span>
+									<button id="btn-sort-restore-default" class="text-indigo-400 hover:text-indigo-300 transition cursor-pointer" title="保存されたタブのデフォルト設定を復元">復元</button>
+									<span class="text-gray-650">|</span>
+									<button id="btn-sort-clear" class="text-gray-500 hover:text-red-400 transition cursor-pointer">クリア</button>
+								</div>
 							</div>
 
 							<!-- Sort Rules List -->
@@ -628,8 +634,11 @@
 
 			<div class="mb-3.5">
 				<div class="flex justify-between items-center text-xxs text-gray-400 mb-1">
-					<span id="lbl-progress-status">ファイルを処理しています...</span>
-					<span id="lbl-progress-pct" class="font-mono">0%</span>
+					<span id="lbl-progress-status" class="truncate flex-1 pr-2">ファイルを処理しています...</span>
+					<div class="flex items-center space-x-2 shrink-0 font-mono">
+						<span id="lbl-progress-time" class="text-gray-500"></span>
+						<span id="lbl-progress-pct">0%</span>
+					</div>
 				</div>
 				<div class="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
 					<div id="progress-bar-fill" class="bg-indigo-500 h-full transition-all duration-300" style="width: 0%"></div>
@@ -865,7 +874,7 @@
 			</div>
 
 			<div class="flex justify-end pt-3 border-t border-gray-700 mt-4">
-				<button type="button" id="btn-detail-close" class="bg-indigo-650 hover:bg-indigo-600 px-5 py-1.5 rounded transition text-white font-semibold cursor-pointer">閉じる</button>
+				<button type="button" id="btn-detail-close" class="bg-gray-700 hover:bg-gray-650 text-gray-300 border border-gray-650 px-5 py-1.5 rounded transition font-semibold cursor-pointer">閉じる</button>
 			</div>
 		</div>
 	</div>

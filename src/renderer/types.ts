@@ -9,6 +9,10 @@ export interface Profile {
 	mtpSubPath?: string;
 	searchHistory?: string[];
 	mtpDeviceName?: string;
+	playMode?: "once" | "loop" | "advance";
+	playVolume?: number;
+	tabSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
+	defaultSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
 }
 
 export interface Settings {

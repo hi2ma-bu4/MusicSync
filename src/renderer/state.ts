@@ -29,6 +29,28 @@ export const state = {
 		{ field: "artist", direction: "asc" },
 		{ field: "album", direction: "asc" },
 	] as { field: string; direction: "asc" | "desc" }[],
+	tabSortRules: {
+		artist: [
+			{ field: "artist", direction: "asc" },
+			{ field: "album", direction: "asc" },
+			{ field: "track", direction: "asc" },
+		],
+		album: [
+			{ field: "album", direction: "asc" },
+			{ field: "track", direction: "asc" },
+		],
+		genre: [
+			{ field: "genre", direction: "asc" },
+			{ field: "artist", direction: "asc" },
+			{ field: "album", direction: "asc" },
+			{ field: "track", direction: "asc" },
+		],
+		track: [
+			{ field: "track", direction: "asc" },
+			{ field: "artist", direction: "asc" },
+			{ field: "album", direction: "asc" },
+		],
+	} as Record<string, { field: string; direction: "asc" | "desc" }[]>,
 
 	// Selection sets
 	checkedCopyTrackIds: new Set<string>(), // missing & updated
