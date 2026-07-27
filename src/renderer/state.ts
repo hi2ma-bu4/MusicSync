@@ -13,6 +13,8 @@ export const state = {
 	currentSettings: {} as Settings,
 	activeTab: "artist" as "artist" | "album" | "genre" | "track",
 	searchQuery: "",
+	filterCopyUpdateActive: false,
+	filterDeleteActive: false,
 	tabScrollPositions: {
 		artist: 0,
 		album: 0,
@@ -24,33 +26,24 @@ export const state = {
 	scannedTracks: [] as ScanResultItem[],
 	filteredTracks: [] as ScanResultItem[],
 	activeStatusFilters: new Set<string>(["missing", "updated", "synced", "phone_only", "path_warning"]),
-	sortRules: [
-		{ field: "track", direction: "asc" },
-		{ field: "artist", direction: "asc" },
-		{ field: "album", direction: "asc" },
-	] as { field: string; direction: "asc" | "desc" }[],
+	sortRules: [] as { field: string; direction: "asc" | "desc"; target: "common" | "group" | "track" }[],
 	tabSortRules: {
 		artist: [
-			{ field: "artist", direction: "asc" },
-			{ field: "album", direction: "asc" },
-			{ field: "track", direction: "asc" },
+			{ field: "artist", direction: "asc", target: "group" },
+			{ field: "album", direction: "asc", target: "group" },
+			{ field: "track", direction: "asc", target: "track" },
 		],
 		album: [
-			{ field: "album", direction: "asc" },
-			{ field: "track", direction: "asc" },
+			{ field: "albumartist", direction: "asc", target: "group" },
+			{ field: "album", direction: "asc", target: "group" },
+			{ field: "track", direction: "asc", target: "track" },
 		],
 		genre: [
-			{ field: "genre", direction: "asc" },
-			{ field: "artist", direction: "asc" },
-			{ field: "album", direction: "asc" },
-			{ field: "track", direction: "asc" },
+			{ field: "genre", direction: "asc", target: "group" },
+			{ field: "title", direction: "asc", target: "track" },
 		],
-		track: [
-			{ field: "track", direction: "asc" },
-			{ field: "artist", direction: "asc" },
-			{ field: "album", direction: "asc" },
-		],
-	} as Record<string, { field: string; direction: "asc" | "desc" }[]>,
+		track: [{ field: "title", direction: "asc", target: "track" }],
+	} as Record<string, { field: string; direction: "asc" | "desc"; target: "common" | "group" | "track" }[]>,
 
 	// Selection sets
 	checkedCopyTrackIds: new Set<string>(), // missing & updated

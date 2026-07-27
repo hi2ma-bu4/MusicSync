@@ -2849,19 +2849,32 @@ function registerIpcHandlers() {
   ipcMain.handle("save-settings", (_event, settings) => {
     store.set("settings", settings);
   });
-  ipcMain.handle("reset-cache", async () => {
+  ipcMain.handle("reset-cache", async (_event, profileId) => {
+    if (!profileId) return;
     const cachesDir2 = path6.join(app2.getPath("userData"), "caches");
     if (fs5.existsSync(cachesDir2)) {
+      const itunesCachePath = path6.join(cachesDir2, `${profileId}_itunes.json`);
+      const phoneCachePath = path6.join(cachesDir2, `${profileId}_phone.json`);
       try {
-        fs5.rmSync(cachesDir2, { recursive: true, force: true });
+        if (fs5.existsSync(itunesCachePath)) {
+          fs5.unlinkSync(itunesCachePath);
+        }
+        if (fs5.existsSync(phoneCachePath)) {
+          fs5.unlinkSync(phoneCachePath);
+        }
       } catch (e) {
-        console.error("Failed to delete caches directory", e);
+        console.error("Failed to delete profile cache JSON files", e);
+      }
+      const thumbnailsDir = path6.join(cachesDir2, "thumbnails", profileId);
+      if (fs5.existsSync(thumbnailsDir)) {
+        try {
+          fs5.rmSync(thumbnailsDir, { recursive: true, force: true });
+        } catch (e) {
+          console.error("Failed to delete profile thumbnails folder", e);
+        }
       }
     }
-    fs5.mkdirSync(cachesDir2, { recursive: true });
-    for (const key of Object.keys(lastScanResults)) {
-      delete lastScanResults[key];
-    }
+    delete lastScanResults[profileId];
   });
   ipcMain.on(
     "show-context-menu",

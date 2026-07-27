@@ -55,8 +55,8 @@ if (!window.api) {
 		saveSettings: async (settings: any) => {
 			localStorage.setItem("mock_settings", JSON.stringify(settings));
 		},
-		resetCache: async () => {
-			console.log("Mock resetCache");
+		resetCache: async (profileId: string) => {
+			console.log("Mock resetCache for profile:", profileId);
 		},
 		showContextMenu: (params: any) => {
 			console.log("Mock showContextMenu:", params);

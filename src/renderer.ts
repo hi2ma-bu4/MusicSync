@@ -5,7 +5,7 @@ import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
-import { compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getSafeId, isTrackChecked, normalizeArtistForIntegration, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
+import { compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import { ScanResultItem } from "./renderer/types";
 import { DEFAULT_DELIMITERS } from "./shared/constants";
@@ -136,6 +136,51 @@ const vsViewport = document.getElementById("virtual-scroll-viewport")!;
 const vsCanvas = document.getElementById("virtual-scroll-canvas")!;
 const vsContent = document.getElementById("virtual-scroll-content")!;
 
+const showStatusContextMenu = (e: MouseEvent, statusId: string, statusLabel: string) => {
+	e.preventDefault();
+	e.stopPropagation();
+
+	const existing = document.getElementById("status-context-menu");
+	if (existing) existing.remove();
+
+	const menu = document.createElement("div");
+	menu.id = "status-context-menu";
+	menu.className = "absolute bg-gray-850 border border-gray-750 text-gray-200 text-xxs py-1 rounded shadow-2xl z-50 pointer-events-auto cursor-pointer";
+	menu.style.top = `${e.pageY}px`;
+	menu.style.left = `${e.pageX}px`;
+
+	const item = document.createElement("div");
+	item.className = "px-4 py-1.5 hover:bg-gray-700 transition";
+	if (statusId === "total") {
+		item.textContent = "すべて非表示にする";
+		item.addEventListener("click", () => {
+			state.activeStatusFilters.clear();
+			updateFilterUI();
+			applyFilterAndRender();
+			menu.remove();
+		});
+	} else {
+		item.textContent = `「${statusLabel}」以外を非表示にする`;
+		item.addEventListener("click", () => {
+			state.activeStatusFilters = new Set([statusId]);
+			updateFilterUI();
+			applyFilterAndRender();
+			menu.remove();
+		});
+	}
+
+	menu.appendChild(item);
+	document.body.appendChild(menu);
+
+	const closeMenu = () => {
+		menu.remove();
+		document.removeEventListener("click", closeMenu);
+	};
+	setTimeout(() => {
+		document.addEventListener("click", closeMenu);
+	}, 50);
+};
+
 async function init() {
 	state.currentSettings = await api.getSettings();
 	if (!state.currentSettings.delimiters) state.currentSettings.delimiters = DEFAULT_DELIMITERS;
@@ -144,6 +189,53 @@ async function init() {
 
 	state.profiles = await api.getProfiles();
 	renderProfileDropdown();
+
+	// Advanced Copy/Update and Delete filters
+	const elToggleFilterCopyUpdate = document.getElementById("toggle-filter-copy-update")!;
+	const elToggleFilterDelete = document.getElementById("toggle-filter-delete")!;
+
+	const updateAdvancedFilterButtonsUI = () => {
+		if (state.filterCopyUpdateActive) {
+			elToggleFilterCopyUpdate.className = "transition-all px-1.5 py-0.5 rounded text-[10px] bg-indigo-950/60 border border-indigo-500/80 text-indigo-300 font-bold shadow-[0_0_8px_rgba(99,102,241,0.4)] cursor-pointer focus:outline-none";
+		} else {
+			elToggleFilterCopyUpdate.className = "transition-all px-1.5 py-0.5 rounded text-[10px] bg-gray-800/20 border border-gray-700/40 text-gray-400 hover:text-white cursor-pointer focus:outline-none";
+		}
+
+		if (state.filterDeleteActive) {
+			elToggleFilterDelete.className = "transition-all px-1.5 py-0.5 rounded text-[10px] bg-red-950/60 border border-red-500/80 text-red-300 font-bold shadow-[0_0_8px_rgba(239,68,68,0.4)] cursor-pointer focus:outline-none";
+		} else {
+			elToggleFilterDelete.className = "transition-all px-1.5 py-0.5 rounded text-[10px] bg-gray-800/20 border border-gray-700/40 text-gray-400 hover:text-white cursor-pointer focus:outline-none";
+		}
+	};
+
+	elToggleFilterCopyUpdate.addEventListener("click", () => {
+		state.filterCopyUpdateActive = !state.filterCopyUpdateActive;
+		updateAdvancedFilterButtonsUI();
+		applyFilterAndRender();
+	});
+
+	elToggleFilterDelete.addEventListener("click", () => {
+		state.filterDeleteActive = !state.filterDeleteActive;
+		updateAdvancedFilterButtonsUI();
+		applyFilterAndRender();
+	});
+
+	// Right click menus for status badges
+	const setupStatusRightClick = (elId: string, statusId: string, statusLabel: string) => {
+		const el = document.getElementById(elId);
+		if (el) {
+			el.addEventListener("contextmenu", (e) => {
+				showStatusContextMenu(e, statusId, statusLabel);
+			});
+		}
+	};
+
+	setupStatusRightClick("stat-btn-total", "total", "全件");
+	setupStatusRightClick("stat-btn-missing", "missing", "未存在");
+	setupStatusRightClick("stat-btn-updated", "updated", "更新あり");
+	setupStatusRightClick("stat-btn-synced", "synced", "同期済");
+	setupStatusRightClick("stat-btn-phone_only", "phone_only", "比較先のみ");
+	setupStatusRightClick("stat-btn-path_warning", "path_warning", "配置不一致");
 
 	api.onContextMenuCommand((command, arg) => {
 		if (command === "play-track") {
@@ -254,6 +346,8 @@ async function init() {
 	setupEventListeners();
 	setupColumnResize();
 	setupPlayerEventListeners();
+
+	elBtnScan.disabled = !state.currentProfileId;
 }
 
 function renderProfileDropdown() {
@@ -271,7 +365,14 @@ function renderProfileDropdown() {
 			${p.id === state.currentProfileId ? '<i class="icon-check text-xs text-indigo-400"></i>' : ""}
 		`;
 
-		btn.addEventListener("click", () => selectProfile(p.id));
+		btn.addEventListener("click", async () => {
+			if (p.id !== state.currentProfileId && getCheckboxChangesCount() > 0) {
+				const confirmed = await showCustomConfirm("プロファイルの切り替え", "選択状態に変更がありますが、破棄してプロファイルを切り替えますか？");
+				if (!confirmed) return;
+				resetCheckboxesToDefault();
+			}
+			selectProfile(p.id);
+		});
 		elProfileDropdownList.appendChild(btn);
 	});
 }
@@ -301,32 +402,41 @@ function selectProfile(id: string) {
 	elTxtSearch.value = "";
 	state.searchQuery = "";
 
-	// Restore tab sort rules
-	if (p.tabSortRules) {
-		state.tabSortRules = JSON.parse(JSON.stringify(p.tabSortRules));
-	} else {
-		state.tabSortRules = {
-			artist: [
-				{ field: "artist", direction: "asc" },
-				{ field: "album", direction: "asc" },
-				{ field: "track", direction: "asc" },
-			],
-			album: [
-				{ field: "album", direction: "asc" },
-				{ field: "track", direction: "asc" },
-			],
-			genre: [
-				{ field: "genre", direction: "asc" },
-				{ field: "artist", direction: "asc" },
-				{ field: "album", direction: "asc" },
-				{ field: "track", direction: "asc" },
-			],
-			track: [
-				{ field: "track", direction: "asc" },
-				{ field: "artist", direction: "asc" },
-				{ field: "album", direction: "asc" },
-			],
-		};
+	// Restore tab sort rules and populate defaults if missing
+	const initialDefaultSortRules = {
+		artist: [
+			{ field: "artist", direction: "asc" as const, target: "group" as const },
+			{ field: "album", direction: "asc" as const, target: "group" as const },
+			{ field: "track", direction: "asc" as const, target: "track" as const },
+		],
+		album: [
+			{ field: "albumartist", direction: "asc" as const, target: "group" as const },
+			{ field: "album", direction: "asc" as const, target: "group" as const },
+			{ field: "track", direction: "asc" as const, target: "track" as const },
+		],
+		genre: [
+			{ field: "genre", direction: "asc" as const, target: "group" as const },
+			{ field: "title", direction: "asc" as const, target: "track" as const },
+		],
+		track: [{ field: "title", direction: "asc" as const, target: "track" as const }],
+	};
+
+	let needsSave = false;
+	if (!p.tabSortRules) {
+		p.tabSortRules = JSON.parse(JSON.stringify(initialDefaultSortRules));
+		needsSave = true;
+	}
+	state.tabSortRules = JSON.parse(JSON.stringify(p.tabSortRules));
+
+	if (!p.defaultSortRules) {
+		p.defaultSortRules = JSON.parse(JSON.stringify(initialDefaultSortRules));
+		needsSave = true;
+	}
+
+	if (needsSave) {
+		api.saveProfile(p).then((updatedProfiles) => {
+			state.profiles = updatedProfiles;
+		});
 	}
 
 	// Restore playback settings
@@ -351,6 +461,7 @@ function selectProfile(id: string) {
 		}
 	}
 
+	state.activeTab = "" as any;
 	switchTab("artist");
 }
 
@@ -763,6 +874,39 @@ function renderActiveView() {
 	updateAllTreeCheckboxes();
 }
 
+function getGroupStatusStats(groups: Map<string, any[]>, status: string) {
+	let complete = 0;
+	let partial = 0;
+
+	groups.forEach((tracks) => {
+		let matchCount = 0;
+		tracks.forEach((t) => {
+			if (t.status === status) matchCount++;
+		});
+
+		if (matchCount === tracks.length) {
+			complete++;
+		} else if (matchCount > 0) {
+			partial++;
+		}
+	});
+
+	return { complete, partial };
+}
+
+function formatStatusStatText(trackCount: number, status: string, groups: Map<string, any[]> | null) {
+	if (!groups || state.activeTab === "track") {
+		return String(trackCount);
+	}
+
+	const { complete, partial } = getGroupStatusStats(groups, status);
+	if (partial > 0) {
+		return `${trackCount} <span class="font-sans text-[10px] text-gray-400">(${complete},<span class="text-gray-500 font-normal opacity-70 text-[9px]">${partial}(一部)</span>)</span>`;
+	} else {
+		return `${trackCount} <span class="font-sans text-[10px] text-gray-400">(${complete})</span>`;
+	}
+}
+
 function updateStatsSummary() {
 	let total = 0;
 	let missing = 0;
@@ -799,11 +943,42 @@ function updateStatsSummary() {
 		}
 	});
 
+	let groups: Map<string, any[]> | null = null;
+	if (state.activeTab === "artist") {
+		groups = new Map<string, any[]>();
+		state.scannedTracks.forEach((t) => {
+			const meta = t.itunesTrack || t.phoneTrack;
+			const artistName = (meta && meta.artist) || "Unknown Artist";
+			const splitNames = splitAndNormalizeArtist(artistName, state.currentSettings.delimiters || [], state.currentSettings.exceptions || []);
+			splitNames.forEach((name) => {
+				const key = normalizeArtistForIntegration(name);
+				if (!groups!.has(key)) groups!.set(key, []);
+				groups!.get(key)!.push(t);
+			});
+		});
+	} else if (state.activeTab === "album") {
+		groups = new Map<string, any[]>();
+		state.scannedTracks.forEach((t) => {
+			const meta = t.itunesTrack || t.phoneTrack;
+			const albumName = (meta && meta.album) || "Unknown Album";
+			if (!groups!.has(albumName)) groups!.set(albumName, []);
+			groups!.get(albumName)!.push(t);
+		});
+	} else if (state.activeTab === "genre") {
+		groups = new Map<string, any[]>();
+		state.scannedTracks.forEach((t) => {
+			const meta = t.itunesTrack || t.phoneTrack;
+			const genreName = (meta && meta.genre) || "Unknown Genre";
+			if (!groups!.has(genreName)) groups!.set(genreName, []);
+			groups!.get(genreName)!.push(t);
+		});
+	}
+
 	elCntTotal.textContent = String(total);
-	elCntMissing.textContent = String(missing);
-	elCntUpdated.textContent = String(updated);
-	elCntSynced.textContent = String(synced);
-	elCntPhoneOnly.textContent = String(phoneOnly);
+	elCntMissing.innerHTML = formatStatusStatText(missing, "missing", groups);
+	elCntUpdated.innerHTML = formatStatusStatText(updated, "updated", groups);
+	elCntSynced.innerHTML = formatStatusStatText(synced, "synced", groups);
+	elCntPhoneOnly.innerHTML = formatStatusStatText(phoneOnly, "phone_only", groups);
 
 	if (elValTotalStats) {
 		elValTotalStats.textContent = `${formatBytes(phoneTotalSize)}/${formatBytes(itunesTotalSize)} (${formatDurationHHMMSS(phoneTotalDuration)}/${formatDurationHHMMSS(itunesTotalDuration)})`;
@@ -824,6 +999,14 @@ function updateStatsSummary() {
 	}
 }
 
+function updateResetChangesButtonState() {
+	const btnReset = document.getElementById("btn-reset-changes") as HTMLButtonElement;
+	if (!btnReset) return;
+
+	const changes = getCheckboxChangesCount();
+	btnReset.disabled = changes === 0;
+}
+
 function updateSummaryBar() {
 	elCntCheckedCopy.textContent = String(state.checkedCopyTrackIds.size);
 	elCntCheckedDelete.textContent = String(state.checkedDeleteTrackIds.size);
@@ -835,6 +1018,8 @@ function updateSummaryBar() {
 
 	const totalChecks = state.checkedCopyTrackIds.size + state.checkedMoveTrackIds.size + state.checkedDeleteTrackIds.size;
 	elBtnSyncExec.disabled = totalChecks === 0 && !hasCheckedWarning;
+
+	updateResetChangesButtonState();
 }
 
 function updateMasterCheckboxState() {
@@ -912,6 +1097,32 @@ function applyFilterAndRender() {
 		return true;
 	});
 
+	// 3. Filter by advanced selection filters (Copy/Update Active and Delete Active)
+	if (state.filterCopyUpdateActive || state.filterDeleteActive) {
+		tracks = tracks.filter((t) => {
+			let matchCopyUpdate = false;
+			let matchDelete = false;
+
+			if (state.filterCopyUpdateActive) {
+				if (t.status === "missing" && isTrackChecked(t)) {
+					matchCopyUpdate = true;
+				} else if (t.status === "updated" && isTrackChecked(t)) {
+					matchCopyUpdate = true;
+				} else if (t.pathMismatch && isTrackChecked(t)) {
+					matchCopyUpdate = true;
+				}
+			}
+
+			if (state.filterDeleteActive) {
+				if ((t.status === "synced" || t.status === "phone_only" || t.status === "updated") && !isTrackChecked(t)) {
+					matchDelete = true;
+				}
+			}
+
+			return matchCopyUpdate || matchDelete;
+		});
+	}
+
 	state.filteredTracks = tracks.sort((a, b) => compareTracks(a, b, state.sortRules));
 	renderActiveView();
 	updateMasterCheckboxState();
@@ -958,6 +1169,16 @@ function getTracksOfAlbumsContainingArtist(artistName: string): any[] {
 }
 
 function setupEventListeners() {
+	const btnResetChanges = document.getElementById("btn-reset-changes")!;
+	btnResetChanges.addEventListener("click", async () => {
+		const confirmed = await showCustomConfirm("変更のリセット", "すべてのチェックボックスの選択状態を初期状態（比較直後の状態）に戻しますか？");
+		if (confirmed) {
+			pushHistoryState();
+			resetCheckboxesToDefault();
+			applyFilterAndRender();
+		}
+	});
+
 	const btnSortToggle = document.getElementById("btn-sort-toggle")!;
 	const sortDropdownPanel = document.getElementById("sort-dropdown-panel")!;
 	const btnSortAddRule = document.getElementById("btn-sort-add-rule")!;
@@ -971,7 +1192,12 @@ function setupEventListeners() {
 
 	// Close when clicking outside
 	document.addEventListener("click", (e) => {
-		if (sortDropdownPanel && !sortDropdownPanel.contains(e.target as Node) && e.target !== btnSortToggle) {
+		const target = e.target as Node;
+		// If the clicked element is no longer in the document, it was dynamically removed during re-rendering (like the toggle button). Do not close.
+		if (!document.body.contains(target)) {
+			return;
+		}
+		if (sortDropdownPanel && !sortDropdownPanel.contains(target) && target !== btnSortToggle) {
 			sortDropdownPanel.classList.add("hidden");
 			sortDropdownPanel.classList.remove("flex");
 		}
@@ -979,7 +1205,7 @@ function setupEventListeners() {
 
 	btnSortAddRule.addEventListener("click", (e) => {
 		e.stopPropagation();
-		state.sortRules.push({ field: "title", direction: "asc" });
+		state.sortRules.push({ field: "title", direction: "asc", target: "common" });
 		saveProfileTabSortRules();
 		renderSortRules();
 		applyFilterAndRender();
@@ -1200,10 +1426,30 @@ function setupEventListeners() {
 		const deleteItunesCount = state.scannedTracks.filter((t) => (t.status === "synced" || t.status === "updated") && state.checkedDeleteTrackIds.has(t.id)).length;
 		const deletePhoneOnlyCount = state.scannedTracks.filter((t) => t.status === "phone_only" && state.checkedDeleteTrackIds.has(t.id)).length;
 
-		document.getElementById("lbl-confirm-copy-count")!.textContent = `${copyCount} 件`;
-		document.getElementById("lbl-confirm-move-count")!.textContent = `${moveCount} 件`;
-		document.getElementById("lbl-confirm-delete-itunes-count")!.textContent = `${deleteItunesCount} 件`;
-		document.getElementById("lbl-confirm-delete-count")!.textContent = `${deletePhoneOnlyCount} 件`;
+		const getUniqueAlbumsCount = (trackFilter: (t: ScanResultItem) => boolean) => {
+			const albums = new Set<string>();
+			state.scannedTracks.forEach((t) => {
+				if (trackFilter(t)) {
+					const meta = t.itunesTrack || t.phoneTrack;
+					if (meta && meta.album) {
+						albums.add(meta.album);
+					} else {
+						albums.add("Unknown Album");
+					}
+				}
+			});
+			return albums.size;
+		};
+
+		const copyAlbums = getUniqueAlbumsCount((t) => (t.status === "missing" || t.status === "updated") && state.checkedCopyTrackIds.has(t.id));
+		const moveAlbums = getUniqueAlbumsCount((t) => t.pathMismatch && (t.status === "synced" || t.status === "updated") && state.checkedMoveTrackIds.has(t.id));
+		const deleteItunesAlbums = getUniqueAlbumsCount((t) => (t.status === "synced" || t.status === "updated") && state.checkedDeleteTrackIds.has(t.id));
+		const deletePhoneOnlyAlbums = getUniqueAlbumsCount((t) => t.status === "phone_only" && state.checkedDeleteTrackIds.has(t.id));
+
+		document.getElementById("lbl-confirm-copy-count")!.innerHTML = `${copyCount} 件 <span class="text-gray-500 font-normal ml-1">(${copyAlbums} アルバム)</span>`;
+		document.getElementById("lbl-confirm-move-count")!.innerHTML = `${moveCount} 件 <span class="text-gray-500 font-normal ml-1">(${moveAlbums} アルバム)</span>`;
+		document.getElementById("lbl-confirm-delete-itunes-count")!.innerHTML = `${deleteItunesCount} 件 <span class="text-gray-500 font-normal ml-1">(${deleteItunesAlbums} アルバム)</span>`;
+		document.getElementById("lbl-confirm-delete-count")!.innerHTML = `${deletePhoneOnlyCount} 件 <span class="text-gray-500 font-normal ml-1">(${deletePhoneOnlyAlbums} アルバム)</span>`;
 
 		let deltaSize = 0;
 		let deltaDuration = 0;
@@ -1890,17 +2136,29 @@ function renderSortRules() {
 	elBadge.textContent = String(state.sortRules.length);
 
 	const fields = [
+		{ val: "title", label: "曲名" },
 		{ val: "artist", label: "アーティスト" },
 		{ val: "album", label: "アルバム" },
-		{ val: "title", label: "曲名" },
+		{ val: "albumartist", label: "アルバムアーティスト" },
+		{ val: "genre", label: "ジャンル" },
+		{ val: "composer", label: "作曲者" },
 		{ val: "year", label: "発売年" },
 		{ val: "track", label: "トラック" },
+		{ val: "size", label: "ファイルサイズ" },
+		{ val: "duration", label: "再生時間" },
+		{ val: "relativePath", label: "相対パス" },
 		{ val: "status", label: "ステータス" },
+	];
+
+	const targets = [
+		{ val: "common", label: "共通" },
+		{ val: "group", label: "グループ" },
+		{ val: "track", label: "個別曲" },
 	];
 
 	state.sortRules.forEach((rule, idx) => {
 		const row = document.createElement("div");
-		row.className = "flex items-center space-x-1 bg-gray-900/50 p-1.5 rounded border border-gray-750 gap-1";
+		row.className = "flex items-center space-x-1.5 bg-gray-900/50 p-1.5 rounded border border-gray-750 gap-1.5";
 
 		// 1. Priority Indicator / Index
 		const priorityLabel = document.createElement("span");
@@ -1908,9 +2166,28 @@ function renderSortRules() {
 		priorityLabel.textContent = `${idx + 1}`;
 		row.appendChild(priorityLabel);
 
-		// 2. Select Field
+		// 2. Target Select (common, group, track)
+		const selTarget = document.createElement("select");
+		selTarget.className = "bg-gray-800 text-white rounded px-1 px-0.5 border border-gray-650 focus:outline-none font-semibold text-[10px] shrink-0";
+		selTarget.style.width = "72px";
+		targets.forEach((t) => {
+			const opt = document.createElement("option");
+			opt.value = t.val;
+			opt.textContent = t.label;
+			if ((rule.target || "common") === t.val) opt.selected = true;
+			selTarget.appendChild(opt);
+		});
+		selTarget.addEventListener("change", () => {
+			rule.target = selTarget.value as "common" | "group" | "track";
+			saveProfileTabSortRules();
+			applyFilterAndRender();
+		});
+		row.appendChild(selTarget);
+
+		// 3. Select Field
 		const selField = document.createElement("select");
-		selField.className = "bg-gray-800 text-white rounded px-1.5 py-0.5 border border-gray-650 focus:outline-none flex-1 font-semibold text-[10px]";
+		selField.className = "bg-gray-800 text-white rounded px-1.5 py-0.5 border border-gray-650 focus:outline-none flex-1 font-semibold text-[10px] min-w-0";
+		selField.style.minWidth = "120px";
 		fields.forEach((f) => {
 			const opt = document.createElement("option");
 			opt.value = f.val;
@@ -1921,35 +2198,29 @@ function renderSortRules() {
 		selField.addEventListener("change", () => {
 			rule.field = selField.value;
 			saveProfileTabSortRules();
+			renderSortRules();
 			applyFilterAndRender();
 		});
 		row.appendChild(selField);
 
-		// 3. Select Direction
-		const selDir = document.createElement("select");
-		selDir.className = "bg-gray-800 text-white rounded px-1.5 py-0.5 border border-gray-650 focus:outline-none w-16 text-[10px]";
-		const optAsc = document.createElement("option");
-		optAsc.value = "asc";
-		optAsc.textContent = "昇順";
-		if (rule.direction === "asc") optAsc.selected = true;
-		selDir.appendChild(optAsc);
-
-		const optDesc = document.createElement("option");
-		optDesc.value = "desc";
-		optDesc.textContent = "降順";
-		if (rule.direction === "desc") optDesc.selected = true;
-		selDir.appendChild(optDesc);
-
-		selDir.addEventListener("change", () => {
-			rule.direction = selDir.value as "asc" | "desc";
+		// 4. Direction Toggle Button
+		const isNumericField = ["year", "track", "size", "duration"].includes(rule.field);
+		const toggleBtn = document.createElement("button");
+		toggleBtn.type = "button";
+		toggleBtn.className = "w-8 h-6 flex items-center justify-center rounded border border-gray-650 bg-gray-800 text-[9px] font-bold text-indigo-400 hover:bg-gray-700 active:scale-95 transition cursor-pointer shrink-0";
+		toggleBtn.textContent = rule.direction === "asc" ? (isNumericField ? "0→9" : "A→Z") : isNumericField ? "9→0" : "Z→A";
+		toggleBtn.title = rule.direction === "asc" ? "昇順 (クリックで降順に変更)" : "降順 (クリックで昇順に変更)";
+		toggleBtn.addEventListener("click", () => {
+			rule.direction = rule.direction === "asc" ? "desc" : "asc";
 			saveProfileTabSortRules();
+			renderSortRules();
 			applyFilterAndRender();
 		});
-		row.appendChild(selDir);
+		row.appendChild(toggleBtn);
 
-		// 4. Move Up / Move Down buttons
+		// 5. Move Up / Move Down buttons
 		const moveBtnContainer = document.createElement("div");
-		moveBtnContainer.className = "flex flex-col space-y-0.5";
+		moveBtnContainer.className = "flex flex-col space-y-0.5 shrink-0";
 
 		const btnUp = document.createElement("button");
 		btnUp.className = `text-[8px] text-gray-500 hover:text-white transition focus:outline-none px-0.5 ${idx === 0 ? "opacity-30 pointer-events-none" : ""}`;
@@ -1981,9 +2252,9 @@ function renderSortRules() {
 
 		row.appendChild(moveBtnContainer);
 
-		// 5. Delete Button
+		// 6. Delete Button
 		const btnDel = document.createElement("button");
-		btnDel.className = "text-gray-500 hover:text-red-400 transition focus:outline-none px-1 py-0.5";
+		btnDel.className = "text-gray-500 hover:text-red-400 transition focus:outline-none px-1 py-0.5 shrink-0";
 		btnDel.innerHTML = '<i class="icon-trash-2 text-[10px]"></i>';
 		btnDel.addEventListener("click", (e) => {
 			e.stopPropagation();
@@ -2022,7 +2293,13 @@ function updateFilterUI() {
 
 function toggleStatusFilter(filterId: string) {
 	if (filterId === "total") {
-		state.activeStatusFilters = new Set(["missing", "updated", "synced", "phone_only", "path_warning"]);
+		const targetFilters = ["missing", "updated", "synced", "phone_only"];
+		const allEnabled = targetFilters.every((f) => state.activeStatusFilters.has(f));
+		if (allEnabled) {
+			targetFilters.forEach((f) => state.activeStatusFilters.delete(f));
+		} else {
+			targetFilters.forEach((f) => state.activeStatusFilters.add(f));
+		}
 	} else {
 		if (state.activeStatusFilters.has(filterId)) {
 			state.activeStatusFilters.delete(filterId);

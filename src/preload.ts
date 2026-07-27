@@ -8,7 +8,7 @@ contextBridge.exposeInMainWorld("api", {
 	deleteProfile: (id: string) => ipcRenderer.invoke("delete-profile", id),
 	getSettings: () => ipcRenderer.invoke("get-settings"),
 	saveSettings: (settings: any) => ipcRenderer.invoke("save-settings", settings),
-	resetCache: () => ipcRenderer.invoke("reset-cache"),
+	resetCache: (profileId: string) => ipcRenderer.invoke("reset-cache", profileId),
 	showContextMenu: (params: any) => ipcRenderer.send("show-context-menu", params),
 	getUsbDevices: () => ipcRenderer.invoke("get-usb-devices"),
 	getMtpDeviceNames: () => ipcRenderer.invoke("get-mtp-device-names"),

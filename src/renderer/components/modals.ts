@@ -1,5 +1,6 @@
 import { api } from "../api";
 import { state } from "../state";
+import { getCheckboxChangesCount, resetCheckboxesToDefault } from "./utils";
 
 // DOM Elements inside dialogs are registered and managed here
 export function initModals(cb: { renderProfileDropdown: () => void; selectProfile: (id: string) => void; renderActiveView: () => void; updateSummaryBar: () => void; startSyncExecution: () => void }) {
@@ -261,6 +262,21 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			exceptions,
 			devMode: elChkSettingsDevMode.checked,
 		};
+
+		const oldDelim = JSON.stringify(state.currentSettings.delimiters || []);
+		const newDelim = JSON.stringify(newSettings.delimiters || []);
+		const oldExc = JSON.stringify(state.currentSettings.exceptions || []);
+		const newExc = JSON.stringify(newSettings.exceptions || []);
+		const devModeChanged = state.currentSettings.devMode !== newSettings.devMode;
+
+		const normSettingsChanged = oldDelim !== newDelim || oldExc !== newExc || devModeChanged;
+
+		if (normSettingsChanged && getCheckboxChangesCount() > 0) {
+			const confirmed = await showCustomConfirm("設定の保存", "区切り文字や例外、開発者モードの設定変更により、現在の曲の選択状態がリセットされます。保存してもよろしいですか？");
+			if (!confirmed) return;
+			resetCheckboxesToDefault();
+		}
+
 		await api.saveSettings(newSettings);
 		state.currentSettings = newSettings;
 		updateDynamicColors(newSettings);
@@ -269,11 +285,15 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 	});
 
 	elBtnSettingsResetCache.addEventListener("click", async () => {
-		const confirmed = await showCustomConfirm("キャッシュの全削除", "スキャン結果キャッシュおよびサムネイル画像を全て削除（リセット）します。よろしいですか？");
+		if (!state.currentProfileId) {
+			await showCustomAlert("キャッシュの削除", "キャッシュを削除するには、先にプロファイルを選択してください。");
+			return;
+		}
+		const confirmed = await showCustomConfirm("キャッシュの削除", "選択中のプロファイルのスキャン結果キャッシュおよびサムネイル画像をすべて削除（リセット）します。よろしいですか？");
 		if (confirmed) {
 			try {
-				await api.resetCache();
-				await showCustomAlert("全削除完了", "キャッシュの全削除が完了しました。");
+				await api.resetCache(state.currentProfileId);
+				await showCustomAlert("削除完了", "選択中のプロファイルのキャッシュ削除が完了しました。");
 				elModalSettings.classList.add("hidden");
 				if (state.currentProfileId) {
 					const btnScan = document.getElementById("btn-scan");

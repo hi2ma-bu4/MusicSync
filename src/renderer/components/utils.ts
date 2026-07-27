@@ -146,15 +146,154 @@ export function splitAndNormalizeArtist(artist: string | null | undefined, delim
 	return finalParts.length > 0 ? finalParts : ["Unknown Artist"];
 }
 
+export function getAlbumArtistInfo(albumTracks: any[]): { name: string; type: "normal" | "unknown" | "various" } {
+	const albumartists = new Set<string>();
+	const artists = new Set<string>();
+
+	albumTracks.forEach((t) => {
+		const meta = t.itunesTrack || t.phoneTrack;
+		if (meta) {
+			if (meta.albumartist && meta.albumartist.trim()) {
+				albumartists.add(meta.albumartist.trim());
+			}
+			if (meta.artist && meta.artist.trim()) {
+				artists.add(meta.artist.trim());
+			}
+		}
+	});
+
+	if (albumartists.size > 0) {
+		if (albumartists.size === 1) {
+			return { name: Array.from(albumartists)[0], type: "normal" };
+		} else {
+			return { name: "様々なアーティスト", type: "various" };
+		}
+	}
+
+	if (artists.size === 1) {
+		return { name: Array.from(artists)[0], type: "normal" };
+	} else if (artists.size > 1) {
+		return { name: "様々なアーティスト", type: "various" };
+	} else {
+		return { name: "不明なアーティスト", type: "unknown" };
+	}
+}
+
+export function compareSortValues(valA: any, valB: any, field: string, direction: "asc" | "desc", isGroup = false, tracksA: any[] = [], tracksB: any[] = []): number {
+	const isUnset = (v: any) => v === undefined || v === null || String(v).trim() === "";
+
+	if (field === "artist" || field === "composer") {
+		const unsetA = isUnset(valA);
+		const unsetB = isUnset(valB);
+		if (unsetA && unsetB) return 0;
+		if (unsetA) return 1;
+		if (unsetB) return -1;
+	}
+
+	if (field === "albumartist") {
+		const getAlbumArtistCategory = (v: any, tracks: any[]) => {
+			if (isGroup && tracks.length > 0) {
+				const info = getAlbumArtistInfo(tracks);
+				if (info.type === "various") return { cat: 3, name: info.name };
+				if (info.type === "unknown") return { cat: 2, name: info.name };
+				return { cat: 1, name: info.name };
+			}
+			const str = String(v || "").trim();
+			if (str === "様々なアーティスト" || str === "Various Artists") {
+				return { cat: 3, name: str };
+			}
+			if (str === "不明なアーティスト" || str === "Unknown Artist" || str === "") {
+				return { cat: 2, name: str };
+			}
+			return { cat: 1, name: str };
+		};
+
+		const catA = getAlbumArtistCategory(valA, tracksA);
+		const catB = getAlbumArtistCategory(valB, tracksB);
+
+		if (catA.cat !== catB.cat) {
+			return catA.cat - catB.cat;
+		}
+		valA = catA.name;
+		valB = catB.name;
+	}
+
+	let cmp = 0;
+	if (typeof valA === "number" && typeof valB === "number") {
+		cmp = valA - valB;
+	} else {
+		cmp = String(valA || "").localeCompare(String(valB || ""), "ja");
+	}
+
+	return direction === "asc" ? cmp : -cmp;
+}
+
+export function getGroupSortValue(field: string, tracks: any[]): any {
+	if (field === "size") {
+		return tracks.reduce((sum, t) => sum + ((t.itunesTrack || t.phoneTrack)?.size || 0), 0);
+	}
+	if (field === "duration") {
+		return tracks.reduce((sum, t) => sum + ((t.itunesTrack || t.phoneTrack)?.duration || 0), 0);
+	}
+	if (field === "year") {
+		const years = tracks.map((t: any) => parseInt((t.itunesTrack || t.phoneTrack)?.year || "0", 10) || 0).filter((y: number) => y > 0);
+		return years.length > 0 ? Math.min(...years) : 0;
+	}
+	if (field === "track") {
+		const trackNos = tracks.map((t: any) => parseInt((t.itunesTrack || t.phoneTrack)?.track?.split("/")[0] || "0", 10) || 0).filter((n: number) => n > 0);
+		return trackNos.length > 0 ? Math.min(...trackNos) : 0;
+	}
+	if (field === "albumartist") {
+		const info = getAlbumArtistInfo(tracks);
+		return info.name;
+	}
+
+	const firstMeta = tracks[0]?.itunesTrack || tracks[0]?.phoneTrack;
+	if (!firstMeta) return "";
+
+	if (field === "artist") return firstMeta.artist || "";
+	if (field === "album") return firstMeta.album || "";
+	if (field === "genre") return firstMeta.genre || "";
+	if (field === "composer") return firstMeta.composer || "";
+	if (field === "relativePath") return firstMeta.relativePath || "";
+	if (field === "title") return firstMeta.title || "";
+	if (field === "status") return tracks[0]?.status || "";
+
+	return "";
+}
+
+export function compareGroups(tracksA: any[], tracksB: any[], rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[]): number {
+	const groupRules = rules.filter((r) => !r.target || r.target === "common" || r.target === "group");
+
+	for (const rule of groupRules) {
+		const valA = getGroupSortValue(rule.field, tracksA);
+		const valB = getGroupSortValue(rule.field, tracksB);
+
+		const cmp = compareSortValues(valA, valB, rule.field, rule.direction, true, tracksA, tracksB);
+		if (cmp !== 0) {
+			return cmp;
+		}
+	}
+
+	const metaA = tracksA[0]?.itunesTrack || tracksA[0]?.phoneTrack;
+	const metaB = tracksB[0]?.itunesTrack || tracksB[0]?.phoneTrack;
+	if (metaA && metaB) {
+		return (metaA.relativePath || "").localeCompare(metaB.relativePath || "", "ja");
+	}
+	return 0;
+}
+
 // Compare two track items using multi-column sort rules
-export function compareTracks(a: any, b: any, rules: { field: string; direction: "asc" | "desc" }[]): number {
+export function compareTracks(a: any, b: any, rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[]): number {
 	const ma = a.itunesTrack || a.phoneTrack;
 	const mb = b.itunesTrack || b.phoneTrack;
 	if (!ma && !mb) return 0;
 	if (!ma) return 1;
 	if (!mb) return -1;
 
-	for (const rule of rules) {
+	const trackRules = rules.filter((r) => !r.target || r.target === "common" || r.target === "track");
+
+	for (const rule of trackRules) {
 		let valA: any = "";
 		let valB: any = "";
 
@@ -167,29 +306,42 @@ export function compareTracks(a: any, b: any, rules: { field: string; direction:
 		} else if (rule.field === "album") {
 			valA = ma.album || "";
 			valB = mb.album || "";
+		} else if (rule.field === "albumartist") {
+			valA = ma.albumartist || "";
+			valB = mb.albumartist || "";
+		} else if (rule.field === "genre") {
+			valA = ma.genre || "";
+			valB = mb.genre || "";
+		} else if (rule.field === "composer") {
+			valA = ma.composer || "";
+			valB = mb.composer || "";
 		} else if (rule.field === "year") {
 			valA = parseInt(ma.year || "0", 10) || 0;
 			valB = parseInt(mb.year || "0", 10) || 0;
 		} else if (rule.field === "track") {
 			valA = parseInt(ma.track || "0", 10) || 0;
 			valB = parseInt(mb.track || "0", 10) || 0;
+		} else if (rule.field === "size") {
+			valA = ma.size || 0;
+			valB = mb.size || 0;
+		} else if (rule.field === "duration") {
+			valA = ma.duration || 0;
+			valB = mb.duration || 0;
+		} else if (rule.field === "relativePath") {
+			valA = ma.relativePath || "";
+			valB = mb.relativePath || "";
 		} else if (rule.field === "status") {
 			valA = a.status || "";
 			valB = b.status || "";
 		}
 
-		let cmp = 0;
-		if (typeof valA === "number" && typeof valB === "number") {
-			cmp = valA - valB;
-		} else {
-			cmp = String(valA).localeCompare(String(valB), "ja");
-		}
-
+		const cmp = compareSortValues(valA, valB, rule.field, rule.direction, false);
 		if (cmp !== 0) {
-			return rule.direction === "asc" ? cmp : -cmp;
+			return cmp;
 		}
 	}
-	return 0;
+
+	return (ma.relativePath || "").localeCompare(mb.relativePath || "", "ja");
 }
 
 const hwKatakanaMap: { [key: string]: string } = {
@@ -337,6 +489,48 @@ export function normalizeForSearch(name: string): string {
 
 	// 5. Convert to lowercase
 	return res.toLowerCase().trim();
+}
+
+export function getCheckboxChangesCount(): number {
+	let changes = 0;
+	state.scannedTracks.forEach((track) => {
+		if (track.status === "missing") {
+			if (state.checkedCopyTrackIds.has(track.id)) {
+				changes++;
+			}
+		} else if (track.status === "updated") {
+			if (!state.checkedCopyTrackIds.has(track.id)) {
+				changes++;
+			}
+		} else if (track.status === "synced" || track.status === "phone_only") {
+			if (state.checkedDeleteTrackIds.has(track.id)) {
+				changes++;
+			}
+		}
+
+		const defaultMove = !!(track.pathMismatch && (track.status === "synced" || track.status === "updated"));
+		const currentMove = state.checkedMoveTrackIds.has(track.id);
+		if (defaultMove !== currentMove) {
+			changes++;
+		}
+	});
+	return changes;
+}
+
+export function resetCheckboxesToDefault() {
+	state.checkedCopyTrackIds.clear();
+	state.checkedMoveTrackIds.clear();
+	state.checkedDeleteTrackIds.clear();
+	state.checkedDeleteItunesTrackIds.clear();
+
+	for (const track of state.scannedTracks) {
+		if (track.status === "updated") {
+			state.checkedCopyTrackIds.add(track.id);
+		}
+		if (track.pathMismatch && (track.status === "synced" || track.status === "updated")) {
+			state.checkedMoveTrackIds.add(track.id);
+		}
+	}
 }
 
 // Format bytes into GB, MB, etc.

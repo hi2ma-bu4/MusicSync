@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareGroups, compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
@@ -96,13 +96,12 @@ export function updateAllTreeCheckboxes() {
 	// 2. Sync all track checkboxes
 	const trackInputs = document.querySelectorAll(`input[id^="chk-track-"]`);
 	trackInputs.forEach((el: any) => {
-		// Since the ID format can be either `chk-track-${albumKey}-${t.id}` or `chk-track-${albumKey}-${discNum}-${t.id}`,
-		// we should retrieve the actual track ID from the end.
-		const parts = el.id.split("-");
-		const trackId = parts[parts.length - 1];
-		const track = trackMap.get(trackId);
-		if (track) {
-			el.checked = isTrackChecked(track);
+		const trackId = el.getAttribute("data-track-id");
+		if (trackId) {
+			const track = trackMap.get(trackId);
+			if (track) {
+				el.checked = isTrackChecked(track);
+			}
 		}
 	});
 
@@ -449,7 +448,7 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 
 	row.innerHTML = `
 		<label for="${trackCheckboxId}" class="flex items-center space-x-2 flex-1 min-w-0 cursor-pointer select-none">
-			<input type="checkbox" id="${trackCheckboxId}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
+			<input type="checkbox" id="${trackCheckboxId}" data-track-id="${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" ${isTrackChecked(t) ? "checked" : ""}>
 			<div class="flex items-center space-x-1 truncate">
 				<span class="text-gray-500 font-mono w-4 inline-block text-right">${meta.track ? meta.track + "." : ""}</span>
 				<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -659,16 +658,9 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	});
 
 	const sortedArtistKeys = Array.from(artistMap.keys()).sort((keyA, keyB) => {
-		const nameA = artistMap.get(keyA)!.displayName;
-		const nameB = artistMap.get(keyB)!.displayName;
-		const artistRule = state.sortRules.find((r) => r.field === "artist");
-		if (artistRule) {
-			const cmp = nameA.localeCompare(nameB, "ja");
-			return artistRule.direction === "asc" ? cmp : -cmp;
-		}
 		const tracksA = artistMap.get(keyA)!.tracks;
 		const tracksB = artistMap.get(keyB)!.tracks;
-		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+		return compareGroups(tracksA, tracksB, state.sortRules);
 	});
 
 	sortedArtistKeys.forEach((normalizedKey) => {
@@ -687,14 +679,9 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		});
 
 		const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
-			const albumRule = state.sortRules.find((r) => r.field === "album");
-			if (albumRule) {
-				const cmp = a.localeCompare(b, "ja");
-				return albumRule.direction === "asc" ? cmp : -cmp;
-			}
 			const tracksA = albumMap.get(a)!;
 			const tracksB = albumMap.get(b)!;
-			return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+			return compareGroups(tracksA, tracksB, state.sortRules);
 		});
 
 		const divArtist = document.createElement("div");
@@ -798,14 +785,9 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	});
 
 	const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
-		const albumRule = state.sortRules.find((r) => r.field === "album");
-		if (albumRule) {
-			const cmp = a.localeCompare(b, "ja");
-			return albumRule.direction === "asc" ? cmp : -cmp;
-		}
 		const tracksA = albumMap.get(a)!;
 		const tracksB = albumMap.get(b)!;
-		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+		return compareGroups(tracksA, tracksB, state.sortRules);
 	});
 
 	sortedAlbums.forEach((albumName) => {
@@ -922,14 +904,9 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 	});
 
 	const sortedGenres = Array.from(genreMap.keys()).sort((a, b) => {
-		const genreRule = state.sortRules.find((r) => r.field === "genre");
-		if (genreRule) {
-			const cmp = a.localeCompare(b, "ja");
-			return genreRule.direction === "asc" ? cmp : -cmp;
-		}
 		const tracksA = genreMap.get(a)!;
 		const tracksB = genreMap.get(b)!;
-		return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+		return compareGroups(tracksA, tracksB, state.sortRules);
 	});
 
 	sortedGenres.forEach((genreName) => {

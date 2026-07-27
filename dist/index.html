@@ -4,8 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-DMbUy--6.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-BBHNaLZj.css">
+  <script type="module" crossorigin src="./assets/js/index-DoZu9Utv.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-umlrpqVW.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.11</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.12</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -186,6 +186,12 @@
 
 				<!-- Compact Sort & Search on the Right -->
 				<div class="flex items-center space-x-2">
+					<!-- Reset Changes Button -->
+					<button id="btn-reset-changes" type="button" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer" disabled>
+						<i class="icon-refresh-cw text-xxs"></i>
+						<span>変更をリセット</span>
+					</button>
+
 					<!-- Notion-like Sort Button & Dropdown Panel -->
 					<div class="relative">
 						<button id="btn-sort-toggle" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none">
@@ -195,7 +201,7 @@
 						</button>
 
 						<!-- Notion-like Sort Dropdown Panel -->
-						<div id="sort-dropdown-panel" class="absolute right-0 mt-1 w-72 bg-gray-800 border border-gray-700 rounded shadow-xl p-3 z-50 text-xxs hidden flex-col space-y-2.5">
+						<div id="sort-dropdown-panel" class="absolute right-0 mt-1 w-[380px] bg-gray-800 border border-gray-700 rounded shadow-xl p-3 z-50 text-xxs hidden flex-col space-y-2.5">
 							<div class="flex items-center justify-between border-b border-gray-700 pb-1.5 gap-2">
 								<span class="font-bold text-gray-300 flex items-center space-x-1 shrink-0">
 									<i class="icon-sliders"></i>
@@ -261,27 +267,27 @@
 					<div class="h-8 bg-gray-800 border-b border-gray-700 flex items-center text-xxs font-semibold uppercase tracking-wider text-gray-400 sticky top-0 z-20">
 						<div class="flex-1 flex items-center w-full" id="table-header-row">
 							<!-- Checking column -->
-							<div class="shrink-0 text-center flex items-center justify-center" style="width: 50px;">
+							<div class="shrink-0 text-center flex items-center justify-center w-12.5">
 								<input id="chk-master" type="checkbox" class="rounded bg-gray-700 border-gray-600 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
 							</div>
 							<!-- Columns with resizing headers -->
-							<div class="shrink-0 px-2 relative truncate-cell" style="width: 250px;" id="th-title">
+							<div class="shrink-0 px-2 relative truncate-cell w-62.5" id="th-title">
 								<span>曲名</span>
 								<div class="resizer" id="resizer-title"></div>
 							</div>
-							<div class="shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-artist">
+							<div class="shrink-0 px-2 relative truncate-cell w-45" id="th-artist">
 								<span>アーティスト</span>
 								<div class="resizer" id="resizer-artist"></div>
 							</div>
-							<div class="shrink-0 px-2 relative truncate-cell" style="width: 180px;" id="th-album">
+							<div class="shrink-0 px-2 relative truncate-cell w-45" id="th-album">
 								<span>アルバム</span>
 								<div class="resizer" id="resizer-album"></div>
 							</div>
-							<div class="shrink-0 px-2 relative truncate-cell text-center" style="width: 60px;" id="th-track">
+							<div class="shrink-0 px-2 relative truncate-cell text-center w-15" id="th-track">
 								<span>トラック</span>
 								<div class="resizer" id="resizer-track"></div>
 							</div>
-							<div class="shrink-0 px-2 relative truncate-cell" style="width: 130px;" id="th-genre">
+							<div class="shrink-0 px-2 relative truncate-cell w-32.5" id="th-genre">
 								<span>ジャンル</span>
 								<div class="resizer" id="resizer-genre"></div>
 							</div>
@@ -331,7 +337,16 @@
 			<span id="stat-btn-path_warning" tabindex="0" class="cursor-pointer hover:text-white transition items-center space-x-1 px-1 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30 text-amber-400 font-medium hidden">
 				<span>⚠️ 配置不一致:</span> <strong id="cnt-path-warnings" class="font-mono">0</strong>
 			</span>
-			<span class="text-xxs border-l border-gray-700 pl-2">選択中: コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono">0</strong> / 削除 <strong id="cnt-checked-delete" class="text-red-400 font-mono">0</strong></span>
+			<span class="text-xxs border-l border-gray-700 pl-2 flex items-center gap-1.5 select-none shrink-0">
+				<span>選択中:</span>
+				<button id="toggle-filter-copy-update" type="button" class="transition-all px-1.5 py-0.5 rounded text-[10px] bg-gray-800/20 border border-gray-700/40 text-gray-400 hover:text-white cursor-pointer focus:outline-none" title="同期時に追加・更新されるファイルのみを表示">
+					コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono font-bold">0</strong>
+				</button>
+				<span class="text-gray-750">/</span>
+				<button id="toggle-filter-delete" type="button" class="transition-all px-1.5 py-0.5 rounded text-[10px] bg-gray-800/20 border border-gray-700/40 text-gray-400 hover:text-white cursor-pointer focus:outline-none" title="同期時に削除されるファイルのみを表示">
+					削除 <strong id="cnt-checked-delete" class="text-red-400 font-mono font-bold">0</strong>
+				</button>
+			</span>
 			<span id="stat-sizes-duration" class="text-xxs border-l border-gray-700 pl-2 text-gray-500">
 				現存 (比較先/iTunes): <strong id="val-total-stats" class="text-gray-300 font-mono">0B/0B (00:00:00/00:00:00)</strong>
 			</span>
@@ -647,7 +662,7 @@
 					</div>
 				</div>
 				<div class="w-full bg-gray-700 rounded-full h-2 overflow-hidden">
-					<div id="progress-bar-fill" class="bg-indigo-500 h-full transition-all duration-300" style="width: 0%"></div>
+					<div id="progress-bar-fill" class="bg-indigo-500 h-full transition-all duration-300 w-0"></div>
 				</div>
 			</div>
 

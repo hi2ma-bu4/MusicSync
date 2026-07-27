@@ -5,6 +5,9 @@
 		}
 	],
 	"settings": {
+		"files.associations": {
+			"*.css": "tailwindcss"
+		},
 		"search.exclude": {
 			"package-lock.json": true,
 			"**/node_modules": true,

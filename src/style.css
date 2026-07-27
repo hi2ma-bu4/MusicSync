@@ -1,100 +1,76 @@
 @import "tailwindcss";
 
-/* Custom scrollbars */
-::-webkit-scrollbar {
-	height: 6px;
-	width: 6px;
-}
+@layer base {
+	/* Custom scrollbars */
+	::-webkit-scrollbar {
+		@apply h-2 w-2;
+	}
 
-::-webkit-scrollbar-track {
-	background: #1f2937;
-}
+	::-webkit-scrollbar-track {
+		@apply bg-gray-800;
+	}
 
-::-webkit-scrollbar-thumb {
-	background: #4b5563;
-	border-radius: 3px;
-}
+	::-webkit-scrollbar-thumb {
+		@apply bg-gray-600 rounded-[3px];
+	}
 
-::-webkit-scrollbar-thumb:hover {
-	background: #6b7280;
-}
+	::-webkit-scrollbar-thumb:hover {
+		@apply bg-gray-500;
+	}
 
-/* Expand/Collapse transitions */
-.accordion-content {
-	max-height: 0;
-	overflow: hidden;
-	transition: max-height .2s ease-out;
-}
+	/* Expand/Collapse transitions */
+	.accordion-content {
+		@apply overflow-hidden max-h-0 transition-[max-height] duration-200 ease-out;
+	}
 
-.accordion-content.open {
-	max-height: 20000px;
-	transition: max-height .3s ease-in;
-}
+	.accordion-content.open {
+		@apply max-h-[20000px] transition-[max-height] duration-300 ease-in;
+	}
 
-/* Resizable table headers */
-.resizer {
-	cursor: col-resize;
-	height: 100%;
-	position: absolute;
-	right: 0;
-	top: 0;
-	user-select: none;
-	width: 4px;
-	z-index: 10;
-}
+	/* Resizable table headers */
+	.resizer {
+		@apply cursor-col-resize h-full absolute right-0 top-0 select-none w-1 z-10;
+	}
 
-.resizer:hover {
-	background-color: #6366f1;
-}
+	.resizer:hover {
+		@apply bg-indigo-500;
+	}
 
-/* Text truncation with ellipsis - OFF wrap */
-.truncate-cell {
-	overflow: hidden !important;
-	text-overflow: ellipsis !important;
-	white-space: nowrap !important;
-}
+	/* Text truncation with ellipsis - OFF wrap */
+	.truncate-cell {
+		@apply overflow-hidden! text-ellipsis! whitespace-nowrap!;
+	}
 
-/* Virtual Scroll viewport styles */
-#virtual-scroll-viewport {
-	height: 100%;
-	overflow-y: auto;
-	position: relative;
-}
+	/* Virtual Scroll viewport styles */
+	#virtual-scroll-viewport {
+		@apply relative h-full overflow-y-auto;
+	}
 
-#virtual-scroll-canvas {
-	left: 0;
-	pointer-events: none;
-	position: absolute;
-	right: 0;
-	top: 0;
-}
+	#virtual-scroll-canvas {
+		@apply absolute pointer-events-none left-0 right-0 top-0;
+	}
 
-#virtual-scroll-content {
-	display: flex;
-	flex-direction: column;
-	left: 0;
-	position: absolute;
-	right: 0;
-	top: 0;
-}
+	#virtual-scroll-content {
+		@apply flex flex-col absolute left-0 right-0 top-0;
+	}
 
-/* Indeterminate state styling */
-input[type="checkbox"]:indeterminate {
-	background-color: #4f46e5;
-	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M5 8h6'/%3E%3C/svg%3E");
-	border-color: #4f46e5;
-}
+	/* Indeterminate state styling */
+	input[type="checkbox"]:indeterminate {
+		@apply bg-indigo-600 border-indigo-600;
 
-/* Mini text size */
-.text-xxs {
-	font-size: .65rem;
-}
+		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M5 8h6'/%3E%3C/svg%3E");
+	}
 
-/* Focus outlines for keyboard accessibility */
-button:focus-visible,
-input:focus-visible,
-select:focus-visible,
-[tabindex="0"]:focus-visible {
-	outline: 2px solid #6366f1 !important;
-	outline-offset: 2px !important;
+	/* Mini text size */
+	.text-xxs {
+		@apply text-[0.65rem];
+	}
+
+	/* Focus outlines for keyboard accessibility */
+	button:focus-visible,
+	input:focus-visible,
+	select:focus-visible,
+	[tabindex="0"]:focus-visible {
+		@apply outline-2! outline-solid! outline-indigo-500! outline-offset-2!;
+	}
 }

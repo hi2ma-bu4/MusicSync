@@ -76,7 +76,7 @@ export interface WindowAPI {
 	deleteProfile: (id: string) => Promise<Profile[]>;
 	getSettings: () => Promise<Settings>;
 	saveSettings: (settings: Settings) => Promise<void>;
-	resetCache: () => Promise<void>;
+	resetCache: (profileId: string) => Promise<void>;
 	showContextMenu: (params: any) => void;
 	getUsbDevices: () => Promise<{ vendorId: number; productId: number; name: string }[]>;
 	getMtpDeviceNames: () => Promise<string[]>;

@@ -10,7 +10,7 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   deleteProfile: (id) => import_electron.ipcRenderer.invoke("delete-profile", id),
   getSettings: () => import_electron.ipcRenderer.invoke("get-settings"),
   saveSettings: (settings) => import_electron.ipcRenderer.invoke("save-settings", settings),
-  resetCache: () => import_electron.ipcRenderer.invoke("reset-cache"),
+  resetCache: (profileId) => import_electron.ipcRenderer.invoke("reset-cache", profileId),
   showContextMenu: (params) => import_electron.ipcRenderer.send("show-context-menu", params),
   getUsbDevices: () => import_electron.ipcRenderer.invoke("get-usb-devices"),
   getMtpDeviceNames: () => import_electron.ipcRenderer.invoke("get-mtp-device-names"),
