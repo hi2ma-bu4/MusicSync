@@ -139,46 +139,11 @@ const vsContent = document.getElementById("virtual-scroll-content")!;
 const showStatusContextMenu = (e: MouseEvent, statusId: string, statusLabel: string) => {
 	e.preventDefault();
 	e.stopPropagation();
-
-	const existing = document.getElementById("status-context-menu");
-	if (existing) existing.remove();
-
-	const menu = document.createElement("div");
-	menu.id = "status-context-menu";
-	menu.className = "absolute bg-gray-850 border border-gray-750 text-gray-200 text-xxs py-1 rounded shadow-2xl z-50 pointer-events-auto cursor-pointer";
-	menu.style.top = `${e.pageY}px`;
-	menu.style.left = `${e.pageX}px`;
-
-	const item = document.createElement("div");
-	item.className = "px-4 py-1.5 hover:bg-gray-700 transition";
-	if (statusId === "total") {
-		item.textContent = "すべて非表示にする";
-		item.addEventListener("click", () => {
-			state.activeStatusFilters.clear();
-			updateFilterUI();
-			applyFilterAndRender();
-			menu.remove();
-		});
-	} else {
-		item.textContent = `「${statusLabel}」以外を非表示にする`;
-		item.addEventListener("click", () => {
-			state.activeStatusFilters = new Set([statusId]);
-			updateFilterUI();
-			applyFilterAndRender();
-			menu.remove();
-		});
-	}
-
-	menu.appendChild(item);
-	document.body.appendChild(menu);
-
-	const closeMenu = () => {
-		menu.remove();
-		document.removeEventListener("click", closeMenu);
-	};
-	setTimeout(() => {
-		document.addEventListener("click", closeMenu);
-	}, 50);
+	api.showContextMenu({
+		isStatus: true,
+		statusId,
+		statusLabel,
+	});
 };
 
 async function init() {
@@ -238,7 +203,15 @@ async function init() {
 	setupStatusRightClick("stat-btn-path_warning", "path_warning", "配置不一致");
 
 	api.onContextMenuCommand((command, arg) => {
-		if (command === "play-track") {
+		if (command === "hide-all-status") {
+			state.activeStatusFilters.clear();
+			updateFilterUI();
+			applyFilterAndRender();
+		} else if (command === "isolate-status") {
+			state.activeStatusFilters = new Set([arg]);
+			updateFilterUI();
+			applyFilterAndRender();
+		} else if (command === "play-track") {
 			const track = state.scannedTracks.find((t) => t.id === arg);
 			if (track) {
 				playTrack(track);
@@ -2523,6 +2496,7 @@ function setupPlayerEventListeners() {
 			genre,
 			itunesFilePath: currentPlayingTrack.itunesTrack?.filePath,
 			phoneFilePath: currentPlayingTrack.phoneTrack?.filePath,
+			isPlayer: true,
 		});
 	};
 

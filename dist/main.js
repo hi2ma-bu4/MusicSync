@@ -2883,14 +2883,40 @@ function registerIpcHandlers() {
       const sendCommand = (command, arg) => {
         event.sender.send("context-menu-command", { command, arg });
       };
+      if (params.isStatus) {
+        if (params.statusId === "total") {
+          menu.append(
+            new MenuItem({
+              label: "\u3059\u3079\u3066\u975E\u8868\u793A\u306B\u3059\u308B",
+              click: () => sendCommand("hide-all-status", "")
+            })
+          );
+        } else {
+          menu.append(
+            new MenuItem({
+              label: `\u300C${params.statusLabel || ""}\u300D\u4EE5\u5916\u3092\u975E\u8868\u793A\u306B\u3059\u308B`,
+              click: () => sendCommand("isolate-status", params.statusId)
+            })
+          );
+        }
+        const win2 = event.sender.getOwnerBrowserWindow();
+        if (win2) {
+          menu.popup({ window: win2 });
+        } else {
+          menu.popup();
+        }
+        return;
+      }
       if (params.trackId) {
-        menu.append(
-          new MenuItem({
-            label: "\u30D7\u30EC\u30D3\u30E5\u30FC\u518D\u751F",
-            click: () => sendCommand("play-track", params.trackId)
-          })
-        );
-        menu.append(new MenuItem({ type: "separator" }));
+        if (!params.isPlayer) {
+          menu.append(
+            new MenuItem({
+              label: "\u30D7\u30EC\u30D3\u30E5\u30FC\u518D\u751F",
+              click: () => sendCommand("play-track", params.trackId)
+            })
+          );
+          menu.append(new MenuItem({ type: "separator" }));
+        }
       }
       if (params.genreSelectionState) {
         menu.append(

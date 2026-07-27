@@ -168,6 +168,10 @@ export function registerIpcHandlers() {
 				genre?: string;
 				itunesFilePath?: string;
 				phoneFilePath?: string;
+				isPlayer?: boolean;
+				isStatus?: boolean;
+				statusId?: string;
+				statusLabel?: string;
 				albumSelectionState?: {
 					canSelectAll: boolean;
 					canDeselectAll: boolean;
@@ -190,14 +194,41 @@ export function registerIpcHandlers() {
 				event.sender.send("context-menu-command", { command, arg });
 			};
 
+			if (params.isStatus) {
+				if (params.statusId === "total") {
+					menu.append(
+						new MenuItem({
+							label: "すべて非表示にする",
+							click: () => sendCommand("hide-all-status", ""),
+						}),
+					);
+				} else {
+					menu.append(
+						new MenuItem({
+							label: `「${params.statusLabel || ""}」以外を非表示にする`,
+							click: () => sendCommand("isolate-status", params.statusId!),
+						}),
+					);
+				}
+				const win = (event as any).sender.getOwnerBrowserWindow();
+				if (win) {
+					menu.popup({ window: win });
+				} else {
+					menu.popup();
+				}
+				return;
+			}
+
 			if (params.trackId) {
-				menu.append(
-					new MenuItem({
-						label: "プレビュー再生",
-						click: () => sendCommand("play-track", params.trackId!),
-					}),
-				);
-				menu.append(new MenuItem({ type: "separator" }));
+				if (!params.isPlayer) {
+					menu.append(
+						new MenuItem({
+							label: "プレビュー再生",
+							click: () => sendCommand("play-track", params.trackId!),
+						}),
+					);
+					menu.append(new MenuItem({ type: "separator" }));
+				}
 			}
 
 			if (params.genreSelectionState) {
