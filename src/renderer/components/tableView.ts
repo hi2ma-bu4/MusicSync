@@ -62,14 +62,7 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 				<div class="shrink-0 text-center flex items-center justify-center vs-chk-cell w-12.5">
 					<input type="checkbox" data-id="${t.id}" class="vs-row-checkbox rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${rowChecked ? "checked" : ""}>
 				</div>
-				<div class="shrink-0 flex items-center justify-center track-play-btn-container w-6" data-row-key="${trackRowKey}">
-					<button type="button" class="track-play-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="再生" data-row-key="${trackRowKey}">
-						<svg class="w-2.5 h-2.5 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-					</button>
-					<button type="button" class="track-pause-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="一時停止" data-row-key="${trackRowKey}">
-						<svg class="w-2.5 h-2.5 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-					</button>
-				</div>
+				<div class="shrink-0 flex items-center justify-center track-play-btn-container w-6" data-row-key="${trackRowKey}"></div>
 				<div class="shrink-0 px-2 truncate-cell font-medium text-gray-200" style="width: ${widthTitle}; min-width: ${widthTitle}; max-width: ${widthTitle};" title="${meta.title}">${meta.title}</div>
 				<div class="shrink-0 px-2 truncate-cell text-gray-400" style="width: ${widthArtist}; min-width: ${widthArtist}; max-width: ${widthArtist};" title="${meta.artist}">${meta.artist}</div>
 				<div class="shrink-0 px-2 truncate-cell text-gray-400" style="width: ${widthAlbum}; min-width: ${widthAlbum}; max-width: ${widthAlbum};" title="${meta.album}">${meta.album}</div>
@@ -84,6 +77,12 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 
 	vsContent.innerHTML = rowsHtml;
 
+	vsContent.querySelectorAll(".vs-row").forEach((row: any) => {
+		if (typeof (window as any).updateTrackRowButtons === "function") {
+			(window as any).updateTrackRowButtons(row);
+		}
+	});
+
 	document.querySelectorAll(".vs-row-checkbox").forEach((el: any) => {
 		el.addEventListener("change", () => {
 			const id = el.getAttribute("data-id");
@@ -94,28 +93,6 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 			setTrackCheckedState(track, el.checked);
 			cb.updateSummaryBar();
 			cb.updateMasterCheckboxState();
-		});
-	});
-
-	document.querySelectorAll(".track-play-btn").forEach((btn: any) => {
-		const id = btn.getAttribute("data-row-key").substring("chk-track-table-".length);
-		const t = state.filteredTracks.find((x) => x.id === id);
-		btn.addEventListener("click", (e: MouseEvent) => {
-			e.stopPropagation();
-			e.preventDefault();
-			if (t && typeof (window as any).playTrackWithRowKey === "function") {
-				(window as any).playTrackWithRowKey(t, `chk-track-table-${id}`);
-			}
-		});
-	});
-
-	document.querySelectorAll(".track-pause-btn").forEach((btn: any) => {
-		btn.addEventListener("click", (e: MouseEvent) => {
-			e.stopPropagation();
-			e.preventDefault();
-			if (typeof (window as any).togglePlayPause === "function") {
-				(window as any).togglePlayPause();
-			}
 		});
 	});
 

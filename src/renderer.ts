@@ -1882,6 +1882,52 @@ function setupEventListeners() {
 			});
 		}
 	});
+
+	document.addEventListener("click", (e) => {
+		const playBtn = (e.target as HTMLElement).closest(".track-play-btn") as HTMLElement;
+		if (playBtn) {
+			e.stopPropagation();
+			e.preventDefault();
+			const row = playBtn.closest(".track-row, .vs-row") as HTMLElement;
+			const trackId = row ? row.getAttribute("data-track-id") : null;
+			const rowKey = playBtn.getAttribute("data-row-key");
+			if (trackId && rowKey) {
+				const track = state.scannedTracks.find((x) => x.id === trackId);
+				if (track && typeof (window as any).playTrackWithRowKey === "function") {
+					(window as any).playTrackWithRowKey(track, rowKey);
+				}
+			}
+			return;
+		}
+
+		const pauseBtn = (e.target as HTMLElement).closest(".track-pause-btn") as HTMLElement;
+		if (pauseBtn) {
+			e.stopPropagation();
+			e.preventDefault();
+			if (typeof (window as any).togglePlayPause === "function") {
+				(window as any).togglePlayPause();
+			}
+			return;
+		}
+	});
+
+	document.addEventListener("mouseover", (e) => {
+		const row = (e.target as HTMLElement).closest(".track-row, .vs-row") as HTMLElement;
+		if (row) {
+			if (typeof (window as any).updateTrackRowButtons === "function") {
+				(window as any).updateTrackRowButtons(row);
+			}
+		}
+	});
+
+	document.addEventListener("mouseout", (e) => {
+		const row = (e.target as HTMLElement).closest(".track-row, .vs-row") as HTMLElement;
+		if (row) {
+			if (typeof (window as any).updateTrackRowButtons === "function") {
+				(window as any).updateTrackRowButtons(row);
+			}
+		}
+	});
 }
 
 function startSyncExecution() {
@@ -2877,18 +2923,85 @@ function playTrackInternal(track: ScanResultItem) {
 	updatePlayPauseButtonUI();
 }
 
+function updateTrackRowButtons(row: HTMLElement) {
+	const container = row.querySelector(".track-play-btn-container") as HTMLElement;
+	if (!container) return;
+
+	const rowKey = container.getAttribute("data-row-key");
+	if (!rowKey) return;
+
+	const isHovered = row.matches(":hover");
+	const isActive = state.currentPlayingRowKey === rowKey;
+
+	const needsButtons = isHovered || isActive;
+
+	if (needsButtons) {
+		let btnPlay = container.querySelector(".track-play-btn") as HTMLElement;
+		let btnPause = container.querySelector(".track-pause-btn") as HTMLElement;
+
+		if (!btnPlay) {
+			const isTreeView = row.classList.contains("track-row");
+			const svgSize = isTreeView ? "w-4 h-4" : "w-2.5 h-2.5";
+
+			btnPlay = document.createElement("button");
+			btnPlay.setAttribute("type", "button");
+			btnPlay.className = "track-play-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4";
+			btnPlay.setAttribute("title", "再生");
+			btnPlay.setAttribute("data-row-key", rowKey);
+			btnPlay.innerHTML = `<svg class="${svgSize} fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+
+			btnPause = document.createElement("button");
+			btnPause.setAttribute("type", "button");
+			btnPause.className = "track-pause-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4";
+			btnPause.setAttribute("title", "一時停止");
+			btnPause.setAttribute("data-row-key", rowKey);
+			btnPause.innerHTML = `<svg class="${svgSize} fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+
+			container.appendChild(btnPlay);
+			container.appendChild(btnPause);
+		}
+
+		const lblNum = container.querySelector(".track-number-lbl") as HTMLElement;
+		if (lblNum) {
+			lblNum.classList.add("hidden");
+		}
+
+		const isPlaying = isActive && state.isPlaying;
+		if (isPlaying) {
+			btnPlay.classList.add("hidden");
+			btnPause.classList.remove("hidden");
+		} else {
+			btnPlay.classList.remove("hidden");
+			btnPause.classList.add("hidden");
+		}
+	} else {
+		const btnPlay = container.querySelector(".track-play-btn");
+		const btnPause = container.querySelector(".track-pause-btn");
+		if (btnPlay) btnPlay.remove();
+		if (btnPause) btnPause.remove();
+
+		const lblNum = container.querySelector(".track-number-lbl") as HTMLElement;
+		if (lblNum) {
+			lblNum.classList.remove("hidden");
+		}
+	}
+}
+(window as any).updateTrackRowButtons = updateTrackRowButtons;
+
 function updatePlayingRowUI() {
-	// Remove playing/paused classes from all previous rows
-	document.querySelectorAll(".track-row.is-playing, .track-row.is-paused, .vs-row.is-playing, .vs-row.is-paused").forEach((el) => {
+	const previouslyPlayingRows: HTMLElement[] = [];
+	document.querySelectorAll(".track-row.is-playing, .track-row.is-paused, .vs-row.is-playing, .vs-row.is-paused").forEach((el: any) => {
+		previouslyPlayingRows.push(el);
 		el.classList.remove("is-playing", "is-paused");
 	});
 
-	// Add appropriate class to the currently active row
+	let currentlyPlayingRow: HTMLElement | null = null;
 	if (state.currentPlayingRowKey) {
 		const container = document.querySelector(`.track-play-btn-container[data-row-key="${state.currentPlayingRowKey}"]`);
 		if (container) {
-			const row = container.closest(".track-row, .vs-row");
+			const row = container.closest(".track-row, .vs-row") as HTMLElement;
 			if (row) {
+				currentlyPlayingRow = row;
 				if (state.isPlaying) {
 					row.classList.add("is-playing");
 				} else {
@@ -2896,6 +3009,13 @@ function updatePlayingRowUI() {
 				}
 			}
 		}
+	}
+
+	previouslyPlayingRows.forEach((row) => {
+		updateTrackRowButtons(row);
+	});
+	if (currentlyPlayingRow && !previouslyPlayingRows.includes(currentlyPlayingRow)) {
+		updateTrackRowButtons(currentlyPlayingRow);
 	}
 }
 

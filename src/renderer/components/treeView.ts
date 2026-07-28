@@ -461,12 +461,6 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 			<input type="checkbox" id="${trackCheckboxId}" data-track-id="${t.id}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer" ${isTrackChecked(t) ? "checked" : ""}>
 			<div class="track-play-btn-container w-4 h-4 flex items-center justify-center shrink-0" data-row-key="${trackCheckboxId}">
 				<span class="track-number-lbl text-gray-500 font-mono text-right w-full">${meta.track ? meta.track + "." : ""}</span>
-				<button type="button" class="track-play-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="再生" data-row-key="${trackCheckboxId}">
-					<svg class="w-4 h-4 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
-				</button>
-				<button type="button" class="track-pause-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="一時停止" data-row-key="${trackCheckboxId}">
-					<svg class="w-4 h-4 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
-				</button>
 			</div>
 			<label for="${trackCheckboxId}" class="flex-1 truncate cursor-pointer select-none">
 				<span class="font-medium text-gray-200 truncate" title="${meta.title}">${meta.title}</span>
@@ -481,6 +475,10 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 
 	elTracksChildren.appendChild(row);
 
+	if (typeof (window as any).updateTrackRowButtons === "function") {
+		(window as any).updateTrackRowButtons(row);
+	}
+
 	const chkTrack = document.getElementById(trackCheckboxId) as HTMLInputElement;
 	chkTrack.addEventListener("change", () => {
 		pushHistoryState();
@@ -489,29 +487,6 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 		cb.updateSummaryBar();
 		cb.updateMasterCheckboxState();
 	});
-
-	const btnPlay = row.querySelector(".track-play-btn") as HTMLButtonElement;
-	const btnPause = row.querySelector(".track-pause-btn") as HTMLButtonElement;
-
-	if (btnPlay) {
-		btnPlay.addEventListener("click", (e) => {
-			e.stopPropagation();
-			e.preventDefault();
-			if (typeof (window as any).playTrackWithRowKey === "function") {
-				(window as any).playTrackWithRowKey(t, trackCheckboxId);
-			}
-		});
-	}
-
-	if (btnPause) {
-		btnPause.addEventListener("click", (e) => {
-			e.stopPropagation();
-			e.preventDefault();
-			if (typeof (window as any).togglePlayPause === "function") {
-				(window as any).togglePlayPause();
-			}
-		});
-	}
 }
 
 // Lazy renders tracks inside an Album
