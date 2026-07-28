@@ -50,11 +50,25 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 		if (!meta) return;
 
 		const rowChecked = isTrackChecked(t);
+		const trackRowKey = `chk-track-table-${t.id}`;
+
+		let rowPlayingClass = "";
+		if (state.currentPlayingRowKey === trackRowKey) {
+			rowPlayingClass = state.isPlaying ? "is-playing" : "is-paused";
+		}
 
 		rowsHtml += `
-			<div class="vs-row flex items-center text-xxs border-b border-gray-800 hover:bg-gray-800 hover:bg-opacity-40 transition-colors bg-${t.status} select-none pointer-events-auto cursor-pointer context-track" data-track-id="${t.id}" data-title="${meta.title || ""}" data-artist="${meta.artist || ""}" data-album="${meta.album || ""}" data-genre="${meta.genre || ""}" style="height: ${rowHeight}px;">
+			<div class="vs-row flex items-center text-xxs border-b border-gray-800 hover:bg-gray-800 hover:bg-opacity-40 transition-colors bg-${t.status} select-none pointer-events-auto cursor-pointer context-track ${rowPlayingClass}" data-track-id="${t.id}" data-title="${meta.title || ""}" data-artist="${meta.artist || ""}" data-album="${meta.album || ""}" data-genre="${meta.genre || ""}" style="height: ${rowHeight}px;">
 				<div class="shrink-0 text-center flex items-center justify-center vs-chk-cell w-12.5">
 					<input type="checkbox" data-id="${t.id}" class="vs-row-checkbox rounded bg-gray-700 border-gray-650 text-indigo-500 focus:ring-indigo-400 h-3.5 w-3.5" ${rowChecked ? "checked" : ""}>
+				</div>
+				<div class="shrink-0 flex items-center justify-center track-play-btn-container w-6" data-row-key="${trackRowKey}">
+					<button type="button" class="track-play-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="再生" data-row-key="${trackRowKey}">
+						<svg class="w-2.5 h-2.5 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>
+					</button>
+					<button type="button" class="track-pause-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4" title="一時停止" data-row-key="${trackRowKey}">
+						<svg class="w-2.5 h-2.5 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>
+					</button>
 				</div>
 				<div class="shrink-0 px-2 truncate-cell font-medium text-gray-200" style="width: ${widthTitle}; min-width: ${widthTitle}; max-width: ${widthTitle};" title="${meta.title}">${meta.title}</div>
 				<div class="shrink-0 px-2 truncate-cell text-gray-400" style="width: ${widthArtist}; min-width: ${widthArtist}; max-width: ${widthArtist};" title="${meta.artist}">${meta.artist}</div>
@@ -83,9 +97,31 @@ export function renderVirtualTracks(vsViewport: HTMLElement, vsCanvas: HTMLEleme
 		});
 	});
 
+	document.querySelectorAll(".track-play-btn").forEach((btn: any) => {
+		const id = btn.getAttribute("data-row-key").substring("chk-track-table-".length);
+		const t = state.filteredTracks.find((x) => x.id === id);
+		btn.addEventListener("click", (e: MouseEvent) => {
+			e.stopPropagation();
+			e.preventDefault();
+			if (t && typeof (window as any).playTrackWithRowKey === "function") {
+				(window as any).playTrackWithRowKey(t, `chk-track-table-${id}`);
+			}
+		});
+	});
+
+	document.querySelectorAll(".track-pause-btn").forEach((btn: any) => {
+		btn.addEventListener("click", (e: MouseEvent) => {
+			e.stopPropagation();
+			e.preventDefault();
+			if (typeof (window as any).togglePlayPause === "function") {
+				(window as any).togglePlayPause();
+			}
+		});
+	});
+
 	document.querySelectorAll(".vs-row").forEach((row: any) => {
 		row.addEventListener("click", (e: MouseEvent) => {
-			if ((e.target as HTMLElement).closest("input") || (e.target as HTMLElement).closest(".warn-icon")) {
+			if ((e.target as HTMLElement).closest("input") || (e.target as HTMLElement).closest(".warn-icon") || (e.target as HTMLElement).closest(".track-play-btn-container")) {
 				return;
 			}
 			const chk = row.querySelector(".vs-row-checkbox") as HTMLInputElement;

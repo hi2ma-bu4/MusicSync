@@ -43,3 +43,10 @@ await build({
 	entryPoints: ["src/preload.ts"],
 	outfile: "dist/preload.js",
 });
+
+await build({
+	...common,
+	format: "esm",
+	entryPoints: ["src/main/metadataWorker.ts"],
+	outfile: "dist/metadataWorker.js",
+});

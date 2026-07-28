@@ -3227,6 +3227,38 @@ function registerIpcHandlers() {
     }
     return await runSync(profile, options, event);
   });
+  async function parseMetadataWithWorker(filePath) {
+    const { Worker } = await import("node:worker_threads");
+    return new Promise((resolve, reject) => {
+      try {
+        const workerPath = path6.join(app2.getAppPath(), "dist", "metadataWorker.js");
+        const worker = new Worker(workerPath);
+        worker.on("message", (msg) => {
+          if (msg.success) {
+            resolve({
+              pictureData: msg.pictureData ? Uint8Array.from(msg.pictureData) : null,
+              pictureFormat: msg.pictureFormat || null
+            });
+          } else {
+            reject(new Error(msg.error || "Worker failed"));
+          }
+          worker.terminate();
+        });
+        worker.on("error", (err) => {
+          reject(err);
+          worker.terminate();
+        });
+        worker.on("exit", (code) => {
+          if (code !== 0) {
+            reject(new Error(`Worker stopped with exit code ${code}`));
+          }
+        });
+        worker.postMessage({ filePath, taskId: "1" });
+      } catch (e) {
+        reject(e);
+      }
+    });
+  }
   ipcMain.handle("get-thumbnail", async (_event, profileId, albumName) => {
     try {
       if (!profileId || !albumName) return null;
@@ -3258,17 +3290,15 @@ function registerIpcHandlers() {
         }
       }
       if (needRegenerate) {
-        const { parseFile: parseFile2 } = await import("music-metadata");
         const { nativeImage: nativeImage2 } = await import("electron");
         if (!fs5.existsSync(track.filePath)) {
           return null;
         }
-        const metadata = await parseFile2(track.filePath, { skipCovers: false });
-        const picture = metadata.common.picture && metadata.common.picture[0];
-        if (!picture) {
+        const result = await parseMetadataWithWorker(track.filePath);
+        if (!result.pictureData) {
           return null;
         }
-        const img = nativeImage2.createFromBuffer(Buffer.from(picture.data));
+        const img = nativeImage2.createFromBuffer(Buffer.from(result.pictureData));
         const resized = img.resize({ width: 150, height: 150, quality: "better" });
         const pngBuf = resized.toPNG();
         fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
@@ -3294,23 +3324,21 @@ function registerIpcHandlers() {
       }
       const track = trackItem.itunesTrack || trackItem.phoneTrack;
       if (!track || !fs5.existsSync(track.filePath)) return false;
-      const { parseFile: parseFile2 } = await import("music-metadata");
-      const metadata = await parseFile2(track.filePath, { skipCovers: false });
-      const picture = metadata.common.picture && metadata.common.picture[0];
-      if (!picture) {
+      const result = await parseMetadataWithWorker(track.filePath);
+      if (!result.pictureData) {
         return false;
       }
       let ext = "png";
-      if (picture.format) {
-        if (picture.format.includes("jpeg") || picture.format.includes("jpg")) {
+      if (result.pictureFormat) {
+        if (result.pictureFormat.includes("jpeg") || result.pictureFormat.includes("jpg")) {
           ext = "jpg";
-        } else if (picture.format.includes("png")) {
+        } else if (result.pictureFormat.includes("png")) {
           ext = "png";
-        } else if (picture.format.includes("gif")) {
+        } else if (result.pictureFormat.includes("gif")) {
           ext = "gif";
-        } else if (picture.format.includes("webp")) {
+        } else if (result.pictureFormat.includes("webp")) {
           ext = "webp";
-        } else if (picture.format.includes("bmp")) {
+        } else if (result.pictureFormat.includes("bmp")) {
           ext = "bmp";
         }
       }
@@ -3321,8 +3349,8 @@ function registerIpcHandlers() {
         fs5.mkdirSync(tempDir, { recursive: true });
       }
       const filePath = path6.join(tempDir, filename);
-      fs5.writeFileSync(filePath, Buffer.from(picture.data));
-      const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+      fs5.writeFileSync(filePath, Buffer.from(result.pictureData));
+      const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
       if (process.platform === "win32") {
         const { execFile } = await import("node:child_process");
         const scriptText = `

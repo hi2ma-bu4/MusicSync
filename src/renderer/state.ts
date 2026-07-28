@@ -15,6 +15,8 @@ export const state = {
 	searchQuery: "",
 	filterCopyUpdateActive: false,
 	filterDeleteActive: false,
+	currentPlayingRowKey: null as string | null,
+	isPlaying: false,
 	tabScrollPositions: {
 		artist: 0,
 		album: 0,

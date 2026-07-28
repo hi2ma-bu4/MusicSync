@@ -753,6 +753,12 @@ function renderSearchCombobox() {
 }
 
 function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", targetName: string) {
+	// Close detailed metadata modal if open
+	const modalDetail = document.getElementById("modal-detail");
+	if (modalDetail) {
+		modalDetail.classList.add("hidden");
+	}
+
 	// Clear search query on jump navigation
 	elTxtSearch.value = "";
 	state.searchQuery = "";
@@ -2612,12 +2618,19 @@ function setupLongPressHandlers() {
 	});
 }
 
-function getActiveTabPlaylist(): ScanResultItem[] {
-	if (state.activeTab === "track") {
-		return [...state.filteredTracks];
-	}
+let currentPlaylistRowKeys: string[] = [];
 
+function getActiveTabPlaylist(): { playlist: ScanResultItem[]; rowKeys: string[] } {
 	const playlist: ScanResultItem[] = [];
+	const rowKeys: string[] = [];
+
+	if (state.activeTab === "track") {
+		state.filteredTracks.forEach((t) => {
+			playlist.push(t);
+			rowKeys.push(`chk-track-table-${t.id}`);
+		});
+		return { playlist, rowKeys };
+	}
 
 	if (state.activeTab === "artist") {
 		const artistMap = new Map<string, { displayName: string; tracks: ScanResultItem[] }>();
@@ -2649,6 +2662,7 @@ function getActiveTabPlaylist(): ScanResultItem[] {
 
 		sortedArtistKeys.forEach((normalizedKey) => {
 			const group = artistMap.get(normalizedKey)!;
+			const artistName = group.displayName;
 			const artistTracks = group.tracks;
 
 			const albumMap = new Map<string, ScanResultItem[]>();
@@ -2673,7 +2687,23 @@ function getActiveTabPlaylist(): ScanResultItem[] {
 			sortedAlbums.forEach((albumName) => {
 				const albumTracks = albumMap.get(albumName)!;
 				albumTracks.sort((a, b) => compareTracks(a, b, state.sortRules));
-				playlist.push(...albumTracks);
+
+				const albumKey = getSafeId("artistalbum", artistName + "_" + albumName);
+				const maxDisc = albumTracks.reduce((max, t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					const discNum = parseInt(meta?.disc || "1", 10) || 1;
+					return Math.max(max, discNum);
+				}, 1);
+				const hasMultipleDiscs = maxDisc >= 2;
+
+				albumTracks.forEach((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					const discNum = parseInt(meta?.disc || "1", 10) || 1;
+					const rowKey = hasMultipleDiscs ? `chk-track-${albumKey}-${discNum}-${t.id}` : `chk-track-${albumKey}-${t.id}`;
+
+					playlist.push(t);
+					rowKeys.push(rowKey);
+				});
 			});
 		});
 	} else if (state.activeTab === "album") {
@@ -2699,10 +2729,26 @@ function getActiveTabPlaylist(): ScanResultItem[] {
 		sortedAlbums.forEach((albumName) => {
 			const albumTracks = albumMap.get(albumName)!;
 			albumTracks.sort((a, b) => compareTracks(a, b, state.sortRules));
-			playlist.push(...albumTracks);
+
+			const albumKey = getSafeId("album", albumName);
+			const maxDisc = albumTracks.reduce((max, t) => {
+				const meta = t.itunesTrack || t.phoneTrack;
+				const discNum = parseInt(meta?.disc || "1", 10) || 1;
+				return Math.max(max, discNum);
+			}, 1);
+			const hasMultipleDiscs = maxDisc >= 2;
+
+			albumTracks.forEach((t) => {
+				const meta = t.itunesTrack || t.phoneTrack;
+				const discNum = parseInt(meta?.disc || "1", 10) || 1;
+				const rowKey = hasMultipleDiscs ? `chk-track-${albumKey}-${discNum}-${t.id}` : `chk-track-${albumKey}-${t.id}`;
+
+				playlist.push(t);
+				rowKeys.push(rowKey);
+			});
 		});
 	} else if (state.activeTab === "genre") {
-		const genreMap = new Map<string, ScanResultItem[]>();
+		const genreMap = new Map<string, any[]>();
 		state.filteredTracks.forEach((t) => {
 			const meta = t.itunesTrack || t.phoneTrack;
 			const genreName = (meta && meta.genre) || "Unknown Genre";
@@ -2724,23 +2770,58 @@ function getActiveTabPlaylist(): ScanResultItem[] {
 		sortedGenres.forEach((genreName) => {
 			const genreTracks = genreMap.get(genreName)!;
 			genreTracks.sort((a, b) => compareTracks(a, b, state.sortRules));
-			playlist.push(...genreTracks);
+
+			const genreKey = getSafeId("genre", genreName);
+			const maxDisc = genreTracks.reduce((max, t) => {
+				const meta = t.itunesTrack || t.phoneTrack;
+				const discNum = parseInt(meta?.disc || "1", 10) || 1;
+				return Math.max(max, discNum);
+			}, 1);
+			const hasMultipleDiscs = maxDisc >= 2;
+
+			genreTracks.forEach((t) => {
+				const meta = t.itunesTrack || t.phoneTrack;
+				const discNum = parseInt(meta?.disc || "1", 10) || 1;
+				const rowKey = hasMultipleDiscs ? `chk-track-${genreKey}-${discNum}-${t.id}` : `chk-track-${genreKey}-${t.id}`;
+
+				playlist.push(t);
+				rowKeys.push(rowKey);
+			});
 		});
 	}
 
-	return playlist;
+	return { playlist, rowKeys };
 }
 
-function playTrack(track: ScanResultItem) {
+function playTrack(track: ScanResultItem, preferredRowKey?: string) {
 	// Snapshot the current active tab's playlist state at the moment of playing
-	currentPlaylist = getActiveTabPlaylist();
-	currentPlaylistIndex = currentPlaylist.findIndex((t) => t.id === track.id);
+	const res = getActiveTabPlaylist();
+	currentPlaylist = res.playlist;
+	currentPlaylistRowKeys = res.rowKeys;
+
+	if (preferredRowKey) {
+		currentPlaylistIndex = currentPlaylistRowKeys.indexOf(preferredRowKey);
+	} else {
+		currentPlaylistIndex = currentPlaylist.findIndex((t) => t.id === track.id);
+	}
+
 	if (currentPlaylistIndex === -1) {
 		currentPlaylist = [track];
+		currentPlaylistRowKeys = [preferredRowKey || `chk-track-table-${track.id}`];
 		currentPlaylistIndex = 0;
 	}
+
+	state.currentPlayingRowKey = currentPlaylistRowKeys[currentPlaylistIndex] || null;
+	state.isPlaying = true;
+
 	playTrackInternal(track);
 }
+
+function playTrackWithRowKey(track: ScanResultItem, rowKey: string) {
+	playTrack(track, rowKey);
+}
+(window as any).playTrackWithRowKey = playTrackWithRowKey;
+(window as any).togglePlayPause = togglePlayPause;
 
 function encodeHex(str: string): string {
 	return Array.from(new TextEncoder().encode(str))
@@ -2796,6 +2877,28 @@ function playTrackInternal(track: ScanResultItem) {
 	updatePlayPauseButtonUI();
 }
 
+function updatePlayingRowUI() {
+	// Remove playing/paused classes from all previous rows
+	document.querySelectorAll(".track-row.is-playing, .track-row.is-paused, .vs-row.is-playing, .vs-row.is-paused").forEach((el) => {
+		el.classList.remove("is-playing", "is-paused");
+	});
+
+	// Add appropriate class to the currently active row
+	if (state.currentPlayingRowKey) {
+		const container = document.querySelector(`.track-play-btn-container[data-row-key="${state.currentPlayingRowKey}"]`);
+		if (container) {
+			const row = container.closest(".track-row, .vs-row");
+			if (row) {
+				if (state.isPlaying) {
+					row.classList.add("is-playing");
+				} else {
+					row.classList.add("is-paused");
+				}
+			}
+		}
+	}
+}
+
 function setupAudioEventListeners(audio: HTMLAudioElement) {
 	const seekbar = document.getElementById("player-seekbar") as HTMLInputElement;
 	const txtCurrent = document.getElementById("player-time-current")!;
@@ -2817,11 +2920,15 @@ function setupAudioEventListeners(audio: HTMLAudioElement) {
 	});
 
 	audio.addEventListener("play", () => {
+		state.isPlaying = true;
 		updatePlayPauseButtonUI();
+		updatePlayingRowUI();
 	});
 
 	audio.addEventListener("pause", () => {
+		state.isPlaying = false;
 		updatePlayPauseButtonUI();
+		updatePlayingRowUI();
 	});
 
 	audio.addEventListener("error", (e) => {
@@ -2847,7 +2954,9 @@ function handleTrackEnded() {
 			audioElement.currentTime = 0;
 			audioElement.pause();
 		}
+		state.isPlaying = false;
 		updatePlayPauseButtonUI();
+		updatePlayingRowUI();
 	}
 }
 
@@ -2859,6 +2968,7 @@ function playNextTrack() {
 	}
 	const nextTrack = currentPlaylist[currentPlaylistIndex];
 	if (nextTrack) {
+		state.currentPlayingRowKey = currentPlaylistRowKeys[currentPlaylistIndex] || null;
 		playTrackInternal(nextTrack);
 	}
 }
@@ -2876,6 +2986,7 @@ function playPrevTrack() {
 		}
 		const prevTrack = currentPlaylist[currentPlaylistIndex];
 		if (prevTrack) {
+			state.currentPlayingRowKey = currentPlaylistRowKeys[currentPlaylistIndex] || null;
 			playTrackInternal(prevTrack);
 		}
 	}

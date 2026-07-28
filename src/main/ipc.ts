@@ -569,6 +569,43 @@ export function registerIpcHandlers() {
 		return await runSync(profile, options, event);
 	});
 
+	async function parseMetadataWithWorker(filePath: string): Promise<{ pictureData: Uint8Array | null; pictureFormat: string | null }> {
+		const { Worker } = await import("node:worker_threads");
+		return new Promise((resolve, reject) => {
+			try {
+				const workerPath = path.join(app.getAppPath(), "dist", "metadataWorker.js");
+				const worker = new Worker(workerPath);
+
+				worker.on("message", (msg) => {
+					if (msg.success) {
+						resolve({
+							pictureData: msg.pictureData ? Uint8Array.from(msg.pictureData) : null,
+							pictureFormat: msg.pictureFormat || null,
+						});
+					} else {
+						reject(new Error(msg.error || "Worker failed"));
+					}
+					worker.terminate();
+				});
+
+				worker.on("error", (err) => {
+					reject(err);
+					worker.terminate();
+				});
+
+				worker.on("exit", (code) => {
+					if (code !== 0) {
+						reject(new Error(`Worker stopped with exit code ${code}`));
+					}
+				});
+
+				worker.postMessage({ filePath, taskId: "1" });
+			} catch (e) {
+				reject(e);
+			}
+		});
+	}
+
 	ipcMain.handle("get-thumbnail", async (_event, profileId: string, albumName: string) => {
 		try {
 			if (!profileId || !albumName) return null;
@@ -609,20 +646,18 @@ export function registerIpcHandlers() {
 			}
 
 			if (needRegenerate) {
-				const { parseFile } = await import("music-metadata");
 				const { nativeImage } = await import("electron");
 
 				if (!fs.existsSync(track.filePath)) {
 					return null;
 				}
 
-				const metadata = await parseFile(track.filePath, { skipCovers: false });
-				const picture = metadata.common.picture && metadata.common.picture[0];
-				if (!picture) {
+				const result = await parseMetadataWithWorker(track.filePath);
+				if (!result.pictureData) {
 					return null;
 				}
 
-				const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+				const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
 				const resized = img.resize({ width: 150, height: 150, quality: "better" });
 				const pngBuf = resized.toPNG();
 
@@ -656,25 +691,23 @@ export function registerIpcHandlers() {
 			const track = trackItem.itunesTrack || trackItem.phoneTrack;
 			if (!track || !fs.existsSync(track.filePath)) return false;
 
-			const { parseFile } = await import("music-metadata");
-			const metadata = await parseFile(track.filePath, { skipCovers: false });
-			const picture = metadata.common.picture && metadata.common.picture[0];
-			if (!picture) {
+			const result = await parseMetadataWithWorker(track.filePath);
+			if (!result.pictureData) {
 				return false;
 			}
 
 			// Determine actual embedded image extension
 			let ext = "png";
-			if (picture.format) {
-				if (picture.format.includes("jpeg") || picture.format.includes("jpg")) {
+			if (result.pictureFormat) {
+				if (result.pictureFormat.includes("jpeg") || result.pictureFormat.includes("jpg")) {
 					ext = "jpg";
-				} else if (picture.format.includes("png")) {
+				} else if (result.pictureFormat.includes("png")) {
 					ext = "png";
-				} else if (picture.format.includes("gif")) {
+				} else if (result.pictureFormat.includes("gif")) {
 					ext = "gif";
-				} else if (picture.format.includes("webp")) {
+				} else if (result.pictureFormat.includes("webp")) {
 					ext = "webp";
-				} else if (picture.format.includes("bmp")) {
+				} else if (result.pictureFormat.includes("bmp")) {
 					ext = "bmp";
 				}
 			}
@@ -691,10 +724,10 @@ export function registerIpcHandlers() {
 			}
 
 			const filePath = path.join(tempDir, filename);
-			fs.writeFileSync(filePath, Buffer.from(picture.data));
+			fs.writeFileSync(filePath, Buffer.from(result.pictureData));
 
 			// Copy to clipboard
-			const img = nativeImage.createFromBuffer(Buffer.from(picture.data));
+			const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
 
 			if (process.platform === "win32") {
 				const { execFile } = await import("node:child_process");

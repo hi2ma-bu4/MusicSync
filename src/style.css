@@ -17,60 +17,121 @@
 	::-webkit-scrollbar-thumb:hover {
 		@apply bg-gray-500;
 	}
+}
 
-	/* Expand/Collapse transitions */
-	.accordion-content {
-		@apply overflow-hidden max-h-0 transition-[max-height] duration-200 ease-out;
-	}
+/* Expand/Collapse transitions */
+.accordion-content {
+	@apply overflow-hidden max-h-0 transition-[max-height] duration-200 ease-out;
+}
 
-	.accordion-content.open {
-		@apply max-h-[20000px] transition-[max-height] duration-300 ease-in;
-	}
+.accordion-content.open {
+	@apply max-h-[20000px] transition-[max-height] duration-300 ease-in;
+}
 
-	/* Resizable table headers */
-	.resizer {
-		@apply cursor-col-resize h-full absolute right-0 top-0 select-none w-1 z-10;
-	}
+/* Resizable table headers */
+.resizer {
+	@apply cursor-col-resize h-full absolute right-0 top-0 select-none w-1 z-10;
+}
 
-	.resizer:hover {
-		@apply bg-indigo-500;
-	}
+.resizer:hover {
+	@apply bg-indigo-500;
+}
 
-	/* Text truncation with ellipsis - OFF wrap */
-	.truncate-cell {
-		@apply overflow-hidden! text-ellipsis! whitespace-nowrap!;
-	}
+/* Text truncation with ellipsis - OFF wrap */
+.truncate-cell {
+	@apply overflow-hidden! text-ellipsis! whitespace-nowrap!;
+}
 
-	/* Virtual Scroll viewport styles */
-	#virtual-scroll-viewport {
-		@apply relative h-full overflow-y-auto;
-	}
+/* Virtual Scroll viewport styles */
+#virtual-scroll-viewport {
+	@apply relative h-full overflow-y-auto;
+}
 
-	#virtual-scroll-canvas {
-		@apply absolute pointer-events-none left-0 right-0 top-0;
-	}
+#virtual-scroll-canvas {
+	@apply absolute pointer-events-none left-0 right-0 top-0;
+}
 
-	#virtual-scroll-content {
-		@apply flex flex-col absolute left-0 right-0 top-0;
-	}
+#virtual-scroll-content {
+	@apply flex flex-col absolute left-0 right-0 top-0;
+}
 
-	/* Indeterminate state styling */
-	input[type="checkbox"]:indeterminate {
-		@apply bg-indigo-600 border-indigo-600;
+/* Indeterminate state styling */
+input[type="checkbox"]:indeterminate {
+	@apply bg-indigo-600 border-indigo-600;
 
-		background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M5 8h6'/%3E%3C/svg%3E");
-	}
+	background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 16 16'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='3' d='M5 8h6'/%3E%3C/svg%3E");
+}
 
-	/* Mini text size */
-	.text-xxs {
-		@apply text-[0.65rem];
-	}
+/* Mini text size */
+.text-xxs {
+	@apply text-[0.65rem];
+}
 
-	/* Focus outlines for keyboard accessibility */
-	button:focus-visible,
-	input:focus-visible,
-	select:focus-visible,
-	[tabindex="0"]:focus-visible {
-		@apply outline-2! outline-solid! outline-indigo-500! outline-offset-2!;
-	}
+/* Focus outlines for keyboard accessibility */
+button:focus-visible,
+input:focus-visible,
+select:focus-visible,
+[tabindex="0"]:focus-visible {
+	@apply outline-2! outline-solid! outline-indigo-500! outline-offset-2!;
+}
+
+/* --- TRACK ROW HOVER PLAY/PAUSE STYLES --- */
+.track-row .track-play-btn,
+.track-row .track-pause-btn {
+	display: none;
+}
+
+.track-row .track-number-lbl {
+	display: inline-block;
+}
+
+/* 1. When the track is currently active and playing */
+.track-row.is-playing .track-number-lbl {
+	display: none;
+}
+.track-row.is-playing .track-pause-btn {
+	display: inline-block;
+}
+
+/* 2. When the track row is hovered but not currently playing */
+.track-row:not(.is-playing):hover .track-number-lbl {
+	display: none;
+}
+.track-row:not(.is-playing):hover .track-play-btn {
+	display: inline-block;
+}
+
+/* 3. When the track row is currently paused and is hovered */
+.track-row.is-paused:hover .track-number-lbl {
+	display: none;
+}
+.track-row.is-paused:hover .track-play-btn {
+	display: inline-block;
+}
+.track-row.is-paused:hover .track-pause-btn {
+	display: none;
+}
+
+/* --- TRACK LIST (TAB) HOVER PLAY/PAUSE STYLES --- */
+.vs-row .track-play-btn,
+.vs-row .track-pause-btn {
+	display: none;
+}
+
+/* 1. When active and playing */
+.vs-row.is-playing .track-pause-btn {
+	display: inline-block;
+}
+
+/* 2. When hovered and not playing */
+.vs-row:not(.is-playing):hover .track-play-btn {
+	display: inline-block;
+}
+
+/* 3. When paused and hovered */
+.vs-row.is-paused:hover .track-play-btn {
+	display: inline-block;
+}
+.vs-row.is-paused:hover .track-pause-btn {
+	display: none;
 }
