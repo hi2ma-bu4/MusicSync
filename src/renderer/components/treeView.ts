@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareGroups, compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareGroups, compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 let currentTreeViewRenderId = 0;
 
@@ -43,18 +43,37 @@ export function restoreScrollPosition(container: HTMLElement, targetScrollTop: n
 	requestAnimationFrame(attemptRestore);
 }
 
-// Synchronizes and updates all checkbox elements (tracks, discs, albums, artists, genres) in the tree view to match the state
-export function updateAllTreeCheckboxes() {
-	// 1. Build high-performance lookup indexes for track ID and parent groupings
-	const trackMap = new Map<string, any>();
-	const artistMap = new Map<string, any[]>();
-	const artistAlbumMap = new Map<string, any[]>();
-	const albumMap = new Map<string, any[]>();
-	const genreMap = new Map<string, any[]>();
-	const discMap = new Map<string, any[]>();
+// Cached index maps to avoid O(N) rebuilds on every checkbox toggle
+let lastFilteredTracksRef: any[] | null = null;
+const cachedIndexMaps = {
+	trackMap: new Map<string, any>(),
+	artistMap: new Map<string, any[]>(),
+	artistAlbumMap: new Map<string, any[]>(),
+	albumMap: new Map<string, any[]>(),
+	genreMap: new Map<string, any[]>(),
+	discMap: new Map<string, any[]>(),
+};
+
+export function clearIndexMapsCache() {
+	lastFilteredTracksRef = null;
+}
+
+// Rebuilds lookup index maps ONLY if the filteredTracks reference has changed
+function rebuildIndexMapsIfNeeded() {
+	if (lastFilteredTracksRef === state.filteredTracks) {
+		return;
+	}
+
+	lastFilteredTracksRef = state.filteredTracks;
+	cachedIndexMaps.trackMap.clear();
+	cachedIndexMaps.artistMap.clear();
+	cachedIndexMaps.artistAlbumMap.clear();
+	cachedIndexMaps.albumMap.clear();
+	cachedIndexMaps.genreMap.clear();
+	cachedIndexMaps.discMap.clear();
 
 	state.filteredTracks.forEach((t) => {
-		trackMap.set(t.id, t);
+		cachedIndexMaps.trackMap.set(t.id, t);
 
 		const meta = t.itunesTrack || t.phoneTrack;
 		if (!meta) return;
@@ -65,35 +84,43 @@ export function updateAllTreeCheckboxes() {
 		splitNames.forEach((name) => {
 			const normalizedArtist = normalizeArtistForIntegration(name);
 
-			if (!artistMap.has(normalizedArtist)) artistMap.set(normalizedArtist, []);
-			artistMap.get(normalizedArtist)!.push(t);
+			if (!cachedIndexMaps.artistMap.has(normalizedArtist)) cachedIndexMaps.artistMap.set(normalizedArtist, []);
+			cachedIndexMaps.artistMap.get(normalizedArtist)!.push(t);
 
 			if (meta.album) {
 				const artistAlbumKey = `${normalizedArtist}_${meta.album}`;
-				if (!artistAlbumMap.has(artistAlbumKey)) artistAlbumMap.set(artistAlbumKey, []);
-				artistAlbumMap.get(artistAlbumKey)!.push(t);
+				if (!cachedIndexMaps.artistAlbumMap.has(artistAlbumKey)) cachedIndexMaps.artistAlbumMap.set(artistAlbumKey, []);
+				cachedIndexMaps.artistAlbumMap.get(artistAlbumKey)!.push(t);
 			}
 		});
 
 		// 2. Album mapping
 		if (meta.album) {
-			if (!albumMap.has(meta.album)) albumMap.set(meta.album, []);
-			albumMap.get(meta.album)!.push(t);
+			if (!cachedIndexMaps.albumMap.has(meta.album)) cachedIndexMaps.albumMap.set(meta.album, []);
+			cachedIndexMaps.albumMap.get(meta.album)!.push(t);
 		}
 
 		// 3. Genre mapping
 		const genreName = meta.genre || "Unknown Genre";
-		if (!genreMap.has(genreName)) genreMap.set(genreName, []);
-		genreMap.get(genreName)!.push(t);
+		if (!cachedIndexMaps.genreMap.has(genreName)) cachedIndexMaps.genreMap.set(genreName, []);
+		cachedIndexMaps.genreMap.get(genreName)!.push(t);
 
 		// 4. Disc mapping
 		if (meta.album) {
 			const discNum = parseInt(meta.disc || "1", 10) || 1;
 			const discKey = `${meta.album}_${discNum}`;
-			if (!discMap.has(discKey)) discMap.set(discKey, []);
-			discMap.get(discKey)!.push(t);
+			if (!cachedIndexMaps.discMap.has(discKey)) cachedIndexMaps.discMap.set(discKey, []);
+			cachedIndexMaps.discMap.get(discKey)!.push(t);
 		}
 	});
+}
+
+// Synchronizes and updates all checkbox elements (tracks, discs, albums, artists, genres) in the tree view to match the state
+export function updateAllTreeCheckboxes() {
+	// Rebuild cached maps only if state.filteredTracks changed
+	rebuildIndexMapsIfNeeded();
+
+	const { trackMap, artistMap, artistAlbumMap, albumMap, genreMap, discMap } = cachedIndexMaps;
 
 	// 2. Sync all track checkboxes
 	const trackInputs = document.querySelectorAll(`input[id^="chk-track-"]`);
@@ -490,7 +517,7 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 }
 
 // Lazy renders tracks inside an Album
-function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, cb: RenderCallbacks) {
+function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], albumKey: string, cb: RenderCallbacks, disableDiscGrouping = false) {
 	elTracksChildren.innerHTML = "";
 
 	// Sort albumTracks using active sort rules
@@ -503,7 +530,7 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 		return Math.max(max, discNum);
 	}, 1);
 
-	const hasMultipleDiscs = maxDisc >= 2;
+	const hasMultipleDiscs = !disableDiscGrouping && maxDisc >= 2;
 
 	if (hasMultipleDiscs) {
 		// Group tracks by disc
@@ -644,13 +671,16 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 		});
 
 		if (isAlbumOpen) {
-			const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
-			renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
+			const elTracksChildren = divAlbum.querySelector(`#children-${albumKey}`) as HTMLElement;
+			if (elTracksChildren) {
+				renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
+			}
 		}
 	});
 }
 
 export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
+	const renderId = ++currentTreeViewRenderId;
 	container.innerHTML = "";
 	container.onscroll = null;
 
@@ -680,8 +710,6 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		const nameB = artistMap.get(keyB)!.displayName;
 		return compareGroups(tracksA, tracksB, state.sortRules, nameA, nameB);
 	});
-
-	const renderId = ++currentTreeViewRenderId;
 	const chunkSize = 50;
 	let index = 0;
 
@@ -739,62 +767,60 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 
 			fragment.appendChild(divArtist);
 
-			// Setup listeners inside setTimeout to ensure the DOM nodes are rendered
-			setTimeout(() => {
-				const chkArtist = document.getElementById(`chk-${artistKey}`) as HTMLInputElement;
-				if (chkArtist) {
-					setCheckboxState(`chk-${artistKey}`, artistTracks);
-					chkArtist.addEventListener("click", (e) => {
-						e.stopPropagation();
-						pushHistoryState();
-						const isChecked = chkArtist.checked;
-						artistTracks.forEach((t) => {
-							setTrackCheckedState(t, isChecked);
-						});
-						updateAllTreeCheckboxes();
-						cb.updateSummaryBar();
-						cb.updateMasterCheckboxState();
+			// Setup listeners synchronously on the newly created div elements inside document fragment
+			const chkArtist = divArtist.querySelector(`#chk-${artistKey}`) as HTMLInputElement;
+			if (chkArtist) {
+				setCheckboxStateElement(chkArtist, artistTracks);
+				chkArtist.addEventListener("click", (e) => {
+					e.stopPropagation();
+					pushHistoryState();
+					const isChecked = chkArtist.checked;
+					artistTracks.forEach((t) => {
+						setTrackCheckedState(t, isChecked);
 					});
-				}
+					updateAllTreeCheckboxes();
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
+				});
+			}
 
-				const elHdr = document.getElementById(`hdr-${artistKey}`);
-				if (elHdr) {
-					elHdr.addEventListener("keydown", (e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							if (e.target === chkArtist) return;
-							e.preventDefault();
-							elHdr.click();
-						}
-					});
-
-					elHdr.addEventListener("click", () => {
-						const isOpenNow = state.expandedGroups.has(artistKey);
-						const newOpenState = !isOpenNow;
-						if (newOpenState) state.expandedGroups.add(artistKey);
-						else state.expandedGroups.delete(artistKey);
-
-						const chevron = document.querySelector(`#hdr-${artistKey} .icon-chevron-right`);
-						const content = document.querySelector(`#hdr-${artistKey} + .accordion-content`);
-						if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
-						if (content) content.classList.toggle("open", newOpenState);
-
-						if (newOpenState) {
-							const elChildren = document.getElementById(`children-${artistKey}`)!;
-							if (elChildren && elChildren.innerHTML === "") {
-								renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
-								updateAllTreeCheckboxes();
-							}
-						}
-					});
-				}
-
-				if (isArtistOpen) {
-					const elChildren = document.getElementById(`children-${artistKey}`)!;
-					if (elChildren) {
-						renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
+			const elHdr = divArtist.querySelector(`#hdr-${artistKey}`) as HTMLElement;
+			if (elHdr) {
+				elHdr.addEventListener("keydown", (e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						if (e.target === chkArtist) return;
+						e.preventDefault();
+						elHdr.click();
 					}
+				});
+
+				elHdr.addEventListener("click", () => {
+					const isOpenNow = state.expandedGroups.has(artistKey);
+					const newOpenState = !isOpenNow;
+					if (newOpenState) state.expandedGroups.add(artistKey);
+					else state.expandedGroups.delete(artistKey);
+
+					const chevron = document.querySelector(`#hdr-${artistKey} .icon-chevron-right`);
+					const content = document.querySelector(`#hdr-${artistKey} + .accordion-content`);
+					if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+					if (content) content.classList.toggle("open", newOpenState);
+
+					if (newOpenState) {
+						const elChildren = document.getElementById(`children-${artistKey}`)!;
+						if (elChildren && elChildren.innerHTML === "") {
+							renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
+							updateAllTreeCheckboxes();
+						}
+					}
+				});
+			}
+
+			if (isArtistOpen) {
+				const elChildren = divArtist.querySelector(`#children-${artistKey}`) as HTMLElement;
+				if (elChildren) {
+					renderArtistAlbums(elChildren, artistName, albumMap, sortedAlbums, cb);
 				}
-			}, 0);
+			}
 		}
 
 		container.appendChild(fragment);
@@ -817,6 +843,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 }
 
 export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
+	const renderId = ++currentTreeViewRenderId;
 	container.innerHTML = "";
 	container.onscroll = null;
 
@@ -838,8 +865,6 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 		const tracksB = albumMap.get(b)!;
 		return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 	});
-
-	const renderId = ++currentTreeViewRenderId;
 	const chunkSize = 50;
 	let index = 0;
 
@@ -888,66 +913,63 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 			fragment.appendChild(div);
 
-			setTimeout(() => {
-				const cardId = `album-card-${albumKey}`;
-				if (document.getElementById(cardId)) {
-					setCheckboxState(`chk-${albumKey}`, albumTracks);
-					applyAlbumArtBackground(cardId, albumName);
-				}
+			// Setup listeners synchronously inside document fragment
+			const cardId = `album-card-${albumKey}`;
+			const chkAlbum = div.querySelector(`#chk-${albumKey}`) as HTMLInputElement;
+			if (chkAlbum) {
+				setCheckboxStateElement(chkAlbum, albumTracks);
+				applyAlbumArtBackground(cardId, albumName);
 
-				const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
-				if (chkAlbum) {
-					chkAlbum.addEventListener("click", (e) => {
-						e.stopPropagation();
-						pushHistoryState();
-						const isChecked = chkAlbum.checked;
-						albumTracks.forEach((t) => {
-							setTrackCheckedState(t, isChecked);
-						});
-						updateAllTreeCheckboxes();
-						cb.updateSummaryBar();
-						cb.updateMasterCheckboxState();
+				chkAlbum.addEventListener("click", (e) => {
+					e.stopPropagation();
+					pushHistoryState();
+					const isChecked = chkAlbum.checked;
+					albumTracks.forEach((t) => {
+						setTrackCheckedState(t, isChecked);
 					});
-				}
+					updateAllTreeCheckboxes();
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
+				});
+			}
 
-				const elHdr = document.getElementById(`hdr-${albumKey}`);
-				if (elHdr) {
-					elHdr.addEventListener("keydown", (e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							if (e.target === chkAlbum) return;
-							e.preventDefault();
-							elHdr.click();
-						}
-					});
-
-					elHdr.addEventListener("click", () => {
-						const isOpenNow = state.expandedGroups.has(albumKey);
-						const newOpenState = !isOpenNow;
-						if (newOpenState) state.expandedGroups.add(albumKey);
-						else state.expandedGroups.delete(albumKey);
-
-						const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
-						const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
-						if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
-						if (content) content.classList.toggle("open", newOpenState);
-
-						if (newOpenState) {
-							const elChildren = document.getElementById(`children-${albumKey}`)!;
-							if (elChildren && elChildren.innerHTML === "") {
-								renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
-								updateAllTreeCheckboxes();
-							}
-						}
-					});
-				}
-
-				if (isAlbumOpen) {
-					const elChildren = document.getElementById(`children-${albumKey}`)!;
-					if (elChildren) {
-						renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
+			const elHdr = div.querySelector(`#hdr-${albumKey}`) as HTMLElement;
+			if (elHdr) {
+				elHdr.addEventListener("keydown", (e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						if (e.target === chkAlbum) return;
+						e.preventDefault();
+						elHdr.click();
 					}
+				});
+
+				elHdr.addEventListener("click", () => {
+					const isOpenNow = state.expandedGroups.has(albumKey);
+					const newOpenState = !isOpenNow;
+					if (newOpenState) state.expandedGroups.add(albumKey);
+					else state.expandedGroups.delete(albumKey);
+
+					const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
+					const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
+					if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+					if (content) content.classList.toggle("open", newOpenState);
+
+					if (newOpenState) {
+						const elChildren = document.getElementById(`children-${albumKey}`)!;
+						if (elChildren && elChildren.innerHTML === "") {
+							renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
+							updateAllTreeCheckboxes();
+						}
+					}
+				});
+			}
+
+			if (isAlbumOpen) {
+				const elChildren = div.querySelector(`#children-${albumKey}`) as HTMLElement;
+				if (elChildren) {
+					renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
 				}
-			}, 0);
+			}
 		}
 
 		container.appendChild(fragment);
@@ -970,6 +992,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 }
 
 export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
+	const renderId = ++currentTreeViewRenderId;
 	container.innerHTML = "";
 	container.onscroll = null;
 
@@ -991,8 +1014,6 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		const tracksB = genreMap.get(b)!;
 		return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 	});
-
-	const renderId = ++currentTreeViewRenderId;
 	const chunkSize = 50;
 	let index = 0;
 
@@ -1034,61 +1055,60 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 
 			fragment.appendChild(div);
 
-			setTimeout(() => {
-				const chkGenre = document.getElementById(`chk-${genreKey}`) as HTMLInputElement;
-				if (chkGenre) {
-					setCheckboxState(`chk-${genreKey}`, genreTracks);
-					chkGenre.addEventListener("click", (e) => {
-						e.stopPropagation();
-						pushHistoryState();
-						const isChecked = chkGenre.checked;
-						genreTracks.forEach((t) => {
-							setTrackCheckedState(t, isChecked);
-						});
-						updateAllTreeCheckboxes();
-						cb.updateSummaryBar();
-						cb.updateMasterCheckboxState();
+			// Setup listeners synchronously inside document fragment
+			const chkGenre = div.querySelector(`#chk-${genreKey}`) as HTMLInputElement;
+			if (chkGenre) {
+				setCheckboxStateElement(chkGenre, genreTracks);
+				chkGenre.addEventListener("click", (e) => {
+					e.stopPropagation();
+					pushHistoryState();
+					const isChecked = chkGenre.checked;
+					genreTracks.forEach((t) => {
+						setTrackCheckedState(t, isChecked);
 					});
-				}
+					updateAllTreeCheckboxes();
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
+				});
+			}
 
-				const elHdr = document.getElementById(`hdr-${genreKey}`);
-				if (elHdr) {
-					elHdr.addEventListener("keydown", (e) => {
-						if (e.key === "Enter" || e.key === " ") {
-							if (e.target === chkGenre) return;
-							e.preventDefault();
-							elHdr.click();
-						}
-					});
-
-					elHdr.addEventListener("click", () => {
-						const isOpenNow = state.expandedGroups.has(genreKey);
-						const newOpenState = !isOpenNow;
-						if (newOpenState) state.expandedGroups.add(genreKey);
-						else state.expandedGroups.delete(genreKey);
-
-						const chevron = document.querySelector(`#hdr-${genreKey} .icon-chevron-right`);
-						const content = document.querySelector(`#hdr-${genreKey} + .accordion-content`);
-						if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
-						if (content) content.classList.toggle("open", newOpenState);
-
-						if (newOpenState) {
-							const elChildren = document.getElementById(`children-${genreKey}`)!;
-							if (elChildren && elChildren.innerHTML === "") {
-								renderAlbumTracks(elChildren, genreTracks, genreKey, cb);
-								updateAllTreeCheckboxes();
-							}
-						}
-					});
-				}
-
-				if (isGenreOpen) {
-					const elChildren = document.getElementById(`children-${genreKey}`)!;
-					if (elChildren) {
-						renderAlbumTracks(elChildren, genreTracks, genreKey, cb);
+			const elHdr = div.querySelector(`#hdr-${genreKey}`) as HTMLElement;
+			if (elHdr) {
+				elHdr.addEventListener("keydown", (e) => {
+					if (e.key === "Enter" || e.key === " ") {
+						if (e.target === chkGenre) return;
+						e.preventDefault();
+						elHdr.click();
 					}
+				});
+
+				elHdr.addEventListener("click", () => {
+					const isOpenNow = state.expandedGroups.has(genreKey);
+					const newOpenState = !isOpenNow;
+					if (newOpenState) state.expandedGroups.add(genreKey);
+					else state.expandedGroups.delete(genreKey);
+
+					const chevron = document.querySelector(`#hdr-${genreKey} .icon-chevron-right`);
+					const content = document.querySelector(`#hdr-${genreKey} + .accordion-content`);
+					if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+					if (content) content.classList.toggle("open", newOpenState);
+
+					if (newOpenState) {
+						const elChildren = document.getElementById(`children-${genreKey}`)!;
+						if (elChildren && elChildren.innerHTML === "") {
+							renderAlbumTracks(elChildren, genreTracks, genreKey, cb, true);
+							updateAllTreeCheckboxes();
+						}
+					}
+				});
+			}
+
+			if (isGenreOpen) {
+				const elChildren = div.querySelector(`#children-${genreKey}`) as HTMLElement;
+				if (elChildren) {
+					renderAlbumTracks(elChildren, genreTracks, genreKey, cb, true);
 				}
-			}, 0);
+			}
 		}
 
 		container.appendChild(fragment);

@@ -4,7 +4,7 @@ import "./style.css";
 import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
-import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
+import { clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
 import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import { ScanResultItem } from "./renderer/types";
@@ -374,6 +374,10 @@ function selectProfile(id: string) {
 	state.filteredTracks = [];
 	elTxtSearch.value = "";
 	state.searchQuery = "";
+
+	// Clear stats and map caches when profile changes
+	clearStatsSummaryCache();
+	clearIndexMapsCache();
 
 	// Restore tab sort rules and populate defaults if missing
 	const initialDefaultSortRules = {
@@ -853,32 +857,48 @@ function renderActiveView() {
 	updateAllTreeCheckboxes();
 }
 
-function getGroupStatusStats(groups: Map<string, any[]>, status: string) {
-	let complete = 0;
-	let partial = 0;
+// One-pass status stats generator to optimize performance on 20000+ tracks
+function getGroupsAllStatusStats(groups: Map<string, any[]>) {
+	const statsMap = new Map<string, { complete: number; partial: number }>();
+	const statuses = ["missing", "updated", "synced", "phone_only"];
+	statuses.forEach((s) => statsMap.set(s, { complete: 0, partial: 0 }));
 
 	groups.forEach((tracks) => {
-		let matchCount = 0;
+		const counts = new Map<string, number>();
+		statuses.forEach((s) => counts.set(s, 0));
+
 		tracks.forEach((t) => {
-			if (t.status === status) matchCount++;
+			if (counts.has(t.status)) {
+				counts.set(t.status, counts.get(t.status)! + 1);
+			}
 		});
 
-		if (matchCount === tracks.length) {
-			complete++;
-		} else if (matchCount > 0) {
-			partial++;
-		}
+		const len = tracks.length;
+		statuses.forEach((s) => {
+			const count = counts.get(s) || 0;
+			const stat = statsMap.get(s)!;
+			if (count === len) {
+				stat.complete++;
+			} else if (count > 0) {
+				stat.partial++;
+			}
+		});
 	});
 
-	return { complete, partial };
+	return statsMap;
 }
 
-function formatStatusStatText(trackCount: number, status: string, groups: Map<string, any[]> | null) {
-	if (!groups || state.activeTab === "track") {
+function formatStatusStatTextMulti(trackCount: number, status: string, statsMap: Map<string, { complete: number; partial: number }> | null) {
+	if (!statsMap || state.activeTab === "track") {
 		return String(trackCount);
 	}
 
-	const { complete, partial } = getGroupStatusStats(groups, status);
+	const stat = statsMap.get(status);
+	if (!stat) {
+		return String(trackCount);
+	}
+
+	const { complete, partial } = stat;
 	if (partial > 0) {
 		return `${trackCount} <span class="font-sans text-[10px] text-gray-400">(${complete},<span class="text-gray-500 font-normal opacity-70 text-[9px]">${partial}(一部)</span>)</span>`;
 	} else {
@@ -886,39 +906,62 @@ function formatStatusStatText(trackCount: number, status: string, groups: Map<st
 	}
 }
 
-function updateStatsSummary() {
-	let total = 0;
-	let missing = 0;
-	let updated = 0;
-	let synced = 0;
-	let phoneOnly = 0;
-	let pathWarnings = 0;
+// Caching stats summary per tab and scanned tracks reference to avoid O(N) recalculations on checkbox click
+let lastScannedTracksRef: any[] | null = null;
+let lastActiveTabStats: string | null = null;
+const cachedStatsSummary = {
+	total: 0,
+	missing: 0,
+	updated: 0,
+	synced: 0,
+	phoneOnly: 0,
+	pathWarnings: 0,
+	phoneTotalSize: 0,
+	phoneTotalDuration: 0,
+	itunesTotalSize: 0,
+	itunesTotalDuration: 0,
+	groupsStatsMap: null as Map<string, { complete: number; partial: number }> | null,
+};
 
-	let phoneTotalSize = 0;
-	let phoneTotalDuration = 0;
-	let itunesTotalSize = 0;
-	let itunesTotalDuration = 0;
+function rebuildStatsSummaryIfNeeded() {
+	if (lastScannedTracksRef === state.scannedTracks && lastActiveTabStats === state.activeTab) {
+		return;
+	}
+
+	lastScannedTracksRef = state.scannedTracks;
+	lastActiveTabStats = state.activeTab;
+
+	cachedStatsSummary.total = 0;
+	cachedStatsSummary.missing = 0;
+	cachedStatsSummary.updated = 0;
+	cachedStatsSummary.synced = 0;
+	cachedStatsSummary.phoneOnly = 0;
+	cachedStatsSummary.pathWarnings = 0;
+	cachedStatsSummary.phoneTotalSize = 0;
+	cachedStatsSummary.phoneTotalDuration = 0;
+	cachedStatsSummary.itunesTotalSize = 0;
+	cachedStatsSummary.itunesTotalDuration = 0;
 
 	state.scannedTracks.forEach((t) => {
 		if (t.status === "phone_only") {
-			phoneOnly++;
+			cachedStatsSummary.phoneOnly++;
 		} else {
-			total++;
-			if (t.status === "missing") missing++;
-			else if (t.status === "updated") updated++;
-			else if (t.status === "synced") synced++;
+			cachedStatsSummary.total++;
+			if (t.status === "missing") cachedStatsSummary.missing++;
+			else if (t.status === "updated") cachedStatsSummary.updated++;
+			else if (t.status === "synced") cachedStatsSummary.synced++;
 		}
 		if (t.pathMismatch) {
-			pathWarnings++;
+			cachedStatsSummary.pathWarnings++;
 		}
 
 		if (t.status !== "missing") {
-			phoneTotalSize += t.phoneTrack?.size ?? t.itunesTrack?.size ?? 0;
-			phoneTotalDuration += t.phoneTrack?.duration ?? t.itunesTrack?.duration ?? 0;
+			cachedStatsSummary.phoneTotalSize += t.phoneTrack?.size ?? t.itunesTrack?.size ?? 0;
+			cachedStatsSummary.phoneTotalDuration += t.phoneTrack?.duration ?? t.itunesTrack?.duration ?? 0;
 		}
 		if (t.status !== "phone_only") {
-			itunesTotalSize += t.itunesTrack?.size ?? t.phoneTrack?.size ?? 0;
-			itunesTotalDuration += t.itunesTrack?.duration ?? t.phoneTrack?.duration ?? 0;
+			cachedStatsSummary.itunesTotalSize += t.itunesTrack?.size ?? t.phoneTrack?.size ?? 0;
+			cachedStatsSummary.itunesTotalDuration += t.itunesTrack?.duration ?? t.phoneTrack?.duration ?? 0;
 		}
 	});
 
@@ -953,11 +996,24 @@ function updateStatsSummary() {
 		});
 	}
 
+	cachedStatsSummary.groupsStatsMap = groups ? getGroupsAllStatusStats(groups) : null;
+}
+
+export function clearStatsSummaryCache() {
+	lastScannedTracksRef = null;
+	lastActiveTabStats = null;
+}
+
+function updateStatsSummary() {
+	rebuildStatsSummaryIfNeeded();
+
+	const { total, missing, updated, synced, phoneOnly, pathWarnings, phoneTotalSize, phoneTotalDuration, itunesTotalSize, itunesTotalDuration, groupsStatsMap } = cachedStatsSummary;
+
 	elCntTotal.textContent = String(total);
-	elCntMissing.innerHTML = formatStatusStatText(missing, "missing", groups);
-	elCntUpdated.innerHTML = formatStatusStatText(updated, "updated", groups);
-	elCntSynced.innerHTML = formatStatusStatText(synced, "synced", groups);
-	elCntPhoneOnly.innerHTML = formatStatusStatText(phoneOnly, "phone_only", groups);
+	elCntMissing.innerHTML = formatStatusStatTextMulti(missing, "missing", groupsStatsMap);
+	elCntUpdated.innerHTML = formatStatusStatTextMulti(updated, "updated", groupsStatsMap);
+	elCntSynced.innerHTML = formatStatusStatTextMulti(synced, "synced", groupsStatsMap);
+	elCntPhoneOnly.innerHTML = formatStatusStatTextMulti(phoneOnly, "phone_only", groupsStatsMap);
 
 	if (elValTotalStats) {
 		elValTotalStats.textContent = `${formatBytes(phoneTotalSize)}/${formatBytes(itunesTotalSize)} (${formatDurationHHMMSS(phoneTotalDuration)}/${formatDurationHHMMSS(itunesTotalDuration)})`;
@@ -1364,6 +1420,10 @@ function setupEventListeners() {
 			state.checkedDeleteTrackIds.clear();
 			state.expandedGroups.clear();
 			clearHistory();
+
+			// Clear stats summary and index map caches on scan or profile load
+			clearStatsSummaryCache();
+			clearIndexMapsCache();
 
 			// Default check specs:
 			// Existing tracks (synced, updated, phone_only) checked by default.
@@ -2920,22 +2980,19 @@ function updateTrackRowButtons(row: HTMLElement) {
 		let btnPause = container.querySelector(".track-pause-btn") as HTMLElement;
 
 		if (!btnPlay) {
-			const isTreeView = row.classList.contains("track-row");
-			const svgSize = isTreeView ? "w-4 h-4" : "w-2.5 h-2.5";
-
 			btnPlay = document.createElement("button");
 			btnPlay.setAttribute("type", "button");
 			btnPlay.className = "track-play-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4";
 			btnPlay.setAttribute("title", "再生");
 			btnPlay.setAttribute("data-row-key", rowKey);
-			btnPlay.innerHTML = `<svg class="${svgSize} fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
+			btnPlay.innerHTML = `<svg class="w-4 h-4 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg>`;
 
 			btnPause = document.createElement("button");
 			btnPause.setAttribute("type", "button");
 			btnPause.className = "track-pause-btn hidden text-indigo-400 hover:text-indigo-300 transition focus:outline-none cursor-pointer flex items-center justify-center w-4 h-4";
 			btnPause.setAttribute("title", "一時停止");
 			btnPause.setAttribute("data-row-key", rowKey);
-			btnPause.innerHTML = `<svg class="${svgSize} fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
+			btnPause.innerHTML = `<svg class="w-4 h-4 fill-current text-indigo-400" viewBox="0 0 24 24"><path d="M6 19h4V5H6v14zm8-14v14h4V5h-4z"/></svg>`;
 
 			container.appendChild(btnPlay);
 			container.appendChild(btnPause);

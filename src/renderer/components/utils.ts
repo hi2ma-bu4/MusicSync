@@ -68,28 +68,30 @@ export function setTrackCheckedState(track: any, checked: boolean) {
 
 // Helper to set indeterminate state for a dynamically rendered checkbox element
 export function setCheckboxState(chkId: string, tracks: any[]) {
-	setTimeout(() => {
-		const el = document.getElementById(chkId) as HTMLInputElement;
-		if (!el) return;
+	const el = document.getElementById(chkId) as HTMLInputElement;
+	if (!el) return;
+	setCheckboxStateElement(el, tracks);
+}
 
-		let checkedCount = 0;
-		const total = tracks.length;
+// Synchronous helper to set checkbox state using direct Element reference
+export function setCheckboxStateElement(el: HTMLInputElement, tracks: any[]) {
+	let checkedCount = 0;
+	const total = tracks.length;
 
-		tracks.forEach((t) => {
-			if (isTrackChecked(t)) checkedCount++;
-		});
+	tracks.forEach((t) => {
+		if (isTrackChecked(t)) checkedCount++;
+	});
 
-		if (checkedCount === 0) {
-			el.checked = false;
-			el.indeterminate = false;
-		} else if (checkedCount === total) {
-			el.checked = true;
-			el.indeterminate = false;
-		} else {
-			el.checked = false;
-			el.indeterminate = true;
-		}
-	}, 0);
+	if (checkedCount === 0) {
+		el.checked = false;
+		el.indeterminate = false;
+	} else if (checkedCount === total) {
+		el.checked = true;
+		el.indeterminate = false;
+	} else {
+		el.checked = false;
+		el.indeterminate = true;
+	}
 }
 
 // Generate warnings icon for parent headers (bubbles warning state up)

@@ -19,13 +19,13 @@
 	}
 }
 
-/* Expand/Collapse transitions */
+/* Expand/Collapse display */
 .accordion-content {
-	@apply overflow-hidden max-h-0 transition-[max-height] duration-200 ease-out;
+	display: none;
 }
 
 .accordion-content.open {
-	@apply max-h-[20000px] transition-[max-height] duration-300 ease-in;
+	display: block;
 }
 
 /* Resizable table headers */

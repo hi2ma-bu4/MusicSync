@@ -4,8 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-DMN9Vxwy.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-Ba_7zGSd.css">
+  <script type="module" crossorigin src="./assets/js/index-CJJgwjQv.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-BI-yZg7m.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.15</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.16</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -312,9 +312,9 @@
 	</div>
 
 	<!-- Bottom Unified Footer - Summary + Colored Legend + Operations -->
-	<footer class="bg-gray-800 border-t border-gray-700 px-4 py-1.5 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-1.5 text-xs z-30">
+	<footer class="bg-gray-800 border-t border-gray-700 px-2 py-1.5 shrink-0 flex flex-col md:flex-row md:items-center justify-between gap-1.5 text-xs z-30">
 		<!-- Summary and Legend integration (● missing, ● updated, ● synced, ● phoneOnly) -->
-		<div id="footer-summary" class="flex flex-wrap items-center gap-x-2 gap-y-1 text-gray-400 select-none">
+		<div id="footer-summary" class="flex flex-wrap items-center gap-x-1 gap-y-1 text-gray-400 select-none">
 			<span id="stat-btn-total" tabindex="0" class="cursor-pointer hover:text-white transition flex items-center space-x-1 px-1 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500">
 				<span>全件:</span> <strong id="cnt-total" class="text-white font-mono">0</strong>
 			</span>
@@ -337,7 +337,7 @@
 			<span id="stat-btn-path_warning" tabindex="0" class="cursor-pointer hover:text-white transition items-center space-x-1 px-1 py-0.5 rounded focus:outline-none focus:ring-1 focus:ring-indigo-500 bg-gray-700/30 text-amber-400 font-medium hidden">
 				<span>⚠️ 配置不一致:</span> <strong id="cnt-path-warnings" class="font-mono">0</strong>
 			</span>
-			<span class="text-xxs border-l border-gray-700 pl-2 flex items-center gap-1.5 select-none shrink-0">
+			<span class="text-xxs border-l border-gray-700 pl-2 flex items-center gap-x-1 select-none shrink-0">
 				<span>選択中:</span>
 				<button id="toggle-filter-copy-update" type="button" class="transition-all px-1.5 py-0.5 rounded text-[10px] bg-gray-800/20 border border-gray-700/40 text-gray-400 hover:text-white cursor-pointer focus:outline-none" title="同期時に追加・更新されるファイルのみを表示">
 					コピー/更新 <strong id="cnt-checked-copy" class="text-indigo-400 font-mono font-bold">0</strong>
