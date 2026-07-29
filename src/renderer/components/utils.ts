@@ -228,7 +228,11 @@ export function compareSortValues(valA: any, valB: any, field: string, direction
 	return direction === "asc" ? cmp : -cmp;
 }
 
-export function getGroupSortValue(field: string, tracks: any[]): any {
+export function getGroupSortValue(field: string, tracks: any[], groupName?: string): any {
+	if (field === "artist" && groupName !== undefined) return groupName;
+	if (field === "album" && groupName !== undefined) return groupName;
+	if (field === "genre" && groupName !== undefined) return groupName;
+
 	if (field === "size") {
 		return tracks.reduce((sum, t) => sum + ((t.itunesTrack || t.phoneTrack)?.size || 0), 0);
 	}
@@ -262,12 +266,12 @@ export function getGroupSortValue(field: string, tracks: any[]): any {
 	return "";
 }
 
-export function compareGroups(tracksA: any[], tracksB: any[], rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[]): number {
+export function compareGroups(tracksA: any[], tracksB: any[], rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[], groupNameA?: string, groupNameB?: string): number {
 	const groupRules = rules.filter((r) => !r.target || r.target === "common" || r.target === "group");
 
 	for (const rule of groupRules) {
-		const valA = getGroupSortValue(rule.field, tracksA);
-		const valB = getGroupSortValue(rule.field, tracksB);
+		const valA = getGroupSortValue(rule.field, tracksA, groupNameA);
+		const valB = getGroupSortValue(rule.field, tracksB, groupNameB);
 
 		const cmp = compareSortValues(valA, valB, rule.field, rule.direction, true, tracksA, tracksB);
 		if (cmp !== 0) {

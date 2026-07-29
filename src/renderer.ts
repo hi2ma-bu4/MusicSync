@@ -5,7 +5,7 @@ import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
 import { renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
-import { compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
+import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import { ScanResultItem } from "./renderer/types";
 import { DEFAULT_DELIMITERS } from "./shared/constants";
@@ -2694,16 +2694,11 @@ function getActiveTabPlaylist(): { playlist: ScanResultItem[]; rowKeys: string[]
 		});
 
 		const sortedArtistKeys = Array.from(artistMap.keys()).sort((keyA, keyB) => {
-			const nameA = artistMap.get(keyA)!.displayName;
-			const nameB = artistMap.get(keyB)!.displayName;
-			const artistRule = state.sortRules.find((r) => r.field === "artist");
-			if (artistRule) {
-				const cmp = nameA.localeCompare(nameB, "ja");
-				return artistRule.direction === "asc" ? cmp : -cmp;
-			}
 			const tracksA = artistMap.get(keyA)!.tracks;
 			const tracksB = artistMap.get(keyB)!.tracks;
-			return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+			const nameA = artistMap.get(keyA)!.displayName;
+			const nameB = artistMap.get(keyB)!.displayName;
+			return compareGroups(tracksA, tracksB, state.sortRules, nameA, nameB);
 		});
 
 		sortedArtistKeys.forEach((normalizedKey) => {
@@ -2720,14 +2715,9 @@ function getActiveTabPlaylist(): { playlist: ScanResultItem[]; rowKeys: string[]
 			});
 
 			const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
-				const albumRule = state.sortRules.find((r) => r.field === "album");
-				if (albumRule) {
-					const cmp = a.localeCompare(b, "ja");
-					return albumRule.direction === "asc" ? cmp : -cmp;
-				}
 				const tracksA = albumMap.get(a)!;
 				const tracksB = albumMap.get(b)!;
-				return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+				return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 			});
 
 			sortedAlbums.forEach((albumName) => {
@@ -2762,14 +2752,9 @@ function getActiveTabPlaylist(): { playlist: ScanResultItem[]; rowKeys: string[]
 		});
 
 		const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
-			const albumRule = state.sortRules.find((r) => r.field === "album");
-			if (albumRule) {
-				const cmp = a.localeCompare(b, "ja");
-				return albumRule.direction === "asc" ? cmp : -cmp;
-			}
 			const tracksA = albumMap.get(a)!;
 			const tracksB = albumMap.get(b)!;
-			return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+			return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 		});
 
 		sortedAlbums.forEach((albumName) => {
@@ -2803,14 +2788,9 @@ function getActiveTabPlaylist(): { playlist: ScanResultItem[]; rowKeys: string[]
 		});
 
 		const sortedGenres = Array.from(genreMap.keys()).sort((a, b) => {
-			const genreRule = state.sortRules.find((r) => r.field === "genre");
-			if (genreRule) {
-				const cmp = a.localeCompare(b, "ja");
-				return genreRule.direction === "asc" ? cmp : -cmp;
-			}
 			const tracksA = genreMap.get(a)!;
 			const tracksB = genreMap.get(b)!;
-			return compareTracks(tracksA[0], tracksB[0], state.sortRules);
+			return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 		});
 
 		sortedGenres.forEach((genreName) => {

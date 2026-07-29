@@ -676,7 +676,9 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	const sortedArtistKeys = Array.from(artistMap.keys()).sort((keyA, keyB) => {
 		const tracksA = artistMap.get(keyA)!.tracks;
 		const tracksB = artistMap.get(keyB)!.tracks;
-		return compareGroups(tracksA, tracksB, state.sortRules);
+		const nameA = artistMap.get(keyA)!.displayName;
+		const nameB = artistMap.get(keyB)!.displayName;
+		return compareGroups(tracksA, tracksB, state.sortRules, nameA, nameB);
 	});
 
 	const renderId = ++currentTreeViewRenderId;
@@ -710,7 +712,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
 				const tracksA = albumMap.get(a)!;
 				const tracksB = albumMap.get(b)!;
-				return compareGroups(tracksA, tracksB, state.sortRules);
+				return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 			});
 
 			const divArtist = document.createElement("div");
@@ -834,7 +836,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	const sortedAlbums = Array.from(albumMap.keys()).sort((a, b) => {
 		const tracksA = albumMap.get(a)!;
 		const tracksB = albumMap.get(b)!;
-		return compareGroups(tracksA, tracksB, state.sortRules);
+		return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 	});
 
 	const renderId = ++currentTreeViewRenderId;
@@ -987,7 +989,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 	const sortedGenres = Array.from(genreMap.keys()).sort((a, b) => {
 		const tracksA = genreMap.get(a)!;
 		const tracksB = genreMap.get(b)!;
-		return compareGroups(tracksA, tracksB, state.sortRules);
+		return compareGroups(tracksA, tracksB, state.sortRules, a, b);
 	});
 
 	const renderId = ++currentTreeViewRenderId;
