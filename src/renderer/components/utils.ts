@@ -66,6 +66,48 @@ export function setTrackCheckedState(track: any, checked: boolean) {
 	}
 }
 
+// Get track change priority (1: copy/update, 2: delete, 3: move, 0: no change)
+export function getTrackChangePriority(track: any): number {
+	// If priority is cached, use it to prevent sorting shifts during individual checkbox toggles
+	if (state.filterSyncTargetOnlyActive && state.trackPriorityCache && state.trackPriorityCache.has(track.id)) {
+		return state.trackPriorityCache.get(track.id)!;
+	}
+
+	// Real-time calculation fallback
+	// 1. Copy/Update (New or updated checked tracks)
+	if ((track.status === "missing" || track.status === "updated") && state.checkedCopyTrackIds.has(track.id)) {
+		return 1;
+	}
+	// 2. Delete (Unchecked synced, updated, or phone_only tracks)
+	if ((track.status === "synced" || track.status === "updated" || track.status === "phone_only") && state.checkedDeleteTrackIds.has(track.id)) {
+		return 2;
+	}
+	// 3. Move (Checked pathMismatch tracks)
+	if (track.pathMismatch && (track.status === "synced" || track.status === "updated") && state.checkedMoveTrackIds.has(track.id)) {
+		return 3;
+	}
+	return 0;
+}
+
+// Check if a group contains any tracks with changes
+export function groupHasChange(tracks: any[]): boolean {
+	return tracks.some((t) => getTrackChangePriority(t) > 0);
+}
+
+// Get group sort priority score based on the highest priority track change inside it (smaller number is higher priority, 0 means no change)
+export function getGroupChangeScore(tracks: any[]): number {
+	let highest = 0;
+	for (const t of tracks) {
+		const pri = getTrackChangePriority(t);
+		if (pri > 0) {
+			if (highest === 0 || pri < highest) {
+				highest = pri;
+			}
+		}
+	}
+	return highest;
+}
+
 // Helper to set indeterminate state for a dynamically rendered checkbox element
 export function setCheckboxState(chkId: string, tracks: any[]) {
 	const el = document.getElementById(chkId) as HTMLInputElement;
@@ -269,6 +311,17 @@ export function getGroupSortValue(field: string, tracks: any[], groupName?: stri
 }
 
 export function compareGroups(tracksA: any[], tracksB: any[], rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[], groupNameA?: string, groupNameB?: string): number {
+	if (state.filterSyncTargetOnlyActive) {
+		const scoreA = getGroupChangeScore(tracksA);
+		const scoreB = getGroupChangeScore(tracksB);
+
+		if (scoreA > 0 && scoreB === 0) return -1;
+		if (scoreB > 0 && scoreA === 0) return 1;
+		if (scoreA > 0 && scoreB > 0 && scoreA !== scoreB) {
+			return scoreA - scoreB;
+		}
+	}
+
 	const groupRules = rules.filter((r) => !r.target || r.target === "common" || r.target === "group");
 
 	for (const rule of groupRules) {
@@ -290,7 +343,18 @@ export function compareGroups(tracksA: any[], tracksB: any[], rules: { field: st
 }
 
 // Compare two track items using multi-column sort rules
-export function compareTracks(a: any, b: any, rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[]): number {
+export function compareTracks(a: any, b: any, rules: { field: string; direction: "asc" | "desc"; target?: "common" | "group" | "track" }[], bypassUpSort = false): number {
+	if (state.filterSyncTargetOnlyActive && !bypassUpSort) {
+		const priA = getTrackChangePriority(a);
+		const priB = getTrackChangePriority(b);
+
+		if (priA > 0 && priB === 0) return -1;
+		if (priB > 0 && priA === 0) return 1;
+		if (priA > 0 && priB > 0 && priA !== priB) {
+			return priA - priB;
+		}
+	}
+
 	const ma = a.itunesTrack || a.phoneTrack;
 	const mb = b.itunesTrack || b.phoneTrack;
 	if (!ma && !mb) return 0;

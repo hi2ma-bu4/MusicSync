@@ -33,6 +33,10 @@ const elTxtSearch = document.getElementById("txt-search") as HTMLInputElement;
 const elBtnSearchClear = document.getElementById("btn-search-clear") as HTMLButtonElement;
 const elSearchCombobox = document.getElementById("search-combobox")!;
 const elBtnScan = document.getElementById("btn-scan") as HTMLButtonElement;
+
+// Sync/Change Target Only filter DOM elements
+const elBtnFilterSyncOnly = document.getElementById("btn-filter-sync-only")!;
+const elIconFilterSyncOnly = document.getElementById("icon-filter-sync-only")!;
 const elBtnSyncExec = document.getElementById("btn-sync-exec") as HTMLButtonElement;
 
 // Tab selectors (Desktop & Mobile)
@@ -173,9 +177,25 @@ async function init() {
 		}
 	};
 
+	const updateFilterSyncOnlyButtonUI = () => {
+		if (state.filterSyncTargetOnlyActive) {
+			elBtnFilterSyncOnly.className = "flex items-center space-x-1.5 bg-indigo-950/60 border border-indigo-500/80 text-indigo-300 shadow-[0_0_8px_rgba(99,102,241,0.4)] px-2.5 py-1 rounded text-xxs font-bold transition focus:outline-none cursor-pointer";
+			elIconFilterSyncOnly.className = "icon-check-square text-xxs";
+		} else {
+			elBtnFilterSyncOnly.className = "flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none cursor-pointer";
+			elIconFilterSyncOnly.className = "icon-square text-xxs";
+		}
+	};
+
 	elToggleFilterCopyUpdate.addEventListener("click", () => {
 		state.filterCopyUpdateActive = !state.filterCopyUpdateActive;
 		updateAdvancedFilterButtonsUI();
+		applyFilterAndRender();
+	});
+
+	elBtnFilterSyncOnly.addEventListener("click", () => {
+		state.filterSyncTargetOnlyActive = !state.filterSyncTargetOnlyActive;
+		updateFilterSyncOnlyButtonUI();
 		applyFilterAndRender();
 	});
 
@@ -372,6 +392,11 @@ function selectProfile(id: string) {
 
 	state.scannedTracks = [];
 	state.filteredTracks = [];
+	state.filterSyncTargetOnlyActive = false;
+	if (elBtnFilterSyncOnly && elIconFilterSyncOnly) {
+		elBtnFilterSyncOnly.className = "flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none cursor-pointer";
+		elIconFilterSyncOnly.className = "icon-square text-xxs";
+	}
 	elTxtSearch.value = "";
 	state.searchQuery = "";
 
@@ -1086,7 +1111,32 @@ function updateMasterCheckboxState() {
 }
 
 function applyFilterAndRender() {
+	// 0. Update priority cache based on the current checked states
+	state.trackPriorityCache.clear();
+	state.scannedTracks.forEach((track) => {
+		let pri = 0;
+		if ((track.status === "missing" || track.status === "updated") && state.checkedCopyTrackIds.has(track.id)) {
+			pri = 1;
+		} else if ((track.status === "synced" || track.status === "updated" || track.status === "phone_only") && state.checkedDeleteTrackIds.has(track.id)) {
+			pri = 2;
+		} else if (track.pathMismatch && (track.status === "synced" || track.status === "updated") && state.checkedMoveTrackIds.has(track.id)) {
+			pri = 3;
+		}
+		state.trackPriorityCache.set(track.id, pri);
+	});
+
 	let tracks = state.scannedTracks;
+
+	// 0. Filter by "同期・変更のみ" (Sync/Change Target Only)
+	if (state.filterSyncTargetOnlyActive) {
+		tracks = tracks.filter((t) => {
+			// Exclude missing tracks that are unchecked
+			if (t.status === "missing" && !isTrackChecked(t)) {
+				return false;
+			}
+			return true;
+		});
+	}
 
 	// 1. Filter by search query based on active tab
 	if (state.searchQuery !== "") {

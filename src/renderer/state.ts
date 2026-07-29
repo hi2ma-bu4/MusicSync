@@ -15,6 +15,7 @@ export const state = {
 	searchQuery: "",
 	filterCopyUpdateActive: false,
 	filterDeleteActive: false,
+	filterSyncTargetOnlyActive: false,
 	currentPlayingRowKey: null as string | null,
 	isPlaying: false,
 	tabScrollPositions: {
@@ -27,6 +28,7 @@ export const state = {
 	// Scanned results
 	scannedTracks: [] as ScanResultItem[],
 	filteredTracks: [] as ScanResultItem[],
+	trackPriorityCache: new Map<string, number>(),
 	activeStatusFilters: new Set<string>(["missing", "updated", "synced", "phone_only", "path_warning"]),
 	sortRules: [] as { field: string; direction: "asc" | "desc"; target: "common" | "group" | "track" }[],
 	tabSortRules: {

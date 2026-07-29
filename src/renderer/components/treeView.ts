@@ -461,6 +461,8 @@ interface RenderCallbacks {
 	renderActiveView: () => void;
 }
 
+import { getTrackChangePriority, groupHasChange } from "./utils";
+
 function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: string, cb: RenderCallbacks, discNum?: number) {
 	const meta = t.itunesTrack || t.phoneTrack;
 	if (!meta) return;
@@ -468,7 +470,15 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 	const trackCheckboxId = discNum !== undefined ? `chk-track-${albumKey}-${discNum}-${t.id}` : `chk-track-${albumKey}-${t.id}`;
 
 	const row = document.createElement("div");
-	row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900/60 gap-2 bg-${t.status} context-track track-row`;
+	let highlightClass = "";
+	if (state.filterSyncTargetOnlyActive) {
+		const pri = getTrackChangePriority(t);
+		if (pri === 1) highlightClass = " track-highlight-add";
+		else if (pri === 2) highlightClass = " track-highlight-delete";
+		else if (pri === 3) highlightClass = " track-highlight-move";
+	}
+
+	row.className = `px-3 py-1 flex items-center justify-between hover:bg-gray-900/60 gap-2 bg-${t.status} context-track track-row${highlightClass}`;
 	row.setAttribute("data-track-id", t.id);
 	row.setAttribute("data-title", meta.title || "");
 	row.setAttribute("data-artist", meta.artist || "");
@@ -506,7 +516,7 @@ function renderSingleTrackRow(elTracksChildren: HTMLElement, t: any, albumKey: s
 		(window as any).updateTrackRowButtons(row);
 	}
 
-	const chkTrack = document.getElementById(trackCheckboxId) as HTMLInputElement;
+	const chkTrack = row.querySelector(`input[id="${trackCheckboxId}"]`) as HTMLInputElement;
 	chkTrack.addEventListener("change", () => {
 		pushHistoryState();
 		setTrackCheckedState(t, chkTrack.checked);
@@ -521,7 +531,8 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 	elTracksChildren.innerHTML = "";
 
 	// Sort albumTracks using active sort rules
-	albumTracks.sort((a, b) => compareTracks(a, b, state.sortRules));
+	const bypassUpSort = state.activeTab !== "genre";
+	albumTracks.sort((a, b) => compareTracks(a, b, state.sortRules, bypassUpSort));
 
 	// Find the maximum disc number to determine if we should group
 	const maxDisc = albumTracks.reduce((max, t) => {
@@ -566,7 +577,7 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 			});
 
 			// Setup Disc Checkbox Listener
-			const chkDisc = document.getElementById(`chk-disc-${albumKey}-${discNum}`) as HTMLInputElement;
+			const chkDisc = discHeader.querySelector(`input[id="chk-disc-${albumKey}-${discNum}"]`) as HTMLInputElement;
 			chkDisc.addEventListener("click", (e) => {
 				e.stopPropagation();
 				pushHistoryState();
@@ -601,7 +612,11 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 
 		const divAlbum = document.createElement("div");
 		divAlbum.id = `album-card-${albumKey}`;
-		divAlbum.className = "relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0 context-album";
+		let albumHighlightClass = "";
+		if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+			albumHighlightClass = " group-change-highlight";
+		}
+		divAlbum.className = `relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0 context-album${albumHighlightClass}`;
 		divAlbum.setAttribute("data-album", albumName);
 		divAlbum.setAttribute("data-artist", firstArtist);
 		divAlbum.setAttribute("data-genre", firstGenre);
@@ -628,7 +643,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 		setCheckboxState(`chk-${albumKey}`, albumTracks);
 		applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
 
-		const chkAlbum = document.getElementById(`chk-${albumKey}`) as HTMLInputElement;
+		const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
 		chkAlbum.addEventListener("click", (e) => {
 			e.stopPropagation();
 			pushHistoryState();
@@ -641,7 +656,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			cb.updateMasterCheckboxState();
 		});
 
-		const elHdr = document.getElementById(`hdr-${albumKey}`)!;
+		const elHdr = divAlbum.querySelector(`#hdr-${albumKey}`) as HTMLElement;
 		elHdr.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" || e.key === " ") {
 				if (e.target === chkAlbum) return; // Prevent double toggling if checking the checkbox directly
@@ -744,7 +759,11 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			});
 
 			const divArtist = document.createElement("div");
-			divArtist.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-artist";
+			let artistHighlightClass = "";
+			if (state.filterSyncTargetOnlyActive && groupHasChange(artistTracks)) {
+				artistHighlightClass = " group-change-highlight";
+			}
+			divArtist.className = `bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-artist${artistHighlightClass}`;
 			divArtist.setAttribute("data-artist", artistName);
 
 			divArtist.innerHTML = `
@@ -888,7 +907,11 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 			const div = document.createElement("div");
 			div.id = `album-card-${albumKey}`;
-			div.className = "relative bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-album";
+			let albumHighlightClass = "";
+			if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+				albumHighlightClass = " group-change-highlight";
+			}
+			div.className = `relative bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-album${albumHighlightClass}`;
 			div.setAttribute("data-album", albumName);
 			div.setAttribute("data-artist", firstArtist);
 			div.setAttribute("data-genre", firstGenre);
@@ -1032,7 +1055,11 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			const isGenreOpen = state.expandedGroups.has(genreKey);
 
 			const div = document.createElement("div");
-			div.className = "bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-genre";
+			let genreHighlightClass = "";
+			if (state.filterSyncTargetOnlyActive && groupHasChange(genreTracks)) {
+				genreHighlightClass = " group-change-highlight";
+			}
+			div.className = `bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-genre${genreHighlightClass}`;
 			div.setAttribute("data-genre", genreName);
 
 			div.innerHTML = `

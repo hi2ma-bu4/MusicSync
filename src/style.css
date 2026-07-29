@@ -21,11 +21,11 @@
 
 /* Expand/Collapse display */
 .accordion-content {
-	display: none;
+	@apply hidden;
 }
 
 .accordion-content.open {
-	display: block;
+	@apply block;
 }
 
 /* Resizable table headers */
@@ -73,4 +73,29 @@ input:focus-visible,
 select:focus-visible,
 [tabindex="0"]:focus-visible {
 	@apply outline-2! outline-solid! outline-indigo-500! outline-offset-2!;
+}
+
+/* Custom highlights for changed tracks and groups */
+.track-highlight-add {
+	box-shadow:
+		inset 0 0 0 1px rgba(34, 197, 94, 0.6),
+		0 0 6px rgba(34, 197, 94, 0.2) !important;
+}
+
+.track-highlight-delete {
+	box-shadow:
+		inset 0 0 0 1px rgba(239, 68, 68, 0.6),
+		0 0 6px rgba(239, 68, 68, 0.2) !important;
+}
+
+.track-highlight-move {
+	box-shadow:
+		inset 0 0 0 1px rgba(245, 158, 11, 0.6),
+		0 0 6px rgba(245, 158, 11, 0.2) !important;
+}
+
+.group-change-highlight {
+	@apply border-indigo-500/80!;
+
+	box-shadow: 0 0 8px rgba(99, 102, 241, 0.3) !important;
 }

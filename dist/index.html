@@ -4,8 +4,8 @@
 	<meta charset="UTF-8">
 	<meta name="viewport" content="width=device-width, initial-scale=1.0">
 	<title>MusicSync - iTunes同期ツール</title>
-  <script type="module" crossorigin src="./assets/js/index-CJJgwjQv.js"></script>
-  <link rel="stylesheet" crossorigin href="./assets/css/index-BI-yZg7m.css">
+  <script type="module" crossorigin src="./assets/js/index-9fqiQshf.js"></script>
+  <link rel="stylesheet" crossorigin href="./assets/css/index-B-UDdids.css">
 </head>
 <body class="bg-gray-900 text-gray-100 h-full overflow-hidden flex flex-col font-sans select-none">
 
@@ -15,7 +15,7 @@
 		<div class="flex items-center space-x-2">
 			<i class="icon-music text-indigo-400 text-lg"></i>
 			<span class="text-base font-bold tracking-wider text-indigo-300">MusicSync</span>
-			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.16</span>
+			<span class="text-xxs bg-gray-700 px-1.5 py-0.5 rounded text-gray-400 font-mono">v0.5.17</span>
 		</div>
 
 		<!-- Central Music Preview Player -->
@@ -165,7 +165,7 @@
 
 					<!-- Real Tabs for Larger Screens -->
 					<nav class="hidden sm:flex space-x-3 border-b-0" aria-label="Tabs">
-						<button id="tab-artist" class="tab-btn pb-1 pt-0.5 border-b-2 border-indigo-500 text-indigo-400 font-semibold transition flex items-center space-x-1">
+						<button id="tab-artist" class="tab-btn pb-1 pt-0.5 border-b-2 border-transparent text-gray-400 hover:text-white transition flex items-center space-x-1">
 							<i class="icon-user text-xs"></i>
 							<span>アーティスト</span>
 						</button>
@@ -190,6 +190,12 @@
 					<button id="btn-reset-changes" type="button" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none disabled:opacity-40 disabled:cursor-not-allowed cursor-pointer" disabled>
 						<i class="icon-refresh-cw text-xxs"></i>
 						<span>変更をリセット</span>
+					</button>
+
+					<!-- Sync/Change Target Only Button -->
+					<button id="btn-filter-sync-only" type="button" class="flex items-center space-x-1.5 bg-gray-700 hover:bg-gray-650 border border-gray-650 px-2.5 py-1 rounded text-xxs font-semibold text-gray-200 transition focus:outline-none cursor-pointer" title="同期・変更される予定の曲のみを表示">
+						<i id="icon-filter-sync-only" class="icon-square text-xxs"></i>
+						<span>同期・変更のみ</span>
 					</button>
 
 					<!-- Notion-like Sort Button & Dropdown Panel -->
