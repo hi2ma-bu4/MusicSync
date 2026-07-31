@@ -4,7 +4,7 @@ import "./style.css";
 import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
-import { clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
+import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
 import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import { ScanResultItem } from "./renderer/types";
@@ -38,6 +38,8 @@ const elBtnScan = document.getElementById("btn-scan") as HTMLButtonElement;
 const elBtnFilterSyncOnly = document.getElementById("btn-filter-sync-only")!;
 const elIconFilterSyncOnly = document.getElementById("icon-filter-sync-only")!;
 const elBtnSyncExec = document.getElementById("btn-sync-exec") as HTMLButtonElement;
+const elBtnViewToggle = document.getElementById("btn-view-toggle") as HTMLButtonElement;
+const elIconViewToggle = document.getElementById("icon-view-toggle")!;
 
 // Tab selectors (Desktop & Mobile)
 const elBtnTabsDropdown = document.getElementById("btn-tabs-dropdown")!;
@@ -336,6 +338,62 @@ async function init() {
 	updateFilterUI();
 	renderSortRules();
 
+	// Setup view toggle event listener
+	if (elBtnViewToggle) {
+		elBtnViewToggle.addEventListener("click", () => {
+			if (state.activeTab !== "artist" && state.activeTab !== "album") return;
+
+			// Before toggling, calculate which album/artist card is closest to the top of the container
+			const container = elTreeContainer;
+			const cards = Array.from(container.querySelectorAll(".context-album, .context-artist, .grid-card-album"));
+			let closestCardId: string | null = null;
+			let minDiff = Infinity;
+			const containerRect = container.getBoundingClientRect();
+
+			cards.forEach((card) => {
+				const rect = card.getBoundingClientRect();
+				const diff = Math.abs(rect.top - containerRect.top);
+				if (diff < minDiff) {
+					minDiff = diff;
+					closestCardId = card.id || null;
+				}
+			});
+
+			// If switching from grid to list, or vice versa, and multiple accordion items might be open,
+			// handle grid closure rule: only keep the last-opened album/artist open.
+			if (state.viewMode === "list") {
+				// Switching to GRID. Ensure at most 1 album is expanded.
+				const expandedList = Array.from(state.expandedGroups);
+				if (expandedList.length > 1) {
+					// Keep only the last expanded group
+					const lastExpanded = expandedList[expandedList.length - 1];
+					state.expandedGroups.clear();
+					state.expandedGroups.add(lastExpanded);
+				}
+			}
+
+			state.isTogglingViewMode = true;
+			state.closestCardId = closestCardId;
+
+			// Toggle the mode
+			state.viewMode = state.viewMode === "list" ? "grid" : "list";
+
+			// Persist in profile
+			if (state.currentProfileId) {
+				const p = state.profiles.find((x) => x.id === state.currentProfileId);
+				if (p) {
+					p.viewMode = state.viewMode;
+					api.saveProfile(p).then((updatedProfiles) => {
+						state.profiles = updatedProfiles;
+					});
+				}
+			}
+
+			updateViewToggleUI();
+			applyFilterAndRender();
+		});
+	}
+
 	setupEventListeners();
 	setupColumnResize();
 	setupPlayerEventListeners();
@@ -449,6 +507,14 @@ function selectProfile(id: string) {
 	}
 	updateLoopModeUI();
 
+	// Restore view mode settings
+	if (p.viewMode) {
+		state.viewMode = p.viewMode;
+	} else {
+		state.viewMode = "list";
+	}
+	updateViewToggleUI();
+
 	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
 	const tooltip = document.getElementById("player-volume-tooltip")!;
 	if (volumeInput) {
@@ -508,7 +574,24 @@ function switchTab(tabId: "artist" | "album" | "genre" | "track") {
 		elTrackContainer.classList.add("hidden");
 	}
 
+	updateViewToggleUI();
 	applyFilterAndRender();
+}
+
+function updateViewToggleUI() {
+	if (!elBtnViewToggle || !elIconViewToggle) return;
+
+	// View toggle is only valid on "artist" and "album" tabs.
+	const isEnabledTab = state.activeTab === "artist" || state.activeTab === "album";
+	elBtnViewToggle.disabled = !isEnabledTab;
+
+	if (state.viewMode === "grid") {
+		elIconViewToggle.className = "icon-list text-xxs";
+		elBtnViewToggle.title = "リスト表示に切り替え";
+	} else {
+		elIconViewToggle.className = "icon-layout-grid text-xxs";
+		elBtnViewToggle.title = "グリッド表示に切り替え";
+	}
 }
 
 import { normalizeForSearch } from "./renderer/components/utils";
@@ -3590,6 +3673,15 @@ function showDetailedModal(type: "track" | "album", data: any) {
 
 	modal.classList.remove("hidden");
 }
+
+window.addEventListener("resize", () => {
+	if (state.viewMode === "grid") {
+		const gridContainers = document.querySelectorAll(".grid");
+		gridContainers.forEach((gridContainer) => {
+			alignGridDrawer(gridContainer as HTMLElement);
+		});
+	}
+});
 
 // Start everything
 init();

@@ -57,6 +57,11 @@ export const state = {
 
 	// Accordion states
 	expandedGroups: new Set<string>(),
+	viewMode: "list" as "list" | "grid",
+
+	// View toggle scroll restoration state
+	isTogglingViewMode: false,
+	closestCardId: null as string | null,
 };
 
 // Undo/Redo Selection History Stacks

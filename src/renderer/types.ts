@@ -13,6 +13,7 @@ export interface Profile {
 	playVolume?: number;
 	tabSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
 	defaultSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
+	viewMode?: "list" | "grid";
 }
 
 export interface Settings {

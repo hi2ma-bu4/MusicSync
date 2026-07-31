@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareGroups, compareTracks, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 let currentTreeViewRenderId = 0;
 
@@ -41,6 +41,65 @@ export function restoreScrollPosition(container: HTMLElement, targetScrollTop: n
 		requestAnimationFrame(attemptRestore);
 	};
 	requestAnimationFrame(attemptRestore);
+}
+
+export function alignGridDrawer(container: HTMLElement) {
+	if (state.viewMode !== "grid") return;
+
+	console.log("ALIGN GRID DRAWER START");
+	// 1. Find the expanded/open drawer inside the container
+	const drawers = Array.from(container.querySelectorAll('[id^="children-"]')) as HTMLElement[];
+	const activeDrawer = drawers.find((d) => !d.classList.contains("hidden"));
+	console.log("ALIGN GRID DRAWER - drawers count:", drawers.length, "active drawer:", activeDrawer?.id);
+	if (!activeDrawer) return;
+
+	// 2. Identify the corresponding card
+	const albumKey = activeDrawer.id.replace("children-", "");
+	const triggerCard = container.querySelector(`#album-card-${albumKey}`) as HTMLElement;
+	console.log("ALIGN GRID DRAWER - albumKey:", albumKey, "trigger card:", triggerCard?.id);
+	if (!triggerCard) return;
+
+	// Temporarily hide the drawer so it doesn't distort offsetTops of other cards
+	const wasHidden = activeDrawer.classList.contains("hidden");
+	activeDrawer.classList.add("hidden");
+
+	// 3. Find all cards in the same grid container
+	const cards = Array.from(container.querySelectorAll(".grid-card-album")) as HTMLElement[];
+	console.log("ALIGN GRID DRAWER - total cards:", cards.length);
+	if (cards.length === 0) {
+		if (!wasHidden) activeDrawer.classList.remove("hidden");
+		return;
+	}
+
+	// 4. Calculate trigger card's offsetTop
+	const targetOffsetTop = triggerCard.offsetTop;
+	console.log("ALIGN GRID DRAWER - triggerCard offsetTop:", targetOffsetTop);
+
+	// 5. Find all cards sharing the exact same offsetTop
+	const sameRowCards = cards.filter((card) => Math.abs(card.offsetTop - targetOffsetTop) < 5);
+	console.log(
+		"ALIGN GRID DRAWER - sameRowCards:",
+		sameRowCards.map((c) => c.id),
+	);
+
+	// Restore drawer visibility
+	if (!wasHidden) {
+		activeDrawer.classList.remove("hidden");
+	}
+
+	if (sameRowCards.length === 0) return;
+
+	// 6. Find the last card in this physical row
+	const lastCardInRow = sameRowCards[sameRowCards.length - 1];
+	console.log("ALIGN GRID DRAWER - lastCardInRow:", lastCardInRow?.id);
+
+	// 7. Insert the active drawer immediately after the last card of the row in DOM
+	if (lastCardInRow.nextSibling !== activeDrawer) {
+		console.log("ALIGN GRID DRAWER - Moving drawer to be after:", lastCardInRow.id);
+		lastCardInRow.parentNode?.insertBefore(activeDrawer, lastCardInRow.nextSibling);
+	} else {
+		console.log("ALIGN GRID DRAWER - Already after lastCardInRow:", lastCardInRow.id);
+	}
 }
 
 // Cached index maps to avoid O(N) rebuilds on every checkbox toggle
@@ -601,97 +660,225 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 // Lazy renders albums inside an Artist
 function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMap: Map<string, any[]>, sortedAlbums: string[], cb: RenderCallbacks) {
 	elChildren.innerHTML = "";
-	sortedAlbums.forEach((albumName) => {
-		const albumTracks = albumMap.get(albumName)!;
-		const albumKey = getSafeId("artistalbum", artistName + "_" + albumName);
-		const isAlbumOpen = state.expandedGroups.has(albumKey);
 
-		const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
-		const firstArtist = firstMeta?.artist || "";
-		const firstGenre = firstMeta?.genre || "";
+	if (state.viewMode === "grid") {
+		// Grid container for artist's albums
+		const gridContainer = document.createElement("div");
+		gridContainer.className = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-2";
+		elChildren.appendChild(gridContainer);
 
-		const divAlbum = document.createElement("div");
-		divAlbum.id = `album-card-${albumKey}`;
-		let albumHighlightClass = "";
-		if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
-			albumHighlightClass = " group-change-highlight";
-		}
-		divAlbum.className = `relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0 context-album${albumHighlightClass}`;
-		divAlbum.setAttribute("data-album", albumName);
-		divAlbum.setAttribute("data-artist", firstArtist);
-		divAlbum.setAttribute("data-genre", firstGenre);
+		sortedAlbums.forEach((albumName) => {
+			const albumTracks = albumMap.get(albumName)!;
+			const albumKey = getSafeId("artistalbum", artistName + "_" + albumName);
+			const isAlbumOpen = state.expandedGroups.has(albumKey);
 
-		divAlbum.innerHTML = `
-			<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
-				<div class="flex items-center space-x-2 flex-1 min-w-0">
-					<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="artistalbum" data-artist="${artistName}" data-album="${albumName}">
-					<div class="flex items-center space-x-1.5 truncate">
-						<i class="icon-disc text-indigo-300 text-xxs"></i>
-						<span class="font-semibold text-gray-300">${albumName}</span>
-						<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+			const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+			const firstArtist = firstMeta?.artist || "";
+			const firstGenre = firstMeta?.genre || "";
+			const albumArtistInfo = getAlbumArtistInfo(albumTracks);
+
+			const divAlbum = document.createElement("div");
+			divAlbum.id = `album-card-${albumKey}`;
+			let albumHighlightClass = "";
+			if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+				albumHighlightClass = " group-change-highlight";
+			}
+			divAlbum.className = `relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2.5 context-album grid-card-album${albumHighlightClass}`;
+			divAlbum.setAttribute("data-album", albumName);
+			divAlbum.setAttribute("data-artist", firstArtist);
+			divAlbum.setAttribute("data-genre", firstGenre);
+
+			divAlbum.innerHTML = `
+				<!-- Album Art Aspect Ratio container -->
+				<div class="relative aspect-square w-full bg-gray-900 rounded overflow-hidden shadow-md group">
+					<img class="grid-album-art w-full h-full object-contain hidden no-drag" draggable="false" src="" alt="">
+					<div class="grid-art-placeholder absolute inset-0 flex items-center justify-center text-gray-600">
+						<i class="icon-music text-3xl"></i>
+					</div>
+					<!-- Master check in top-left with semi-transparent circle background -->
+					<div class="absolute top-2 left-2 z-20 h-6 w-6 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition">
+						<input type="checkbox" id="chk-${albumKey}" class="m-0 p-0 leading-none rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer" data-type="artistalbum" data-artist="${artistName}" data-album="${albumName}">
+					</div>
+					<!-- Parent Warnings icon bubble -->
+					<div class="absolute top-2 right-2 z-20">
 						${getParentWarningHtml("album", albumName, albumTracks)}
 					</div>
 				</div>
-				<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
-			</div>
-			<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
-				<div id="children-${albumKey}" class="bg-gray-900 border-t border-gray-700 divide-y divide-gray-800"></div>
-			</div>
-		`;
+				<!-- Info container below art -->
+				<div class="mt-2 text-left space-y-0.5">
+					<div class="font-bold text-gray-200 truncate text-[11px]" title="${albumName}">${albumName}</div>
+					<div class="text-[10px] text-gray-400 truncate" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
+				</div>
+			`;
 
-		elChildren.appendChild(divAlbum);
-		setCheckboxState(`chk-${albumKey}`, albumTracks);
-		applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
+			gridContainer.appendChild(divAlbum);
+			setCheckboxState(`chk-${albumKey}`, albumTracks);
 
-		const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
-		chkAlbum.addEventListener("click", (e) => {
-			e.stopPropagation();
-			pushHistoryState();
-			const isChecked = chkAlbum.checked;
-			albumTracks.forEach((t) => {
-				setTrackCheckedState(t, isChecked);
-			});
-			updateAllTreeCheckboxes();
-			cb.updateSummaryBar();
-			cb.updateMasterCheckboxState();
-		});
-
-		const elHdr = divAlbum.querySelector(`#hdr-${albumKey}`) as HTMLElement;
-		elHdr.addEventListener("keydown", (e) => {
-			if (e.key === "Enter" || e.key === " ") {
-				if (e.target === chkAlbum) return; // Prevent double toggling if checking the checkbox directly
-				e.preventDefault();
-				elHdr.click();
+			// Load Album Art thumbnail
+			if (state.currentProfileId) {
+				api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
+					if (dataUri) {
+						const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
+						const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
+						if (img) {
+							img.src = dataUri;
+							img.classList.remove("hidden");
+							if (placeholder) placeholder.classList.add("hidden");
+						}
+					}
+				});
 			}
+
+			// Sub-tracks container (expanded direct-insertion panel below/after)
+			const divTracksContent = document.createElement("div");
+			divTracksContent.id = `children-${albumKey}`;
+			divTracksContent.className = "col-span-full bg-gray-900 border border-gray-700/80 rounded mt-2 p-2 divide-y divide-gray-800 space-y-0.5 text-xxs hidden";
+			gridContainer.appendChild(divTracksContent);
+
+			if (isAlbumOpen) {
+				divTracksContent.classList.remove("hidden");
+				renderAlbumTracks(divTracksContent, albumTracks, albumKey, cb);
+			}
+
+			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
+			chkAlbum.addEventListener("click", (e) => {
+				e.stopPropagation();
+				pushHistoryState();
+				const isChecked = chkAlbum.checked;
+				albumTracks.forEach((t) => {
+					setTrackCheckedState(t, isChecked);
+				});
+				updateAllTreeCheckboxes();
+				cb.updateSummaryBar();
+				cb.updateMasterCheckboxState();
+			});
+
+			divAlbum.addEventListener("click", (e) => {
+				if (e.target === chkAlbum) return;
+
+				const isOpenNow = state.expandedGroups.has(albumKey);
+				const newOpenState = !isOpenNow;
+
+				if (newOpenState) {
+					// GRID Close other albums rule: Close all other open artist albums
+					const otherKeys = Array.from(state.expandedGroups).filter((key) => key !== albumKey && key.startsWith("artistalbum_"));
+					otherKeys.forEach((key) => {
+						state.expandedGroups.delete(key);
+						const otherTracksContainer = document.getElementById(`children-${key}`);
+						if (otherTracksContainer) {
+							otherTracksContainer.classList.add("hidden");
+							otherTracksContainer.innerHTML = "";
+						}
+					});
+
+					state.expandedGroups.add(albumKey);
+					divTracksContent.classList.remove("hidden");
+					renderAlbumTracks(divTracksContent, albumTracks, albumKey, cb);
+					alignGridDrawer(gridContainer);
+					updateAllTreeCheckboxes();
+				} else {
+					state.expandedGroups.delete(albumKey);
+					divTracksContent.classList.add("hidden");
+					divTracksContent.innerHTML = "";
+				}
+			});
 		});
 
-		elHdr.addEventListener("click", () => {
-			const isOpenNow = state.expandedGroups.has(albumKey);
-			const newOpenState = !isOpenNow;
-			if (newOpenState) state.expandedGroups.add(albumKey);
-			else state.expandedGroups.delete(albumKey);
+		// Align initial expanded drawer on first render
+		alignGridDrawer(gridContainer);
+	} else {
+		sortedAlbums.forEach((albumName) => {
+			const albumTracks = albumMap.get(albumName)!;
+			const albumKey = getSafeId("artistalbum", artistName + "_" + albumName);
+			const isAlbumOpen = state.expandedGroups.has(albumKey);
 
-			const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
-			const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
-			if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
-			if (content) content.classList.toggle("open", newOpenState);
+			const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+			const firstArtist = firstMeta?.artist || "";
+			const firstGenre = firstMeta?.genre || "";
 
-			if (newOpenState) {
-				const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
-				if (elTracksChildren.innerHTML === "") {
+			const divAlbum = document.createElement("div");
+			divAlbum.id = `album-card-${albumKey}`;
+			let albumHighlightClass = "";
+			if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+				albumHighlightClass = " group-change-highlight";
+			}
+			divAlbum.className = `relative border border-gray-700 rounded bg-gray-800 overflow-hidden mb-1.5 last:mb-0 context-album${albumHighlightClass}`;
+			divAlbum.setAttribute("data-album", albumName);
+			divAlbum.setAttribute("data-artist", firstArtist);
+			divAlbum.setAttribute("data-genre", firstGenre);
+
+			divAlbum.innerHTML = `
+				<div class="px-2.5 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
+					<div class="flex items-center space-x-2 flex-1 min-w-0">
+						<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="artistalbum" data-artist="${artistName}" data-album="${albumName}">
+						<div class="flex items-center space-x-1.5 truncate">
+							<i class="icon-disc text-indigo-300 text-xxs"></i>
+							<span class="font-semibold text-gray-300">${albumName}</span>
+							<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+							${getParentWarningHtml("album", albumName, albumTracks)}
+						</div>
+					</div>
+					<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
+				</div>
+				<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
+					<div id="children-${albumKey}" class="bg-gray-900 border-t border-gray-700 divide-y divide-gray-800"></div>
+				</div>
+			`;
+
+			elChildren.appendChild(divAlbum);
+			setCheckboxState(`chk-${albumKey}`, albumTracks);
+			applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
+
+			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
+			chkAlbum.addEventListener("click", (e) => {
+				e.stopPropagation();
+				pushHistoryState();
+				const isChecked = chkAlbum.checked;
+				albumTracks.forEach((t) => {
+					setTrackCheckedState(t, isChecked);
+				});
+				updateAllTreeCheckboxes();
+				cb.updateSummaryBar();
+				cb.updateMasterCheckboxState();
+			});
+
+			const elHdr = divAlbum.querySelector(`#hdr-${albumKey}`) as HTMLElement;
+			elHdr.addEventListener("keydown", (e) => {
+				if (e.key === "Enter" || e.key === " ") {
+					if (e.target === chkAlbum) return; // Prevent double toggling if checking the checkbox directly
+					e.preventDefault();
+					elHdr.click();
+				}
+			});
+
+			elHdr.addEventListener("click", () => {
+				const isOpenNow = state.expandedGroups.has(albumKey);
+				const newOpenState = !isOpenNow;
+				if (newOpenState) state.expandedGroups.add(albumKey);
+				else state.expandedGroups.delete(albumKey);
+
+				const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
+				const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
+				if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+				if (content) content.classList.toggle("open", newOpenState);
+
+				if (newOpenState) {
+					const elTracksChildren = document.getElementById(`children-${albumKey}`)!;
+					if (elTracksChildren.innerHTML === "") {
+						renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
+						updateAllTreeCheckboxes();
+					}
+				}
+			});
+
+			if (isAlbumOpen) {
+				const elTracksChildren = divAlbum.querySelector(`#children-${albumKey}`) as HTMLElement;
+				if (elTracksChildren) {
 					renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
-					updateAllTreeCheckboxes();
 				}
 			}
 		});
-
-		if (isAlbumOpen) {
-			const elTracksChildren = divAlbum.querySelector(`#children-${albumKey}`) as HTMLElement;
-			if (elTracksChildren) {
-				renderAlbumTracks(elTracksChildren, albumTracks, albumKey, cb);
-			}
-		}
-	});
+	}
 }
 
 export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
@@ -848,11 +1035,23 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		if (index < sortedArtistKeys.length) {
 			requestAnimationFrame(nextChunk);
 		} else {
-			if (state.tabScrollPositions.artist) {
-				restoreScrollPosition(container, state.tabScrollPositions.artist);
+			if (state.isTogglingViewMode && state.closestCardId) {
+				const targetCard = document.getElementById(state.closestCardId);
+				if (targetCard) {
+					targetCard.scrollIntoView({ behavior: "auto", block: "start" });
+				}
+				setTimeout(() => {
+					state.isTogglingViewMode = false;
+					state.closestCardId = null;
+				}, 100);
+			} else {
+				if (state.tabScrollPositions.artist) {
+					restoreScrollPosition(container, state.tabScrollPositions.artist);
+				}
 			}
 
 			container.onscroll = () => {
+				if (state.isTogglingViewMode) return;
 				state.tabScrollPositions.artist = container.scrollTop;
 			};
 		}
@@ -887,62 +1086,94 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	const chunkSize = 50;
 	let index = 0;
 
-	function nextChunk() {
-		if (renderId !== currentTreeViewRenderId) {
-			return; // Aborted
-		}
+	if (state.viewMode === "grid") {
+		// Grid View rendering
+		const gridContainer = document.createElement("div");
+		gridContainer.className = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4";
+		container.appendChild(gridContainer);
 
-		const end = Math.min(index + chunkSize, sortedAlbums.length);
-		const fragment = document.createDocumentFragment();
-
-		for (let i = index; i < end; i++) {
-			const albumName = sortedAlbums[i];
-			const albumTracks = albumMap.get(albumName)!;
-			const albumKey = getSafeId("album", albumName);
-			const isAlbumOpen = state.expandedGroups.has(albumKey);
-
-			const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
-			const firstArtist = firstMeta?.artist || "";
-			const firstGenre = firstMeta?.genre || "";
-
-			const div = document.createElement("div");
-			div.id = `album-card-${albumKey}`;
-			let albumHighlightClass = "";
-			if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
-				albumHighlightClass = " group-change-highlight";
+		function nextGridChunk() {
+			if (renderId !== currentTreeViewRenderId) {
+				return; // Aborted
 			}
-			div.className = `relative bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-album${albumHighlightClass}`;
-			div.setAttribute("data-album", albumName);
-			div.setAttribute("data-artist", firstArtist);
-			div.setAttribute("data-genre", firstGenre);
 
-			div.innerHTML = `
-				<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
-					<div class="flex items-center space-x-2 flex-1 min-w-0">
-						<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="album" data-album="${albumName}">
-						<div class="flex items-center space-x-1 truncate">
-							<i class="icon-disc text-indigo-400 text-xxs"></i>
-							<span class="font-bold text-gray-200">${albumName}</span>
-							<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+			const end = Math.min(index + chunkSize, sortedAlbums.length);
+			const fragment = document.createDocumentFragment();
+
+			for (let i = index; i < end; i++) {
+				const albumName = sortedAlbums[i];
+				const albumTracks = albumMap.get(albumName)!;
+				const albumKey = getSafeId("album", albumName);
+				const isAlbumOpen = state.expandedGroups.has(albumKey);
+
+				const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+				const firstArtist = firstMeta?.artist || "";
+				const firstGenre = firstMeta?.genre || "";
+				const albumArtistInfo = getAlbumArtistInfo(albumTracks);
+
+				const divAlbum = document.createElement("div");
+				divAlbum.id = `album-card-${albumKey}`;
+				let albumHighlightClass = "";
+				if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+					albumHighlightClass = " group-change-highlight";
+				}
+				divAlbum.className = `relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2.5 context-album grid-card-album${albumHighlightClass}`;
+				divAlbum.setAttribute("data-album", albumName);
+				divAlbum.setAttribute("data-artist", firstArtist);
+				divAlbum.setAttribute("data-genre", firstGenre);
+
+				divAlbum.innerHTML = `
+					<!-- Album Art Aspect Ratio container -->
+					<div class="relative aspect-square w-full bg-gray-900 rounded overflow-hidden shadow-md group">
+						<img class="grid-album-art w-full h-full object-contain hidden no-drag" draggable="false" src="" alt="">
+						<div class="grid-art-placeholder absolute inset-0 flex items-center justify-center text-gray-600">
+							<i class="icon-music text-3xl"></i>
+						</div>
+						<!-- Master check in top-left with semi-transparent circle background -->
+						<div class="absolute top-2 left-2 z-20 h-6 w-6 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition">
+							<input type="checkbox" id="chk-${albumKey}" class="m-0 p-0 leading-none rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer" data-type="album" data-album="${albumName}">
+						</div>
+						<!-- Parent Warnings icon bubble -->
+						<div class="absolute top-2 right-2 z-20">
 							${getParentWarningHtml("album", albumName, albumTracks)}
 						</div>
 					</div>
-					<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
-				</div>
-				<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
-					<div id="children-${albumKey}" class="border-t border-gray-700 bg-gray-900/40 p-2.5 divide-y divide-gray-800"></div>
-				</div>
-			`;
+					<!-- Info container below art -->
+					<div class="mt-2 text-left space-y-0.5">
+						<div class="font-bold text-gray-200 truncate text-[11px]" title="${albumName}">${albumName}</div>
+						<div class="text-[10px] text-gray-400 truncate" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
+					</div>
+				`;
 
-			fragment.appendChild(div);
+				fragment.appendChild(divAlbum);
 
-			// Setup listeners synchronously inside document fragment
-			const cardId = `album-card-${albumKey}`;
-			const chkAlbum = div.querySelector(`#chk-${albumKey}`) as HTMLInputElement;
-			if (chkAlbum) {
-				setCheckboxStateElement(chkAlbum, albumTracks);
-				applyAlbumArtBackground(cardId, albumName);
+				// Load Album Art thumbnail
+				if (state.currentProfileId) {
+					api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
+						if (dataUri) {
+							const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
+							const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
+							if (img) {
+								img.src = dataUri;
+								img.classList.remove("hidden");
+								if (placeholder) placeholder.classList.add("hidden");
+							}
+						}
+					});
+				}
 
+				// Sub-tracks container (expanded direct-insertion panel below/after)
+				const divTracksContent = document.createElement("div");
+				divTracksContent.id = `children-${albumKey}`;
+				divTracksContent.className = "col-span-full bg-gray-900 border border-gray-700/80 rounded mt-2 p-2 divide-y divide-gray-800 space-y-0.5 text-xxs hidden";
+				fragment.appendChild(divTracksContent);
+
+				if (isAlbumOpen) {
+					divTracksContent.classList.remove("hidden");
+					renderAlbumTracks(divTracksContent, albumTracks, albumKey, cb);
+				}
+
+				const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
 				chkAlbum.addEventListener("click", (e) => {
 					e.stopPropagation();
 					pushHistoryState();
@@ -954,64 +1185,209 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 					cb.updateSummaryBar();
 					cb.updateMasterCheckboxState();
 				});
-			}
 
-			const elHdr = div.querySelector(`#hdr-${albumKey}`) as HTMLElement;
-			if (elHdr) {
-				elHdr.addEventListener("keydown", (e) => {
-					if (e.key === "Enter" || e.key === " ") {
-						if (e.target === chkAlbum) return;
-						e.preventDefault();
-						elHdr.click();
-					}
-				});
+				divAlbum.addEventListener("click", (e) => {
+					if (e.target === chkAlbum) return;
 
-				elHdr.addEventListener("click", () => {
 					const isOpenNow = state.expandedGroups.has(albumKey);
 					const newOpenState = !isOpenNow;
-					if (newOpenState) state.expandedGroups.add(albumKey);
-					else state.expandedGroups.delete(albumKey);
-
-					const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
-					const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
-					if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
-					if (content) content.classList.toggle("open", newOpenState);
 
 					if (newOpenState) {
-						const elChildren = document.getElementById(`children-${albumKey}`)!;
-						if (elChildren && elChildren.innerHTML === "") {
-							renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
-							updateAllTreeCheckboxes();
-						}
+						// GRID Close other albums rule: Close all other open albums
+						const otherKeys = Array.from(state.expandedGroups).filter((key) => key !== albumKey && key.startsWith("album_"));
+						otherKeys.forEach((key) => {
+							state.expandedGroups.delete(key);
+							const otherTracksContainer = document.getElementById(`children-${key}`);
+							if (otherTracksContainer) {
+								otherTracksContainer.classList.add("hidden");
+								otherTracksContainer.innerHTML = "";
+							}
+						});
+
+						state.expandedGroups.add(albumKey);
+						divTracksContent.classList.remove("hidden");
+						renderAlbumTracks(divTracksContent, albumTracks, albumKey, cb);
+						alignGridDrawer(gridContainer);
+						updateAllTreeCheckboxes();
+					} else {
+						state.expandedGroups.delete(albumKey);
+						divTracksContent.classList.add("hidden");
+						divTracksContent.innerHTML = "";
 					}
 				});
 			}
 
-			if (isAlbumOpen) {
-				const elChildren = div.querySelector(`#children-${albumKey}`) as HTMLElement;
-				if (elChildren) {
-					renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
+			gridContainer.appendChild(fragment);
+			index = end;
+
+			if (index < sortedAlbums.length) {
+				requestAnimationFrame(nextGridChunk);
+			} else {
+				alignGridDrawer(gridContainer);
+
+				if (state.isTogglingViewMode && state.closestCardId) {
+					const targetCard = document.getElementById(state.closestCardId);
+					if (targetCard) {
+						targetCard.scrollIntoView({ behavior: "auto", block: "start" });
+					}
+					setTimeout(() => {
+						state.isTogglingViewMode = false;
+						state.closestCardId = null;
+					}, 100);
+				} else {
+					if (state.tabScrollPositions.album) {
+						restoreScrollPosition(container, state.tabScrollPositions.album);
+					}
+				}
+
+				container.onscroll = () => {
+					if (state.isTogglingViewMode) return;
+					state.tabScrollPositions.album = container.scrollTop;
+				};
+			}
+		}
+
+		nextGridChunk();
+	} else {
+		// List View rendering (original)
+		function nextChunk() {
+			if (renderId !== currentTreeViewRenderId) {
+				return; // Aborted
+			}
+
+			const end = Math.min(index + chunkSize, sortedAlbums.length);
+			const fragment = document.createDocumentFragment();
+
+			for (let i = index; i < end; i++) {
+				const albumName = sortedAlbums[i];
+				const albumTracks = albumMap.get(albumName)!;
+				const albumKey = getSafeId("album", albumName);
+				const isAlbumOpen = state.expandedGroups.has(albumKey);
+
+				const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
+				const firstArtist = firstMeta?.artist || "";
+				const firstGenre = firstMeta?.genre || "";
+
+				const div = document.createElement("div");
+				div.id = `album-card-${albumKey}`;
+				let albumHighlightClass = "";
+				if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
+					albumHighlightClass = " group-change-highlight";
+				}
+				div.className = `relative bg-gray-800 rounded overflow-hidden border border-gray-700 shadow-sm text-xxs mb-2 context-album${albumHighlightClass}`;
+				div.setAttribute("data-album", albumName);
+				div.setAttribute("data-artist", firstArtist);
+				div.setAttribute("data-genre", firstGenre);
+
+				div.innerHTML = `
+					<div class="px-3 py-1.5 flex items-center justify-between hover:bg-gray-700 transition cursor-pointer select-none" id="hdr-${albumKey}" tabindex="0">
+						<div class="flex items-center space-x-2 flex-1 min-w-0">
+							<input type="checkbox" id="chk-${albumKey}" class="rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5" tabindex="0" data-type="album" data-album="${albumName}">
+							<div class="flex items-center space-x-1 truncate">
+								<i class="icon-disc text-indigo-400 text-xxs"></i>
+								<span class="font-bold text-gray-200">${albumName}</span>
+								<span class="text-xxs text-gray-500">(${albumTracks.length}曲)</span>
+								${getParentWarningHtml("album", albumName, albumTracks)}
+							</div>
+						</div>
+						<i class="icon-chevron-right text-gray-400 text-xxs transition-transform duration-150 ${isAlbumOpen ? "transform rotate-90" : ""}"></i>
+					</div>
+					<div class="accordion-content ${isAlbumOpen ? "open" : ""}">
+						<div id="children-${albumKey}" class="border-t border-gray-700 bg-gray-900/40 p-2.5 divide-y divide-gray-800"></div>
+					</div>
+				`;
+
+				fragment.appendChild(div);
+
+				// Setup listeners synchronously inside document fragment
+				const cardId = `album-card-${albumKey}`;
+				const chkAlbum = div.querySelector(`#chk-${albumKey}`) as HTMLInputElement;
+				if (chkAlbum) {
+					setCheckboxStateElement(chkAlbum, albumTracks);
+					applyAlbumArtBackground(cardId, albumName);
+
+					chkAlbum.addEventListener("click", (e) => {
+						e.stopPropagation();
+						pushHistoryState();
+						const isChecked = chkAlbum.checked;
+						albumTracks.forEach((t) => {
+							setTrackCheckedState(t, isChecked);
+						});
+						updateAllTreeCheckboxes();
+						cb.updateSummaryBar();
+						cb.updateMasterCheckboxState();
+					});
+				}
+
+				const elHdr = div.querySelector(`#hdr-${albumKey}`) as HTMLElement;
+				if (elHdr) {
+					elHdr.addEventListener("keydown", (e) => {
+						if (e.key === "Enter" || e.key === " ") {
+							if (e.target === chkAlbum) return;
+							e.preventDefault();
+							elHdr.click();
+						}
+					});
+
+					elHdr.addEventListener("click", () => {
+						const isOpenNow = state.expandedGroups.has(albumKey);
+						const newOpenState = !isOpenNow;
+						if (newOpenState) state.expandedGroups.add(albumKey);
+						else state.expandedGroups.delete(albumKey);
+
+						const chevron = document.querySelector(`#hdr-${albumKey} .icon-chevron-right`);
+						const content = document.querySelector(`#hdr-${albumKey} + .accordion-content`);
+						if (chevron) chevron.classList.toggle("rotate-90", newOpenState);
+						if (content) content.classList.toggle("open", newOpenState);
+
+						if (newOpenState) {
+							const elChildren = document.getElementById("children-" + albumKey)!;
+							if (elChildren && elChildren.innerHTML === "") {
+								renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
+								updateAllTreeCheckboxes();
+							}
+						}
+					});
+				}
+
+				if (isAlbumOpen) {
+					const elChildren = div.querySelector(`#children-${albumKey}`) as HTMLElement;
+					if (elChildren) {
+						renderAlbumTracks(elChildren, albumTracks, albumKey, cb);
+					}
 				}
 			}
-		}
 
-		container.appendChild(fragment);
-		index = end;
+			container.appendChild(fragment);
+			index = end;
 
-		if (index < sortedAlbums.length) {
-			requestAnimationFrame(nextChunk);
-		} else {
-			if (state.tabScrollPositions.album) {
-				restoreScrollPosition(container, state.tabScrollPositions.album);
+			if (index < sortedAlbums.length) {
+				requestAnimationFrame(nextChunk);
+			} else {
+				if (state.isTogglingViewMode && state.closestCardId) {
+					const targetCard = document.getElementById(state.closestCardId);
+					if (targetCard) {
+						targetCard.scrollIntoView({ behavior: "auto", block: "start" });
+					}
+					setTimeout(() => {
+						state.isTogglingViewMode = false;
+						state.closestCardId = null;
+					}, 100);
+				} else {
+					if (state.tabScrollPositions.album) {
+						restoreScrollPosition(container, state.tabScrollPositions.album);
+					}
+				}
+
+				container.onscroll = () => {
+					if (state.isTogglingViewMode) return;
+					state.tabScrollPositions.album = container.scrollTop;
+				};
 			}
-
-			container.onscroll = () => {
-				state.tabScrollPositions.album = container.scrollTop;
-			};
 		}
-	}
 
-	nextChunk();
+		nextChunk();
+	}
 }
 
 export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
@@ -1144,11 +1520,23 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		if (index < sortedGenres.length) {
 			requestAnimationFrame(nextChunk);
 		} else {
-			if (state.tabScrollPositions.genre) {
-				restoreScrollPosition(container, state.tabScrollPositions.genre);
+			if (state.isTogglingViewMode && state.closestCardId) {
+				const targetCard = document.getElementById(state.closestCardId);
+				if (targetCard) {
+					targetCard.scrollIntoView({ behavior: "auto", block: "start" });
+				}
+				setTimeout(() => {
+					state.isTogglingViewMode = false;
+					state.closestCardId = null;
+				}, 100);
+			} else {
+				if (state.tabScrollPositions.genre) {
+					restoreScrollPosition(container, state.tabScrollPositions.genre);
+				}
 			}
 
 			container.onscroll = () => {
+				if (state.isTogglingViewMode) return;
 				state.tabScrollPositions.genre = container.scrollTop;
 			};
 		}
