@@ -428,7 +428,7 @@ function renderProfileDropdown() {
 	});
 }
 
-function selectProfile(id: string) {
+async function selectProfile(id: string) {
 	state.currentProfileId = id;
 	const p = state.profiles.find((x) => x.id === id);
 	if (!p) return;
@@ -461,6 +461,19 @@ function selectProfile(id: string) {
 	// Clear stats and map caches when profile changes
 	clearStatsSummaryCache();
 	clearIndexMapsCache();
+
+	// Load profile-specific settings merged with global fallbacks
+	const globalSettings = await api.getSettings();
+	state.currentSettings = {
+		colorMissing: p.colorMissing || globalSettings.colorMissing || "#22c55e",
+		colorUpdated: p.colorUpdated || globalSettings.colorUpdated || "#f59e0b",
+		colorSynced: p.colorSynced || globalSettings.colorSynced || "#94a3b8",
+		colorPhoneOnly: p.colorPhoneOnly || globalSettings.colorPhoneOnly || "#ef4444",
+		delimiters: p.delimiters || globalSettings.delimiters || DEFAULT_DELIMITERS,
+		exceptions: p.exceptions || globalSettings.exceptions || [],
+		devMode: globalSettings.devMode || false,
+	};
+	updateDynamicColors(state.currentSettings);
 
 	// Restore tab sort rules and populate defaults if missing
 	const initialDefaultSortRules = {
@@ -760,7 +773,7 @@ function renderSearchCombobox() {
 				row.innerHTML = `
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
-							<img class="search-combobox-album-art w-full h-full object-cover hidden" data-album-name="${item}" src="" alt="">
+							<img class="search-combobox-album-art w-full h-full object-contain object-bottom-left hidden" data-album-name="${item}" src="" alt="">
 							<i class="search-combobox-art-placeholder icon-music text-gray-600 text-[10px]"></i>
 						</div>
 						<span class="truncate font-semibold text-gray-200">${item}</span>
@@ -819,7 +832,7 @@ function renderSearchCombobox() {
 				row.innerHTML = `
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
-							<img class="search-combobox-track-art w-full h-full object-cover hidden" data-album-name="${trackAlbum.replace(/"/g, "&quot;")}" src="" alt="">
+							<img class="search-combobox-track-art w-full h-full object-contain object-bottom-left hidden" data-album-name="${trackAlbum.replace(/"/g, "&quot;")}" src="" alt="">
 							<i class="search-combobox-track-placeholder icon-music text-gray-600 text-[10px]"></i>
 						</div>
 						<div class="flex items-center space-x-1 truncate font-sans min-w-0 flex-1">
@@ -878,56 +891,37 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 	elSearchCombobox.classList.add("hidden");
 
 	// Reset stored scroll positions to avoid scroll restore conflicts on jump target
-	state.tabScrollPositions[tabId] = 0;
+	if (tabId === "track") {
+		const idx = state.filteredTracks.findIndex((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
+		if (idx !== -1) {
+			state.tabScrollPositions.track = idx * 30;
+		}
+	} else {
+		state.tabScrollPositions[tabId] = 0;
+	}
 
 	// Reset filter and render instantly so the element exists on screen
 	applyFilterAndRender();
 
 	// 2. Switch tab and auto-expand target group
 	if (tabId === "artist") {
-		// Try to find normalized artist key in all tracks
 		let normalizedKey = normalizeArtistForIntegration(targetName);
 		const artistKey = getSafeId("artist", normalizedKey);
 		state.expandedGroups.add(artistKey);
+		state.jumpTargetId = `hdr-${artistKey}`;
 		switchTab("artist");
-		// 3. Scroll to target element instantly
-		setTimeout(() => {
-			const el = document.getElementById(`hdr-${artistKey}`);
-			if (el) {
-				el.scrollIntoView({ behavior: "auto", block: "center" });
-			}
-		}, 50);
 	} else if (tabId === "album") {
 		const albumKey = getSafeId("album", targetName);
 		state.expandedGroups.add(albumKey);
+		state.jumpTargetId = `hdr-${albumKey}`;
 		switchTab("album");
-		// 3. Scroll to target element instantly
-		setTimeout(() => {
-			const el = document.getElementById(`hdr-${albumKey}`);
-			if (el) {
-				el.scrollIntoView({ behavior: "auto", block: "center" });
-			}
-		}, 50);
 	} else if (tabId === "genre") {
 		const genreKey = getSafeId("genre", targetName);
 		state.expandedGroups.add(genreKey);
+		state.jumpTargetId = `hdr-${genreKey}`;
 		switchTab("genre");
-		// 3. Scroll to target element instantly
-		setTimeout(() => {
-			const el = document.getElementById(`hdr-${genreKey}`);
-			if (el) {
-				el.scrollIntoView({ behavior: "auto", block: "center" });
-			}
-		}, 50);
 	} else if (tabId === "track") {
 		switchTab("track");
-		// 3. Scroll to target item index in the virtual scroll viewport instantly
-		setTimeout(() => {
-			const idx = state.filteredTracks.findIndex((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
-			if (idx !== -1) {
-				vsViewport.scrollTop = idx * 30; // Row height is 30px
-			}
-		}, 50);
 	}
 }
 (window as any).navigateToSuggestion = navigateToSuggestion;
@@ -1490,6 +1484,16 @@ function setupEventListeners() {
 		elColorUpdated.value = state.currentSettings.colorUpdated || "#f59e0b";
 		elColorSynced.value = state.currentSettings.colorSynced || "#94a3b8";
 		elColorPhoneOnly.value = state.currentSettings.colorPhoneOnly || "#ef4444";
+
+		const elSelSettingsGridSize = document.getElementById("sel-settings-grid-size") as HTMLSelectElement;
+		if (elSelSettingsGridSize) {
+			const activeProfile = state.profiles.find((p) => p.id === state.currentProfileId);
+			if (activeProfile) {
+				elSelSettingsGridSize.value = activeProfile.gridSize || "large";
+			} else {
+				elSelSettingsGridSize.value = "large";
+			}
+		}
 
 		if (modalsController) {
 			modalsController.loadSettings(state.currentSettings.delimiters || [], state.currentSettings.exceptions || [], state.currentSettings.devMode || false);

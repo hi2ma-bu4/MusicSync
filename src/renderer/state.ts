@@ -62,6 +62,7 @@ export const state = {
 	// View toggle scroll restoration state
 	isTogglingViewMode: false,
 	closestCardId: null as string | null,
+	jumpTargetId: null as string | null,
 };
 
 // Undo/Redo Selection History Stacks

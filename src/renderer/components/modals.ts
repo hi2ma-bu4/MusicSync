@@ -1,3 +1,4 @@
+import { DEFAULT_DELIMITERS } from "../../shared/constants";
 import { api } from "../api";
 import { state } from "../state";
 import { getCheckboxChangesCount, resetCheckboxesToDefault } from "./utils";
@@ -277,9 +278,47 @@ export function initModals(cb: { renderProfileDropdown: () => void; selectProfil
 			resetCheckboxesToDefault();
 		}
 
-		await api.saveSettings(newSettings);
-		state.currentSettings = newSettings;
-		updateDynamicColors(newSettings);
+		// Save devMode globally
+		const globalSettings = await api.getSettings();
+		globalSettings.devMode = elChkSettingsDevMode.checked;
+		await api.saveSettings(globalSettings);
+
+		// If there is an active profile, save its specific settings
+		if (state.currentProfileId) {
+			const p = state.profiles.find((x) => x.id === state.currentProfileId);
+			if (p) {
+				p.colorMissing = elColorMissing.value;
+				p.colorUpdated = elColorUpdated.value;
+				p.colorSynced = elColorSynced.value;
+				p.colorPhoneOnly = elColorPhoneOnly.value;
+				p.delimiters = delimiters;
+				p.exceptions = exceptions;
+
+				const elSelSettingsGridSize = document.getElementById("sel-settings-grid-size") as HTMLSelectElement;
+				if (elSelSettingsGridSize) {
+					p.gridSize = elSelSettingsGridSize.value as "large" | "medium" | "small";
+				}
+
+				state.profiles = await api.saveProfile(p);
+
+				// Update current settings to match profile
+				state.currentSettings = {
+					colorMissing: p.colorMissing,
+					colorUpdated: p.colorUpdated,
+					colorSynced: p.colorSynced,
+					colorPhoneOnly: p.colorPhoneOnly || "#ef4444",
+					delimiters: p.delimiters || DEFAULT_DELIMITERS,
+					exceptions: p.exceptions || [],
+					devMode: globalSettings.devMode || false,
+				};
+			}
+		} else {
+			// Fallback: save settings globally if no profile selected
+			await api.saveSettings(newSettings);
+			state.currentSettings = newSettings;
+		}
+
+		updateDynamicColors(state.currentSettings);
 		elModalSettings.classList.add("hidden");
 		cb.renderActiveView();
 	});

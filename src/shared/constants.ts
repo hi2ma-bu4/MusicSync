@@ -1,1 +1,1 @@
-export const DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "、", "／"];
+export const DEFAULT_DELIMITERS = [",", "|", "feat.", "&", ";", "、", "／"];

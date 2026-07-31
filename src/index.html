@@ -39,7 +39,7 @@
 
 					<!-- Album Art -->
 					<div id="player-album-art-container" class="w-7 h-7 rounded bg-gray-850 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden shadow-sm relative cursor-pointer">
-						<img id="player-album-art" class="w-full h-full object-cover hidden" src="" alt="">
+						<img id="player-album-art" class="w-full h-full object-contain object-bottom-left hidden" src="" alt="">
 						<i id="player-art-placeholder" class="icon-music text-gray-500 text-xs"></i>
 					</div>
 					<div class="flex flex-col min-w-0 text-left">
@@ -453,6 +453,19 @@
 			<h3 class="text-sm font-bold text-indigo-300 mb-3.5">設定</h3>
 
 			<div class="space-y-4 overflow-y-auto flex-1 pr-1.5">
+				<!-- Album Grid Size -->
+				<div>
+					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">アルバムグリッドの表示サイズ</h4>
+					<div class="flex items-center justify-between py-1">
+						<span class="text-gray-300 font-semibold">表示サイズ (Grid Size)</span>
+						<select id="sel-settings-grid-size" class="bg-gray-700 border border-gray-650 rounded px-2.5 py-1.5 text-white focus:outline-none focus:border-indigo-500">
+							<option value="large">大</option>
+							<option value="medium">中</option>
+							<option value="small">小</option>
+						</select>
+					</div>
+				</div>
+
 				<!-- Status Colors -->
 				<div>
 					<h4 class="font-bold text-gray-400 border-b border-gray-700 pb-1 mb-2">ステータス表示色</h4>
@@ -808,7 +821,7 @@
 				<div class="flex gap-4 items-start bg-gray-900/40 p-3 rounded border border-gray-750">
 					<!-- Album Art -->
 					<div id="detail-album-art-container" tabindex="0" class="w-20 h-20 rounded bg-gray-850 border border-gray-750 flex items-center justify-center shrink-0 overflow-hidden shadow-md relative cursor-pointer focus:ring-2 focus:ring-indigo-500 focus:outline-none transition" title="クリックして選択、Ctrl+Cでコピー可能">
-						<img id="detail-album-art" class="w-full h-full object-cover hidden" src="" alt="">
+						<img id="detail-album-art" class="w-full h-full object-contain object-bottom-left hidden" src="" alt="">
 						<i id="detail-art-placeholder" class="icon-music text-gray-500 text-2xl"></i>
 					</div>
 					<div class="flex-1 min-w-0 space-y-2">

@@ -2100,7 +2100,7 @@ import path6 from "node:path";
 import { Readable } from "node:stream";
 
 // src/shared/constants.ts
-var DEFAULT_DELIMITERS = [",", "|", "feat.", ";", "\u3001", "\uFF0F"];
+var DEFAULT_DELIMITERS = [",", "|", "feat.", "&", ";", "\u3001", "\uFF0F"];
 
 // src/main/ipc.ts
 init_cancelState();
@@ -3299,8 +3299,23 @@ function registerIpcHandlers() {
           return null;
         }
         const img = nativeImage2.createFromBuffer(Buffer.from(result.pictureData));
-        const resized = img.resize({ width: 150, height: 150, quality: "better" });
-        const pngBuf = resized.toPNG();
+        const size = img.getSize();
+        let pngBuf;
+        if (size.width <= 150 && size.height <= 150) {
+          pngBuf = img.toPNG();
+        } else {
+          let newWidth = 150;
+          let newHeight = 150;
+          if (size.width >= size.height) {
+            newWidth = 150;
+            newHeight = Math.max(1, Math.round(size.height * 150 / size.width));
+          } else {
+            newHeight = 150;
+            newWidth = Math.max(1, Math.round(size.width * 150 / size.height));
+          }
+          const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
+          pngBuf = resized.toPNG();
+        }
         fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
         fs5.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
       }

@@ -14,6 +14,13 @@ export interface Profile {
 	tabSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
 	defaultSortRules?: Record<string, { field: string; direction: "asc" | "desc" }[]>;
 	viewMode?: "list" | "grid";
+	gridSize?: "large" | "medium" | "small";
+	colorMissing?: string;
+	colorUpdated?: string;
+	colorSynced?: string;
+	colorPhoneOnly?: string;
+	delimiters?: string[];
+	exceptions?: string[];
 }
 
 export interface Settings {

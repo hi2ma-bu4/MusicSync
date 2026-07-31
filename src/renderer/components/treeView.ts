@@ -4,6 +4,63 @@ import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml,
 
 let currentTreeViewRenderId = 0;
 
+function getGridContainerClass(gridSize: "large" | "medium" | "small", isAlbumTab = false): string {
+	const padding = isAlbumTab ? "p-4" : "p-2";
+	if (gridSize === "small") {
+		return `grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 xl:grid-cols-12 gap-3 ${padding}`;
+	} else if (gridSize === "medium") {
+		return `grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 gap-3.5 ${padding}`;
+	} else {
+		return `grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 ${padding}`;
+	}
+}
+
+function renderAlbumCardInnerHtml(albumKey: string, albumName: string, artistName: string, dataType: "artistalbum" | "album", albumTracks: any[], gridSize: "large" | "medium" | "small"): string {
+	const albumArtistInfo = getAlbumArtistInfo(albumTracks);
+	const parentWarning = getParentWarningHtml("album", albumName, albumTracks);
+
+	let inner = `
+		<!-- Album Art Aspect Ratio container -->
+		<div class="relative aspect-square w-full bg-gray-900 rounded overflow-hidden shadow-md group-hover:shadow-lg transition">
+			<img class="grid-album-art w-full h-full object-contain object-bottom-left hidden no-drag" draggable="false" src="" alt="">
+			<div class="grid-art-placeholder absolute inset-0 flex items-center justify-center text-gray-600">
+				<i class="icon-music text-3xl"></i>
+			</div>
+			<!-- Master check in top-left with semi-transparent circle background -->
+			<div class="absolute top-2 left-2 z-20 h-6 w-6 flex items-center justify-center rounded-full bg-black/40 group-hover:bg-black/80 group-hover:scale-110 transition-all duration-150">
+				<input type="checkbox" id="chk-${albumKey}" class="m-0 p-0 leading-none rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer transition-transform duration-150 group-hover:scale-110" data-type="${dataType}" data-artist="${artistName}" data-album="${albumName}">
+			</div>
+			<!-- Parent Warnings icon bubble -->
+			<div class="absolute top-2 right-2 z-20">
+				${parentWarning}
+			</div>
+	`;
+
+	if (gridSize === "small") {
+		inner += `
+			<!-- Hover Overlay Panel for Small Size -->
+			<div class="absolute bottom-0 inset-x-0 pt-7 pb-2 px-2 text-left opacity-0 group-hover:opacity-100 transition-opacity duration-150 z-10 pointer-events-none flex flex-col justify-end" style="background: linear-gradient(to top, rgba(0,0,0,0.95) 0%, rgba(0,0,0,0.85) 60%, rgba(0,0,0,0) 100%);">
+				<div class="font-bold text-gray-200 truncate text-[10px] leading-tight" title="${albumName}">${albumName}</div>
+				<div class="text-[9px] text-gray-400 truncate leading-tight mt-0.5" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
+			</div>
+		`;
+	}
+
+	inner += `</div>`;
+
+	if (gridSize !== "small") {
+		inner += `
+			<!-- Info container below art -->
+			<div class="mt-2 text-left space-y-0.5">
+				<div class="font-bold text-gray-200 truncate text-[11px]" title="${albumName}">${albumName}</div>
+				<div class="text-[10px] text-gray-400 truncate" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
+			</div>
+		`;
+	}
+
+	return inner;
+}
+
 function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!state.currentProfileId) return;
 	api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
@@ -413,7 +470,7 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 				row.innerHTML = `
 					<div class="flex items-center space-x-2 min-w-0 flex-1">
 						<div class="w-6 h-6 rounded bg-gray-900 border border-gray-700 flex items-center justify-center shrink-0 overflow-hidden relative shadow-sm">
-							<img class="search-album-art w-full h-full object-cover hidden" data-album-name="${item}" src="" alt="">
+							<img class="search-album-art w-full h-full object-contain object-bottom-left hidden" data-album-name="${item}" src="" alt="">
 							<i class="search-art-placeholder icon-music text-gray-600 text-[10px]"></i>
 						</div>
 						<span class="truncate font-semibold text-gray-200">${item}</span>
@@ -661,10 +718,13 @@ function renderAlbumTracks(elTracksChildren: HTMLElement, albumTracks: any[], al
 function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMap: Map<string, any[]>, sortedAlbums: string[], cb: RenderCallbacks) {
 	elChildren.innerHTML = "";
 
+	const activeProfile = state.profiles.find((p) => p.id === state.currentProfileId);
+	const gridSize = activeProfile?.gridSize || "large";
+
 	if (state.viewMode === "grid") {
 		// Grid container for artist's albums
 		const gridContainer = document.createElement("div");
-		gridContainer.className = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-2";
+		gridContainer.className = getGridContainerClass(gridSize, false);
 		elChildren.appendChild(gridContainer);
 
 		sortedAlbums.forEach((albumName) => {
@@ -675,7 +735,6 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
 			const firstArtist = firstMeta?.artist || "";
 			const firstGenre = firstMeta?.genre || "";
-			const albumArtistInfo = getAlbumArtistInfo(albumTracks);
 
 			const divAlbum = document.createElement("div");
 			divAlbum.id = `album-card-${albumKey}`;
@@ -683,33 +742,12 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
 				albumHighlightClass = " group-change-highlight";
 			}
-			divAlbum.className = `relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2.5 context-album grid-card-album${albumHighlightClass}`;
+			divAlbum.className = `group relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2 context-album grid-card-album${albumHighlightClass}`;
 			divAlbum.setAttribute("data-album", albumName);
 			divAlbum.setAttribute("data-artist", firstArtist);
 			divAlbum.setAttribute("data-genre", firstGenre);
 
-			divAlbum.innerHTML = `
-				<!-- Album Art Aspect Ratio container -->
-				<div class="relative aspect-square w-full bg-gray-900 rounded overflow-hidden shadow-md group">
-					<img class="grid-album-art w-full h-full object-contain hidden no-drag" draggable="false" src="" alt="">
-					<div class="grid-art-placeholder absolute inset-0 flex items-center justify-center text-gray-600">
-						<i class="icon-music text-3xl"></i>
-					</div>
-					<!-- Master check in top-left with semi-transparent circle background -->
-					<div class="absolute top-2 left-2 z-20 h-6 w-6 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition">
-						<input type="checkbox" id="chk-${albumKey}" class="m-0 p-0 leading-none rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer" data-type="artistalbum" data-artist="${artistName}" data-album="${albumName}">
-					</div>
-					<!-- Parent Warnings icon bubble -->
-					<div class="absolute top-2 right-2 z-20">
-						${getParentWarningHtml("album", albumName, albumTracks)}
-					</div>
-				</div>
-				<!-- Info container below art -->
-				<div class="mt-2 text-left space-y-0.5">
-					<div class="font-bold text-gray-200 truncate text-[11px]" title="${albumName}">${albumName}</div>
-					<div class="text-[10px] text-gray-400 truncate" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
-				</div>
-			`;
+			divAlbum.innerHTML = renderAlbumCardInnerHtml(albumKey, albumName, artistName, "artistalbum", albumTracks, gridSize);
 
 			gridContainer.appendChild(divAlbum);
 			setCheckboxState(`chk-${albumKey}`, albumTracks);
@@ -752,6 +790,24 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 				cb.updateSummaryBar();
 				cb.updateMasterCheckboxState();
 			});
+
+			const chkWrapper = chkAlbum.parentElement as HTMLElement;
+			if (chkWrapper) {
+				chkWrapper.addEventListener("click", (e) => {
+					if (e.target === chkAlbum) return;
+					e.stopPropagation();
+					e.preventDefault();
+					chkAlbum.checked = !chkAlbum.checked;
+					pushHistoryState();
+					const isChecked = chkAlbum.checked;
+					albumTracks.forEach((t) => {
+						setTrackCheckedState(t, isChecked);
+					});
+					updateAllTreeCheckboxes();
+					cb.updateSummaryBar();
+					cb.updateMasterCheckboxState();
+				});
+			}
 
 			divAlbum.addEventListener("click", (e) => {
 				if (e.target === chkAlbum) return;
@@ -883,8 +939,8 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 
 export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 	const renderId = ++currentTreeViewRenderId;
-	container.innerHTML = "";
 	container.onscroll = null;
+	container.innerHTML = "";
 
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当する曲がありません</p>';
@@ -1035,7 +1091,13 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 		if (index < sortedArtistKeys.length) {
 			requestAnimationFrame(nextChunk);
 		} else {
-			if (state.isTogglingViewMode && state.closestCardId) {
+			if (state.jumpTargetId) {
+				const el = document.getElementById(state.jumpTargetId);
+				if (el) {
+					el.scrollIntoView({ behavior: "auto", block: "center" });
+				}
+				state.jumpTargetId = null;
+			} else if (state.isTogglingViewMode && state.closestCardId) {
 				const targetCard = document.getElementById(state.closestCardId);
 				if (targetCard) {
 					targetCard.scrollIntoView({ behavior: "auto", block: "start" });
@@ -1051,7 +1113,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 			}
 
 			container.onscroll = () => {
-				if (state.isTogglingViewMode) return;
+				if (state.isTogglingViewMode || state.jumpTargetId) return;
 				state.tabScrollPositions.artist = container.scrollTop;
 			};
 		}
@@ -1062,13 +1124,16 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 
 export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	const renderId = ++currentTreeViewRenderId;
-	container.innerHTML = "";
 	container.onscroll = null;
+	container.innerHTML = "";
 
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当するアルバムがありません</p>';
 		return;
 	}
+
+	const activeProfile = state.profiles.find((p) => p.id === state.currentProfileId);
+	const gridSize = activeProfile?.gridSize || "large";
 
 	const albumMap = new Map<string, any[]>();
 	state.filteredTracks.forEach((t) => {
@@ -1089,7 +1154,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 	if (state.viewMode === "grid") {
 		// Grid View rendering
 		const gridContainer = document.createElement("div");
-		gridContainer.className = "grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-4 p-4";
+		gridContainer.className = getGridContainerClass(gridSize, true);
 		container.appendChild(gridContainer);
 
 		function nextGridChunk() {
@@ -1109,7 +1174,6 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				const firstMeta = albumTracks[0]?.itunesTrack || albumTracks[0]?.phoneTrack;
 				const firstArtist = firstMeta?.artist || "";
 				const firstGenre = firstMeta?.genre || "";
-				const albumArtistInfo = getAlbumArtistInfo(albumTracks);
 
 				const divAlbum = document.createElement("div");
 				divAlbum.id = `album-card-${albumKey}`;
@@ -1117,33 +1181,12 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				if (state.filterSyncTargetOnlyActive && groupHasChange(albumTracks)) {
 					albumHighlightClass = " group-change-highlight";
 				}
-				divAlbum.className = `relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2.5 context-album grid-card-album${albumHighlightClass}`;
+				divAlbum.className = `group relative flex flex-col cursor-pointer select-none rounded bg-gray-800 border border-gray-700/65 overflow-hidden transition hover:border-indigo-500/50 p-2 context-album grid-card-album${albumHighlightClass}`;
 				divAlbum.setAttribute("data-album", albumName);
 				divAlbum.setAttribute("data-artist", firstArtist);
 				divAlbum.setAttribute("data-genre", firstGenre);
 
-				divAlbum.innerHTML = `
-					<!-- Album Art Aspect Ratio container -->
-					<div class="relative aspect-square w-full bg-gray-900 rounded overflow-hidden shadow-md group">
-						<img class="grid-album-art w-full h-full object-contain hidden no-drag" draggable="false" src="" alt="">
-						<div class="grid-art-placeholder absolute inset-0 flex items-center justify-center text-gray-600">
-							<i class="icon-music text-3xl"></i>
-						</div>
-						<!-- Master check in top-left with semi-transparent circle background -->
-						<div class="absolute top-2 left-2 z-20 h-6 w-6 flex items-center justify-center rounded-full bg-black/50 hover:bg-black/70 transition">
-							<input type="checkbox" id="chk-${albumKey}" class="m-0 p-0 leading-none rounded bg-gray-700 border-gray-650 text-indigo-650 focus:ring-indigo-500 h-3.5 w-3.5 cursor-pointer" data-type="album" data-album="${albumName}">
-						</div>
-						<!-- Parent Warnings icon bubble -->
-						<div class="absolute top-2 right-2 z-20">
-							${getParentWarningHtml("album", albumName, albumTracks)}
-						</div>
-					</div>
-					<!-- Info container below art -->
-					<div class="mt-2 text-left space-y-0.5">
-						<div class="font-bold text-gray-200 truncate text-[11px]" title="${albumName}">${albumName}</div>
-						<div class="text-[10px] text-gray-400 truncate" title="${albumArtistInfo.name}">${albumArtistInfo.name}</div>
-					</div>
-				`;
+				divAlbum.innerHTML = renderAlbumCardInnerHtml(albumKey, albumName, firstArtist, "album", albumTracks, gridSize);
 
 				fragment.appendChild(divAlbum);
 
@@ -1186,6 +1229,24 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 					cb.updateMasterCheckboxState();
 				});
 
+				const chkWrapper = chkAlbum.parentElement as HTMLElement;
+				if (chkWrapper) {
+					chkWrapper.addEventListener("click", (e) => {
+						if (e.target === chkAlbum) return;
+						e.stopPropagation();
+						e.preventDefault();
+						chkAlbum.checked = !chkAlbum.checked;
+						pushHistoryState();
+						const isChecked = chkAlbum.checked;
+						albumTracks.forEach((t) => {
+							setTrackCheckedState(t, isChecked);
+						});
+						updateAllTreeCheckboxes();
+						cb.updateSummaryBar();
+						cb.updateMasterCheckboxState();
+					});
+				}
+
 				divAlbum.addEventListener("click", (e) => {
 					if (e.target === chkAlbum) return;
 
@@ -1225,7 +1286,13 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			} else {
 				alignGridDrawer(gridContainer);
 
-				if (state.isTogglingViewMode && state.closestCardId) {
+				if (state.jumpTargetId) {
+					const el = document.getElementById(state.jumpTargetId) || document.getElementById(state.jumpTargetId.replace("hdr-", "album-card-"));
+					if (el) {
+						el.scrollIntoView({ behavior: "auto", block: "center" });
+					}
+					state.jumpTargetId = null;
+				} else if (state.isTogglingViewMode && state.closestCardId) {
 					const targetCard = document.getElementById(state.closestCardId);
 					if (targetCard) {
 						targetCard.scrollIntoView({ behavior: "auto", block: "start" });
@@ -1241,7 +1308,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				}
 
 				container.onscroll = () => {
-					if (state.isTogglingViewMode) return;
+					if (state.isTogglingViewMode || state.jumpTargetId) return;
 					state.tabScrollPositions.album = container.scrollTop;
 				};
 			}
@@ -1364,7 +1431,13 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 			if (index < sortedAlbums.length) {
 				requestAnimationFrame(nextChunk);
 			} else {
-				if (state.isTogglingViewMode && state.closestCardId) {
+				if (state.jumpTargetId) {
+					const el = document.getElementById(state.jumpTargetId) || document.getElementById(state.jumpTargetId.replace("hdr-", "album-card-"));
+					if (el) {
+						el.scrollIntoView({ behavior: "auto", block: "center" });
+					}
+					state.jumpTargetId = null;
+				} else if (state.isTogglingViewMode && state.closestCardId) {
 					const targetCard = document.getElementById(state.closestCardId);
 					if (targetCard) {
 						targetCard.scrollIntoView({ behavior: "auto", block: "start" });
@@ -1380,7 +1453,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				}
 
 				container.onscroll = () => {
-					if (state.isTogglingViewMode) return;
+					if (state.isTogglingViewMode || state.jumpTargetId) return;
 					state.tabScrollPositions.album = container.scrollTop;
 				};
 			}
@@ -1392,8 +1465,8 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 	const renderId = ++currentTreeViewRenderId;
-	container.innerHTML = "";
 	container.onscroll = null;
+	container.innerHTML = "";
 
 	if (state.filteredTracks.length === 0) {
 		container.innerHTML = '<p class="text-xxs text-gray-500 text-center py-6">該当するジャンルがありません</p>';
@@ -1520,7 +1593,13 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 		if (index < sortedGenres.length) {
 			requestAnimationFrame(nextChunk);
 		} else {
-			if (state.isTogglingViewMode && state.closestCardId) {
+			if (state.jumpTargetId) {
+				const el = document.getElementById(state.jumpTargetId);
+				if (el) {
+					el.scrollIntoView({ behavior: "auto", block: "center" });
+				}
+				state.jumpTargetId = null;
+			} else if (state.isTogglingViewMode && state.closestCardId) {
 				const targetCard = document.getElementById(state.closestCardId);
 				if (targetCard) {
 					targetCard.scrollIntoView({ behavior: "auto", block: "start" });
@@ -1536,7 +1615,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 			}
 
 			container.onscroll = () => {
-				if (state.isTogglingViewMode) return;
+				if (state.isTogglingViewMode || state.jumpTargetId) return;
 				state.tabScrollPositions.genre = container.scrollTop;
 			};
 		}
