@@ -1,5 +1,5 @@
 import { DEFAULT_DELIMITERS } from "../shared/constants";
-import { WindowAPI } from "./types";
+import type { WindowAPI } from "./types";
 
 export type { WindowAPI };
 

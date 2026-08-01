@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { setProcessingRelativePath } from "./cancelState";
-import { TrackMetadata } from "./types";
+import type { TrackMetadata } from "./types";
 import { findMusicFiles as findLocalMusicFiles, getTrackMetadata as getLocalTrackMetadata } from "./utils";
 
 import cleanEmptyDirsScript from "./powershell/mtp/cleanEmptyDirs.ps1";

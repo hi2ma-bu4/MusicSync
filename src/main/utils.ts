@@ -1,7 +1,7 @@
 import { parseFile } from "music-metadata";
 import fs from "node:fs";
 import path from "node:path";
-import { TrackMetadata } from "./types";
+import type { TrackMetadata } from "./types";
 
 export function normText(val: string | null | undefined): string {
 	if (!val) return "";

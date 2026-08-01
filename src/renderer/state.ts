@@ -1,4 +1,4 @@
-import { Profile, ScanResultItem, Settings } from "./types";
+import type { Profile, ScanResultItem, Settings } from "./types";
 
 export const PHONE_DISPLAY_LABEL = "比較先";
 

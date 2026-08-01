@@ -7,7 +7,7 @@ import { renderVirtualTracks } from "./renderer/components/tableView";
 import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
 import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
-import { ScanResultItem } from "./renderer/types";
+import type { ScanResultItem } from "./renderer/types";
 import { DEFAULT_DELIMITERS } from "./shared/constants";
 
 // DOM Elements

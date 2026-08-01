@@ -3,7 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { activeScanCancelled, resetScanCancelled } from "./cancelState";
 import { getStorageWrapper } from "./storageWrapper";
-import { ScanResultItem, TrackMetadata } from "./types";
+import type { ScanResultItem, TrackMetadata } from "./types";
 import { findMusicFiles, getTrackMetadata, normText, normTrack } from "./utils";
 
 // Global scan results cache in-memory

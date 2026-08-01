@@ -1,4 +1,4 @@
-import { MtpCode } from "./types";
+import type { MtpCode } from "./types";
 
 export const TYPE: readonly string[] = ["undefined", "Command Block", "Data Block", "Response Block", "Event Block"];
 

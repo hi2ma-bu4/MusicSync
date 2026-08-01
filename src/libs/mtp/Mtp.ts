@@ -1,5 +1,5 @@
 import { CODE, TYPE } from "./constants";
-import { MtpCode, MtpContainer, ParsedContainer, UsbConfig } from "./types";
+import type { MtpCode, MtpContainer, ParsedContainer, UsbConfig } from "./types";
 import { is_electron, is_node } from "./utils";
 
 let usb: any = null;

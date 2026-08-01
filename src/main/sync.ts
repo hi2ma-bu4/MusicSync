@@ -3,7 +3,7 @@ import path from "node:path";
 import { activeSyncCancelled, resetSyncCancelled, setProcessingRelativePath } from "./cancelState";
 import { lastScanResults } from "./scanner";
 import { getStorageWrapper } from "./storageWrapper";
-import { SyncOptions } from "./types";
+import type { SyncOptions } from "./types";
 
 export async function runSync(profile: any, options: SyncOptions, event: Electron.IpcMainInvokeEvent): Promise<{ failedTrackIds: string[] }> {
 	resetSyncCancelled();
