@@ -10,7 +10,22 @@ import { runSync } from "./sync";
 
 const store = new Store();
 
+let isScanRunning = false;
+let isSyncRunning = false;
+let unsyncedChangesCount = 0;
+
+export function getAppCloseStates() {
+	return {
+		isScanRunning,
+		isSyncRunning,
+		unsyncedChangesCount,
+	};
+}
+
 export function registerIpcHandlers() {
+	ipcMain.on("update-unsynced-changes-count", (_event, count: number) => {
+		unsyncedChangesCount = count;
+	});
 	protocol.handle("media", async (request) => {
 		try {
 			const url = new URL(request.url);
@@ -553,7 +568,12 @@ export function registerIpcHandlers() {
 		if (!profile) {
 			throw new Error("Profile not found");
 		}
-		await runScan(profile, event);
+		isScanRunning = true;
+		try {
+			await runScan(profile, event);
+		} finally {
+			isScanRunning = false;
+		}
 	});
 
 	ipcMain.handle("get-scan-result", (_event, profileId: string) => {
@@ -566,7 +586,13 @@ export function registerIpcHandlers() {
 		if (!profile) {
 			throw new Error("Profile not found");
 		}
-		return await runSync(profile, options, event);
+		isSyncRunning = true;
+		try {
+			const res = await runSync(profile, options, event);
+			return res;
+		} finally {
+			isSyncRunning = false;
+		}
 	});
 
 	async function parseMetadataWithWorker(filePath: string): Promise<{ pictureData: Uint8Array | null; pictureFormat: string | null }> {

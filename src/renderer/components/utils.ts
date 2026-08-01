@@ -277,6 +277,9 @@ export function getGroupSortValue(field: string, tracks: any[], groupName?: stri
 	if (field === "album" && groupName !== undefined) return groupName;
 	if (field === "genre" && groupName !== undefined) return groupName;
 
+	if (field === "trackCount") {
+		return tracks.length;
+	}
 	if (field === "size") {
 		return tracks.reduce((sum, t) => sum + ((t.itunesTrack || t.phoneTrack)?.size || 0), 0);
 	}
@@ -397,6 +400,10 @@ export function compareTracks(a: any, b: any, rules: { field: string; direction:
 		} else if (rule.field === "duration") {
 			valA = ma.duration || 0;
 			valB = mb.duration || 0;
+		} else if (rule.field === "trackCount") {
+			// trackCount sorting is intended for group levels. Individual track comparison handles it gracefully by evaluating it as 1.
+			valA = 1;
+			valB = 1;
 		} else if (rule.field === "relativePath") {
 			valA = ma.relativePath || "";
 			valB = mb.relativePath || "";

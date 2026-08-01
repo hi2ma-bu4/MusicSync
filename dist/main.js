@@ -2058,45 +2058,15 @@ var init_storageWrapper = __esm({
 import { app as app3, protocol as protocol2 } from "electron";
 
 // src/main/index.ts
-init_storageWrapper();
-import { BrowserWindow } from "electron";
-import Store from "electron-store";
-import path3 from "node:path";
-function createWindow() {
-  const win = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    webPreferences: {
-      preload: path3.join(process.cwd(), "dist", "preload.js"),
-      contextIsolation: true
-    }
-  });
-  const store2 = new Store();
-  win.on("close", () => {
-    console.log("[Window] Window is closing. Cleaning up MTP wrappers...");
-    closeAllActiveMtpWrappers().catch((err) => {
-      console.error("[Window] Error during MTP wrapper close cleanup:", err);
-    });
-  });
-  win.webContents.on("before-input-event", (event, input) => {
-    if ((input.control || input.meta) && input.shift && input.key.toLowerCase() === "i") {
-      const settings = store2.get("settings", {});
-      if (settings && settings.devMode) {
-        win.webContents.toggleDevTools();
-        event.preventDefault();
-      }
-    }
-  });
-  win.setMenuBarVisibility(false);
-  win.removeMenu();
-  win.loadFile(path3.join(process.cwd(), "dist", "index.html"));
-}
+import { BrowserWindow, dialog as dialog4 } from "electron";
+import Store2 from "electron-store";
+import path6 from "node:path";
 
 // src/main/ipc.ts
 import { app as app2, clipboard, dialog as dialog3, ipcMain, Menu, MenuItem, nativeImage, protocol, shell } from "electron";
-import Store2 from "electron-store";
+import Store from "electron-store";
 import fs5 from "node:fs";
-import path6 from "node:path";
+import path5 from "node:path";
 import { Readable } from "node:stream";
 
 // src/shared/constants.ts
@@ -2111,14 +2081,14 @@ init_storageWrapper();
 init_utils();
 import { app, dialog as dialog2 } from "electron";
 import fs3 from "node:fs";
-import path4 from "node:path";
+import path3 from "node:path";
 var lastScanResults = {};
-var cachesDir = path4.join(app.getPath("userData"), "caches");
+var cachesDir = path3.join(app.getPath("userData"), "caches");
 if (!fs3.existsSync(cachesDir)) {
   fs3.mkdirSync(cachesDir, { recursive: true });
 }
 function getCachePath(profileId, suffix) {
-  return path4.join(cachesDir, `${profileId}_${suffix}.json`);
+  return path3.join(cachesDir, `${profileId}_${suffix}.json`);
 }
 function loadCache(profileId, suffix) {
   const cachePath = getCachePath(profileId, suffix);
@@ -2454,7 +2424,7 @@ async function runScan(profile, event) {
 // src/main/sync.ts
 init_cancelState();
 import fs4 from "node:fs";
-import path5 from "node:path";
+import path4 from "node:path";
 init_storageWrapper();
 async function runSync(profile, options, event) {
   resetSyncCancelled();
@@ -2531,8 +2501,8 @@ async function runSync(profile, options, event) {
         logAndSend(msg, pct);
       };
       const onConsecutiveFailures = async (failedCount) => {
-        const { dialog: dialog4 } = await import("electron");
-        const choice = dialog4.showMessageBoxSync({
+        const { dialog: dialog5 } = await import("electron");
+        const choice = dialog5.showMessageBoxSync({
           type: "question",
           buttons: ["\u306F\u3044 (Yes - \u7D9A\u884C)", "\u3044\u3044\u3048 (No - \u4E2D\u65AD)"],
           title: "\u9023\u7D9A\u30A8\u30E9\u30FC\u306E\u691C\u51FA",
@@ -2558,7 +2528,7 @@ async function runSync(profile, options, event) {
             } else if (profile.storageType === "mtp_powershell") {
               item.phoneTrack.filePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${newRelative}`;
             } else {
-              item.phoneTrack.filePath = path5.join(profile.phonePath, newRelative);
+              item.phoneTrack.filePath = path4.join(profile.phonePath, newRelative);
             }
             item.phoneTrack.relativePath = newRelative;
             item.pathMismatch = false;
@@ -2617,7 +2587,7 @@ async function runSync(profile, options, event) {
                 } else if (profile.storageType === "mtp_powershell") {
                   item.phoneTrack.filePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${newRelative}`;
                 } else {
-                  item.phoneTrack.filePath = path5.join(profile.phonePath, newRelative);
+                  item.phoneTrack.filePath = path4.join(profile.phonePath, newRelative);
                 }
                 item.phoneTrack.relativePath = newRelative;
                 item.pathMismatch = false;
@@ -2713,7 +2683,7 @@ async function runSync(profile, options, event) {
                 } else if (profile.storageType === "mtp_powershell") {
                   remotePath = `mtp_powershell://${encodeURIComponent(profile.mtpDeviceName)}/${relative}`;
                 } else {
-                  remotePath = path5.join(profile.phonePath, relative);
+                  remotePath = path4.join(profile.phonePath, relative);
                 }
                 const remoteMeta = await storage.getTrackMetadata(remotePath, relative);
                 remoteSize = remoteMeta.size;
@@ -2749,8 +2719,21 @@ async function runSync(profile, options, event) {
 }
 
 // src/main/ipc.ts
-var store = new Store2();
+var store = new Store();
+var isScanRunning = false;
+var isSyncRunning = false;
+var unsyncedChangesCount = 0;
+function getAppCloseStates() {
+  return {
+    isScanRunning,
+    isSyncRunning,
+    unsyncedChangesCount
+  };
+}
 function registerIpcHandlers() {
+  ipcMain.on("update-unsynced-changes-count", (_event, count) => {
+    unsyncedChangesCount = count;
+  });
   protocol.handle("media", async (request) => {
     try {
       const url = new URL(request.url);
@@ -2762,7 +2745,7 @@ function registerIpcHandlers() {
       }
       const stat = fs5.statSync(decodedPath);
       const fileSize = stat.size;
-      const ext = path6.extname(decodedPath).toLowerCase();
+      const ext = path5.extname(decodedPath).toLowerCase();
       let contentType = "audio/mpeg";
       if (ext === ".m4a") {
         contentType = "audio/mp4";
@@ -2851,10 +2834,10 @@ function registerIpcHandlers() {
   });
   ipcMain.handle("reset-cache", async (_event, profileId) => {
     if (!profileId) return;
-    const cachesDir2 = path6.join(app2.getPath("userData"), "caches");
+    const cachesDir2 = path5.join(app2.getPath("userData"), "caches");
     if (fs5.existsSync(cachesDir2)) {
-      const itunesCachePath = path6.join(cachesDir2, `${profileId}_itunes.json`);
-      const phoneCachePath = path6.join(cachesDir2, `${profileId}_phone.json`);
+      const itunesCachePath = path5.join(cachesDir2, `${profileId}_itunes.json`);
+      const phoneCachePath = path5.join(cachesDir2, `${profileId}_phone.json`);
       try {
         if (fs5.existsSync(itunesCachePath)) {
           fs5.unlinkSync(itunesCachePath);
@@ -2865,7 +2848,7 @@ function registerIpcHandlers() {
       } catch (e) {
         console.error("Failed to delete profile cache JSON files", e);
       }
-      const thumbnailsDir = path6.join(cachesDir2, "thumbnails", profileId);
+      const thumbnailsDir = path5.join(cachesDir2, "thumbnails", profileId);
       if (fs5.existsSync(thumbnailsDir)) {
         try {
           fs5.rmSync(thumbnailsDir, { recursive: true, force: true });
@@ -3214,7 +3197,12 @@ function registerIpcHandlers() {
     if (!profile) {
       throw new Error("Profile not found");
     }
-    await runScan(profile, event);
+    isScanRunning = true;
+    try {
+      await runScan(profile, event);
+    } finally {
+      isScanRunning = false;
+    }
   });
   ipcMain.handle("get-scan-result", (_event, profileId) => {
     return lastScanResults[profileId] || [];
@@ -3225,13 +3213,19 @@ function registerIpcHandlers() {
     if (!profile) {
       throw new Error("Profile not found");
     }
-    return await runSync(profile, options, event);
+    isSyncRunning = true;
+    try {
+      const res = await runSync(profile, options, event);
+      return res;
+    } finally {
+      isSyncRunning = false;
+    }
   });
   async function parseMetadataWithWorker(filePath) {
     const { Worker } = await import("node:worker_threads");
     return new Promise((resolve, reject) => {
       try {
-        const workerPath = path6.join(app2.getAppPath(), "dist", "metadataWorker.js");
+        const workerPath = path5.join(app2.getAppPath(), "dist", "metadataWorker.js");
         const worker = new Worker(workerPath);
         worker.on("message", (msg) => {
           if (msg.success) {
@@ -3263,12 +3257,12 @@ function registerIpcHandlers() {
     try {
       if (!profileId || !albumName) return null;
       const albumHex = Buffer.from(albumName).toString("hex");
-      const thumbnailsDir = path6.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
+      const thumbnailsDir = path5.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
       if (!fs5.existsSync(thumbnailsDir)) {
         fs5.mkdirSync(thumbnailsDir, { recursive: true });
       }
-      const pngPath = path6.join(thumbnailsDir, `${albumHex}.png`);
-      const metaPath = path6.join(thumbnailsDir, `${albumHex}.meta.json`);
+      const pngPath = path5.join(thumbnailsDir, `${albumHex}.png`);
+      const metaPath = path5.join(thumbnailsDir, `${albumHex}.meta.json`);
       const results = lastScanResults[profileId] || [];
       const trackItem = results.find((t) => {
         const meta = t.itunesTrack || t.phoneTrack;
@@ -3359,11 +3353,11 @@ function registerIpcHandlers() {
       }
       const safeFilename = albumName.replace(/[\\/:*?"<>|]/g, "_");
       const filename = `${safeFilename}.${ext}`;
-      const tempDir = path6.join(app2.getPath("userData"), "caches", "temp_copies");
+      const tempDir = path5.join(app2.getPath("userData"), "caches", "temp_copies");
       if (!fs5.existsSync(tempDir)) {
         fs5.mkdirSync(tempDir, { recursive: true });
       }
-      const filePath = path6.join(tempDir, filename);
+      const filePath = path5.join(tempDir, filename);
       fs5.writeFileSync(filePath, Buffer.from(result.pictureData));
       const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
       if (process.platform === "win32") {
@@ -3423,6 +3417,66 @@ function registerIpcHandlers() {
       return false;
     }
   });
+}
+
+// src/main/index.ts
+init_storageWrapper();
+function createWindow() {
+  const win = new BrowserWindow({
+    width: 1200,
+    height: 800,
+    webPreferences: {
+      preload: path6.join(process.cwd(), "dist", "preload.js"),
+      contextIsolation: true
+    }
+  });
+  const store2 = new Store2();
+  win.on("close", (e) => {
+    const { isScanRunning: isScanRunning2, isSyncRunning: isSyncRunning2, unsyncedChangesCount: unsyncedChangesCount2 } = getAppCloseStates();
+    if (isScanRunning2 || isSyncRunning2) {
+      const choice = dialog4.showMessageBoxSync(win, {
+        type: "question",
+        buttons: ["\u7D42\u4E86\u3059\u308B", "\u30AD\u30E3\u30F3\u30BB\u30EB"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "\u51E6\u7406\u5B9F\u884C\u4E2D\u306E\u78BA\u8A8D",
+        message: "\u73FE\u5728\u3001\u30B9\u30AD\u30E3\u30F3\u307E\u305F\u306F\u540C\u671F\u51E6\u7406\u304C\u5B9F\u884C\u4E2D\u3067\u3059\u3002\u9014\u4E2D\u3067\u7D42\u4E86\u3059\u308B\u3068\u30C7\u30FC\u30BF\u304C\u7834\u640D\u3059\u308B\u6050\u308C\u304C\u3042\u308A\u307E\u3059\u3002\u672C\u5F53\u306B\u30A2\u30D7\u30EA\u3092\u7D42\u4E86\u3057\u307E\u3059\u304B\uFF1F"
+      });
+      if (choice !== 0) {
+        e.preventDefault();
+        return;
+      }
+    } else if (unsyncedChangesCount2 > 0) {
+      const choice = dialog4.showMessageBoxSync(win, {
+        type: "question",
+        buttons: ["\u7D42\u4E86\u3059\u308B", "\u30AD\u30E3\u30F3\u30BB\u30EB"],
+        defaultId: 1,
+        cancelId: 1,
+        title: "\u672A\u540C\u671F\u306E\u5909\u66F4\u3042\u308A",
+        message: "\u540C\u671F\u3055\u308C\u3066\u3044\u306A\u3044\u5909\u66F4\uFF08\u9078\u629E\u72B6\u614B\u306E\u5909\u66F4\uFF09\u304C\u3042\u308A\u307E\u3059\u3002\u7D42\u4E86\u3059\u308B\u3068\u73FE\u5728\u306E\u5909\u66F4\u72B6\u614B\u306F\u7834\u68C4\u3055\u308C\u307E\u3059\u3002\u672C\u5F53\u306B\u30A2\u30D7\u30EA\u3092\u7D42\u4E86\u3057\u307E\u3059\u304B\uFF1F"
+      });
+      if (choice !== 0) {
+        e.preventDefault();
+        return;
+      }
+    }
+    console.log("[Window] Window is closing. Cleaning up MTP wrappers...");
+    closeAllActiveMtpWrappers().catch((err) => {
+      console.error("[Window] Error during MTP wrapper close cleanup:", err);
+    });
+  });
+  win.webContents.on("before-input-event", (event, input) => {
+    if ((input.control || input.meta) && input.shift && input.key.toLowerCase() === "i") {
+      const settings = store2.get("settings", {});
+      if (settings && settings.devMode) {
+        win.webContents.toggleDevTools();
+        event.preventDefault();
+      }
+    }
+  });
+  win.setMenuBarVisibility(false);
+  win.removeMenu();
+  win.loadFile(path6.join(process.cwd(), "dist", "index.html"));
 }
 
 // src/main.ts

@@ -58,6 +58,25 @@ const elChkMaster = document.getElementById("chk-master") as HTMLInputElement;
 
 let modalsController: any = null;
 
+// Global closeAllOverlays function defined at top level for lexical scope in TypeScript
+function closeAllOverlays(except?: HTMLElement) {
+	const overlays = [
+		{ el: document.getElementById("profile-dropdown-menu"), trigger: document.getElementById("btn-profile-dropdown") },
+		{ el: document.getElementById("sort-dropdown-panel"), trigger: document.getElementById("btn-sort-toggle") },
+		{ el: document.getElementById("search-combobox"), trigger: document.getElementById("txt-search") },
+		{ el: document.getElementById("tabs-dropdown-menu"), trigger: document.getElementById("btn-tabs-dropdown") },
+		{ el: document.getElementById("volume-popover"), trigger: document.getElementById("btn-player-volume") },
+	];
+
+	overlays.forEach((o) => {
+		if (o.el && o.el !== except) {
+			o.el.classList.add("hidden");
+			o.el.classList.remove("flex");
+		}
+	});
+}
+(window as any).closeAllOverlays = closeAllOverlays;
+
 // Summary stats footer
 const elCntTotal = document.getElementById("cnt-total")!;
 const elCntMissing = document.getElementById("cnt-missing")!;
@@ -432,6 +451,13 @@ async function selectProfile(id: string) {
 	state.currentProfileId = id;
 	const p = state.profiles.find((x) => x.id === id);
 	if (!p) return;
+
+	// Reset unsynced changes count as we are switching profiles
+	try {
+		api.updateUnsyncedChangesCount(0);
+	} catch (err) {
+		console.error("Failed to reset unsynced changes count:", err);
+	}
 
 	renderProfileDropdown();
 
@@ -1157,6 +1183,13 @@ function updateSummaryBar() {
 	elBtnSyncExec.disabled = totalChecks === 0 && !hasCheckedWarning;
 
 	updateResetChangesButtonState();
+
+	// Update unsynced changes count in main process
+	try {
+		api.updateUnsyncedChangesCount(getCheckboxChangesCount());
+	} catch (err) {
+		console.error("Failed to update unsynced changes count:", err);
+	}
 }
 
 function updateMasterCheckboxState() {
@@ -1348,8 +1381,12 @@ function setupEventListeners() {
 
 	btnSortToggle.addEventListener("click", (e) => {
 		e.stopPropagation();
-		sortDropdownPanel.classList.toggle("hidden");
-		sortDropdownPanel.classList.toggle("flex");
+		const isHidden = sortDropdownPanel.classList.contains("hidden");
+		closeAllOverlays();
+		if (isHidden) {
+			sortDropdownPanel.classList.remove("hidden");
+			sortDropdownPanel.classList.add("flex");
+		}
 	});
 
 	// Close when clicking outside
@@ -1359,11 +1396,56 @@ function setupEventListeners() {
 		if (!document.body.contains(target)) {
 			return;
 		}
-		if (sortDropdownPanel && !sortDropdownPanel.contains(target) && target !== btnSortToggle) {
-			sortDropdownPanel.classList.add("hidden");
-			sortDropdownPanel.classList.remove("flex");
+
+		const triggersAndOverlays = [
+			{ el: elProfileDropdownMenu, trigger: elBtnProfileDropdown },
+			{ el: sortDropdownPanel, trigger: btnSortToggle },
+			{ el: elSearchCombobox, trigger: elTxtSearch },
+			{ el: elTabsDropdownMenu, trigger: elBtnTabsDropdown },
+			{ el: document.getElementById("volume-popover")!, trigger: document.getElementById("btn-player-volume")! },
+		];
+
+		// Check if we clicked inside any overlay or its trigger
+		let clickedInsideAny = false;
+		for (const item of triggersAndOverlays) {
+			if (item.el && (item.el.contains(target) || item.trigger === target || item.trigger?.contains(target))) {
+				clickedInsideAny = true;
+				break;
+			}
+		}
+
+		if (!clickedInsideAny) {
+			closeAllOverlays();
 		}
 	});
+
+	// Handle global right-click to close overlays
+	document.addEventListener(
+		"contextmenu",
+		(e) => {
+			const target = e.target as Node;
+			const triggersAndOverlays = [
+				{ el: elProfileDropdownMenu, trigger: elBtnProfileDropdown },
+				{ el: sortDropdownPanel, trigger: btnSortToggle },
+				{ el: elSearchCombobox, trigger: elTxtSearch },
+				{ el: elTabsDropdownMenu, trigger: elBtnTabsDropdown },
+				{ el: document.getElementById("volume-popover")!, trigger: document.getElementById("btn-player-volume")! },
+			];
+
+			let clickedInsideAny = false;
+			for (const item of triggersAndOverlays) {
+				if (item.el && (item.el.contains(target) || item.trigger === target || item.trigger?.contains(target))) {
+					clickedInsideAny = true;
+					break;
+				}
+			}
+
+			if (!clickedInsideAny) {
+				closeAllOverlays();
+			}
+		},
+		true,
+	);
 
 	btnSortAddRule.addEventListener("click", (e) => {
 		e.stopPropagation();
@@ -1424,13 +1506,11 @@ function setupEventListeners() {
 
 	elBtnProfileDropdown.addEventListener("click", (e) => {
 		e.stopPropagation();
-		elProfileDropdownMenu.classList.toggle("hidden");
-	});
-
-	document.addEventListener("click", () => {
-		elProfileDropdownMenu.classList.add("hidden");
-		elTabsDropdownMenu.classList.add("hidden");
-		elSearchCombobox.classList.add("hidden");
+		const isHidden = elProfileDropdownMenu.classList.contains("hidden");
+		closeAllOverlays();
+		if (isHidden) {
+			elProfileDropdownMenu.classList.remove("hidden");
+		}
 	});
 
 	elBtnDropdownNewProfile.addEventListener("click", () => {
@@ -1464,6 +1544,11 @@ function setupEventListeners() {
 		if (!p) return;
 		const confirmed = await showCustomConfirm("プロファイルの削除", `プロファイル「${p.name}」を削除してもよろしいですか？`);
 		if (confirmed) {
+			try {
+				api.updateUnsyncedChangesCount(0);
+			} catch (err) {
+				console.error("Failed to reset unsynced changes count:", err);
+			}
 			state.profiles = await api.deleteProfile(p.id);
 			state.currentProfileId = null;
 			state.scannedTracks = [];
@@ -1707,6 +1792,7 @@ function setupEventListeners() {
 
 	const showPredictionsIfQuery = () => {
 		const query = elTxtSearch.value.trim().toLowerCase();
+		closeAllOverlays();
 		if (query.length >= 1) {
 			state.searchQuery = query;
 			renderSearchCombobox();
@@ -1824,7 +1910,11 @@ function setupEventListeners() {
 
 	elBtnTabsDropdown.addEventListener("click", (e) => {
 		e.stopPropagation();
-		elTabsDropdownMenu.classList.toggle("hidden");
+		const isHidden = elTabsDropdownMenu.classList.contains("hidden");
+		closeAllOverlays();
+		if (isHidden) {
+			elTabsDropdownMenu.classList.remove("hidden");
+		}
 	});
 
 	document.querySelectorAll(".tab-opt").forEach((el) => {
@@ -2370,6 +2460,7 @@ function renderSortRules() {
 		{ val: "duration", label: "再生時間" },
 		{ val: "relativePath", label: "相対パス" },
 		{ val: "status", label: "ステータス" },
+		{ val: "trackCount", label: "曲内包件数" },
 	];
 
 	const targets = [
@@ -2390,7 +2481,7 @@ function renderSortRules() {
 
 		// 2. Target Select (common, group, track)
 		const selTarget = document.createElement("select");
-		selTarget.className = "bg-gray-800 text-white rounded px-1 px-0.5 border border-gray-650 focus:outline-none font-semibold text-[10px] shrink-0";
+		selTarget.className = "bg-gray-800 text-white rounded px-1 px-0.5 border border-gray-650 focus:outline-none font-semibold text-[10px] shrink-0 disabled:opacity-50";
 		selTarget.style.width = "72px";
 		targets.forEach((t) => {
 			const opt = document.createElement("option");
@@ -2399,6 +2490,11 @@ function renderSortRules() {
 			if ((rule.target || "common") === t.val) opt.selected = true;
 			selTarget.appendChild(opt);
 		});
+		if (rule.field === "trackCount") {
+			selTarget.value = "group";
+			rule.target = "group";
+			selTarget.disabled = true;
+		}
 		selTarget.addEventListener("change", () => {
 			rule.target = selTarget.value as "common" | "group" | "track";
 			saveProfileTabSortRules();
@@ -2419,6 +2515,9 @@ function renderSortRules() {
 		});
 		selField.addEventListener("change", () => {
 			rule.field = selField.value;
+			if (rule.field === "trackCount") {
+				rule.target = "group";
+			}
 			saveProfileTabSortRules();
 			renderSortRules();
 			applyFilterAndRender();
@@ -2426,7 +2525,7 @@ function renderSortRules() {
 		row.appendChild(selField);
 
 		// 4. Direction Toggle Button
-		const isNumericField = ["year", "track", "size", "duration"].includes(rule.field);
+		const isNumericField = ["year", "track", "size", "duration", "trackCount"].includes(rule.field);
 		const toggleBtn = document.createElement("button");
 		toggleBtn.type = "button";
 		toggleBtn.className = "w-8 h-6 flex items-center justify-center rounded border border-gray-650 bg-gray-800 text-[9px] font-bold text-indigo-400 hover:bg-gray-700 active:scale-95 transition cursor-pointer shrink-0";
@@ -2698,7 +2797,11 @@ function setupPlayerEventListeners() {
 
 		btnVolume.addEventListener("click", (e) => {
 			e.stopPropagation();
-			popover.classList.toggle("hidden");
+			const isHidden = popover.classList.contains("hidden");
+			closeAllOverlays();
+			if (isHidden) {
+				popover.classList.remove("hidden");
+			}
 		});
 
 		popover.addEventListener("click", (e) => {

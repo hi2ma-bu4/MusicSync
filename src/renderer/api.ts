@@ -196,6 +196,9 @@ if (!window.api) {
 		executeSync: async (_profileId: string, _options: any) => {
 			console.log("Mock executeSync");
 		},
+		updateUnsyncedChangesCount: (count: number) => {
+			console.log("Mock updateUnsyncedChangesCount:", count);
+		},
 		getThumbnail: async (_profileId: string, _albumName: string) => {
 			// デバッグ用フォールバック処理 (サムネイル画像モック)
 			return null;

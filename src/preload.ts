@@ -23,6 +23,7 @@ contextBridge.exposeInMainWorld("api", {
 	startScan: (profileId: string) => ipcRenderer.invoke("start-scan", profileId),
 	getScanResult: (profileId: string) => ipcRenderer.invoke("get-scan-result", profileId),
 	executeSync: (profileId: string, options: any) => ipcRenderer.invoke("execute-sync", profileId, options),
+	updateUnsyncedChangesCount: (count: number) => ipcRenderer.send("update-unsynced-changes-count", count),
 	getThumbnail: (profileId: string, albumName: string) => ipcRenderer.invoke("get-thumbnail", profileId, albumName),
 	copyAlbumArt: (profileId: string, albumName: string) => ipcRenderer.invoke("copy-album-art", profileId, albumName),
 	onScanProgress: (callback: (progress: any) => void) => {

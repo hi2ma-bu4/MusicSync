@@ -25,6 +25,7 @@ import_electron.contextBridge.exposeInMainWorld("api", {
   startScan: (profileId) => import_electron.ipcRenderer.invoke("start-scan", profileId),
   getScanResult: (profileId) => import_electron.ipcRenderer.invoke("get-scan-result", profileId),
   executeSync: (profileId, options) => import_electron.ipcRenderer.invoke("execute-sync", profileId, options),
+  updateUnsyncedChangesCount: (count) => import_electron.ipcRenderer.send("update-unsynced-changes-count", count),
   getThumbnail: (profileId, albumName) => import_electron.ipcRenderer.invoke("get-thumbnail", profileId, albumName),
   copyAlbumArt: (profileId, albumName) => import_electron.ipcRenderer.invoke("copy-album-art", profileId, albumName),
   onScanProgress: (callback) => {
