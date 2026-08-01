@@ -2734,6 +2734,145 @@ let currentPlaylist: ScanResultItem[] = [];
 let currentPlaylistIndex = -1;
 let loopMode: "once" | "loop" | "advance" = "once";
 
+// Web Audio API for Spectrum Analyzer & Volume level indicator
+let audioCtx: AudioContext | null = null;
+let analyser: AnalyserNode | null = null;
+let sourceNode: MediaElementAudioSourceNode | null = null;
+let dataArray: Uint8Array;
+let timeDataArray: Uint8Array;
+let bufferLength = 0;
+let animationFrameId: number | null = null;
+
+function initWebAudio(audio: HTMLAudioElement) {
+	if (audioCtx) return;
+
+	try {
+		const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+		audioCtx = new AudioContextClass();
+		analyser = audioCtx.createAnalyser();
+		analyser.fftSize = 256; // 128 frequency bins, extremely fast and lightweight
+		bufferLength = analyser.frequencyBinCount;
+		dataArray = new Uint8Array(bufferLength);
+		timeDataArray = new Uint8Array(bufferLength);
+
+		sourceNode = audioCtx.createMediaElementSource(audio);
+		sourceNode.connect(analyser);
+		analyser.connect(audioCtx.destination);
+	} catch (e) {
+		console.error("Failed to initialize Web Audio API:", e);
+	}
+}
+
+function startVisualizer() {
+	const activeAudioCtx = audioCtx || (window as any).audioCtx;
+	const activeAnalyser = analyser || (window as any).analyser;
+
+	if (!activeAudioCtx || !activeAnalyser) return;
+
+	if (activeAudioCtx.state === "suspended") {
+		activeAudioCtx.resume();
+	}
+
+	if (animationFrameId) {
+		cancelAnimationFrame(animationFrameId);
+		animationFrameId = null;
+	}
+
+	const canvas = document.getElementById("player-spectrum") as HTMLCanvasElement;
+	const canvasCtx = canvas ? canvas.getContext("2d") : null;
+	const elVolumeLevel = document.getElementById("player-volume-level");
+	const popover = document.getElementById("volume-popover");
+
+	// Resolve local or window arrays for flexible mock/test rendering
+	const activeBufferLength = bufferLength || activeAnalyser.frequencyBinCount || 128;
+	const activeDataArray = dataArray || (window as any).dataArray || new Uint8Array(activeBufferLength);
+
+	function renderFrame() {
+		const currentIsPlaying = state.isPlaying || (window as any).state?.isPlaying;
+		if (!currentIsPlaying || !activeAnalyser) {
+			animationFrameId = null;
+			return; // Instantly exit the animation loop to prevent idle CPU usage
+		}
+
+		animationFrameId = requestAnimationFrame(renderFrame);
+
+		let avgFreq = 0;
+
+		// 1. Render Spectrum Analyzer
+		if (canvas && canvasCtx) {
+			activeAnalyser.getByteFrequencyData(activeDataArray as any);
+
+			const width = canvas.clientWidth || 300;
+			// Height of spectrum is 20px (matches HTML height)
+			const height = 20;
+
+			// Handle high DPI display or canvas resizing
+			if (canvas.width !== width) {
+				canvas.width = width;
+			}
+			if (canvas.height !== height) {
+				canvas.height = height;
+			}
+
+			canvasCtx.clearRect(0, 0, width, height);
+
+			// Downsample 128 frequencies to 32 visual bars for 75% drawing overhead reduction and retro chunky look!
+			const visualBars = 32;
+			const step = Math.floor(activeBufferLength / visualBars);
+			const barWidth = width / visualBars;
+			let x = 0;
+
+			// Faint gray/slate color
+			canvasCtx.fillStyle = "rgba(100, 116, 139, 0.2)";
+
+			let totalFreqSum = 0;
+
+			for (let i = 0; i < visualBars; i++) {
+				let sum = 0;
+				for (let j = 0; j < step; j++) {
+					const idx = i * step + j;
+					sum += activeDataArray[idx];
+				}
+				const val = sum / step;
+				totalFreqSum += val;
+
+				const percent = val / 255;
+				const barHeight = percent * height;
+
+				// Draw bar graph design (棒グラフのようなデザイン) with 1px margin, aligning its bottom edge exactly to bottom of canvas
+				canvasCtx.fillRect(x, height - barHeight, barWidth - 1, barHeight);
+
+				x += barWidth;
+			}
+
+			avgFreq = totalFreqSum / visualBars;
+		}
+
+		// 2. Render Volume Dynamic Level Line (ONLY if volume popover is actually visible/expanded)
+		if (elVolumeLevel && popover && !popover.classList.contains("hidden")) {
+			// Extremely optimized: compute dynamic level using the already-fetched frequency average.
+			// This completely bypasses the need for getByteTimeDomainData and its costly secondary buffer processing loop!
+			if (avgFreq === 0 && activeAnalyser) {
+				// Fallback if canvas was not rendered but popover is open
+				activeAnalyser.getByteFrequencyData(activeDataArray as any);
+				let sum = 0;
+				for (let i = 0; i < activeBufferLength; i++) {
+					sum += activeDataArray[i];
+				}
+				avgFreq = sum / activeBufferLength;
+			}
+
+			// Map frequency average to level percentage
+			// Frequency average for playing songs usually sits between 10 and 150
+			const volumeLevelPct = Math.min(100, Math.round((avgFreq / 180) * 100));
+
+			elVolumeLevel.style.height = `${volumeLevelPct}%`;
+		}
+	}
+
+	animationFrameId = requestAnimationFrame(renderFrame);
+}
+
 const SKIP_TICK_INTERVAL_MS = 200;
 const SKIP_AMOUNT_SECONDS = 5;
 
@@ -2776,6 +2915,7 @@ function setupPlayerEventListeners() {
 		if (audioElement && !isNaN(audioElement.duration)) {
 			const pct = parseFloat(seekbar.value);
 			audioElement.currentTime = (pct / 100) * audioElement.duration;
+			seekbar.style.background = `linear-gradient(to right, #6366f1 0%, #6366f1 ${pct}%, #374151 ${pct}%, #374151 100%)`;
 		}
 	});
 
@@ -3148,6 +3288,8 @@ function playTrackWithRowKey(track: ScanResultItem, rowKey: string) {
 }
 (window as any).playTrackWithRowKey = playTrackWithRowKey;
 (window as any).togglePlayPause = togglePlayPause;
+(window as any).state = state;
+(window as any).startVisualizer = startVisualizer;
 
 function encodeHex(str: string): string {
 	return Array.from(new TextEncoder().encode(str))
@@ -3167,12 +3309,21 @@ function playTrackInternal(track: ScanResultItem) {
 		audioElement.src = "";
 	} else {
 		audioElement = new Audio();
+		audioElement.crossOrigin = "anonymous";
 		setupAudioEventListeners(audioElement);
 	}
+
+	initWebAudio(audioElement);
 
 	const volumeInput = document.getElementById("player-volume") as HTMLInputElement;
 	if (volumeInput && audioElement) {
 		audioElement.volume = parseFloat(volumeInput.value);
+	}
+
+	const seekbarReset = document.getElementById("player-seekbar") as HTMLInputElement;
+	if (seekbarReset) {
+		seekbarReset.value = "0";
+		seekbarReset.style.background = "linear-gradient(to right, #6366f1 0%, #6366f1 0%, #374151 0%, #374151 100%)";
 	}
 
 	currentPlayingTrack = track;
@@ -3305,6 +3456,7 @@ function setupAudioEventListeners(audio: HTMLAudioElement) {
 		if (!audio.duration || isNaN(audio.duration)) return;
 		const pct = (audio.currentTime / audio.duration) * 100;
 		seekbar.value = String(pct);
+		seekbar.style.background = `linear-gradient(to right, #6366f1 0%, #6366f1 ${pct}%, #374151 ${pct}%, #374151 100%)`;
 		txtCurrent.textContent = formatTime(audio.currentTime);
 	});
 
@@ -3320,12 +3472,19 @@ function setupAudioEventListeners(audio: HTMLAudioElement) {
 		state.isPlaying = true;
 		updatePlayPauseButtonUI();
 		updatePlayingRowUI();
+		startVisualizer();
 	});
 
 	audio.addEventListener("pause", () => {
 		state.isPlaying = false;
 		updatePlayPauseButtonUI();
 		updatePlayingRowUI();
+
+		// Reset volume level indicator to 0% when paused/stopped
+		const elVolumeLevel = document.getElementById("player-volume-level");
+		if (elVolumeLevel) {
+			elVolumeLevel.style.height = "0%";
+		}
 	});
 
 	audio.addEventListener("error", (e) => {

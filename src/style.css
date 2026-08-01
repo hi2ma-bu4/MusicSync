@@ -103,3 +103,20 @@ select:focus-visible,
 
 	box-shadow: 0 0 8px rgba(99, 102, 241, 0.3) !important;
 }
+
+/* Custom volume slider overrides to make the track transparent but keep the thumb */
+.custom-volume-slider {
+	background: transparent !important;
+	-webkit-appearance: none;
+	appearance: none;
+}
+
+.custom-volume-slider::-webkit-slider-runnable-track {
+	background: transparent !important;
+	border: none !important;
+}
+
+.custom-volume-slider::-moz-range-track {
+	background: transparent !important;
+	border: none !important;
+}

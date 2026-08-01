@@ -2736,12 +2736,25 @@ function registerIpcHandlers() {
   });
   protocol.handle("media", async (request) => {
     try {
+      if (request.method === "OPTIONS") {
+        return new Response(null, {
+          status: 204,
+          headers: {
+            "Access-Control-Allow-Origin": "*",
+            "Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+            "Access-Control-Allow-Headers": "*"
+          }
+        });
+      }
       const url = new URL(request.url);
       const hexStr = url.pathname.slice(1);
       const decodedPath = Buffer.from(hexStr, "hex").toString("utf-8");
       if (!fs5.existsSync(decodedPath)) {
         console.error(`[media protocol] File not found on disk: "${decodedPath}"`);
-        return new Response("Not Found", { status: 404 });
+        return new Response("Not Found", {
+          status: 404,
+          headers: { "Access-Control-Allow-Origin": "*" }
+        });
       }
       const stat = fs5.statSync(decodedPath);
       const fileSize = stat.size;
@@ -2771,7 +2784,8 @@ function registerIpcHandlers() {
             "Content-Range": `bytes ${start}-${end}/${fileSize}`,
             "Accept-Ranges": "bytes",
             "Content-Length": String(chunkSize),
-            "Content-Type": contentType
+            "Content-Type": contentType,
+            "Access-Control-Allow-Origin": "*"
           }
         });
       } else {
@@ -2782,7 +2796,8 @@ function registerIpcHandlers() {
           headers: {
             "Content-Length": String(fileSize),
             "Content-Type": contentType,
-            "Accept-Ranges": "bytes"
+            "Accept-Ranges": "bytes",
+            "Access-Control-Allow-Origin": "*"
           }
         });
       }
@@ -3489,7 +3504,8 @@ protocol2.registerSchemesAsPrivileged([
       secure: true,
       supportFetchAPI: true,
       bypassCSP: true,
-      stream: true
+      stream: true,
+      corsEnabled: true
     }
   }
 ]);

@@ -11,6 +11,7 @@ protocol.registerSchemesAsPrivileged([
 			supportFetchAPI: true,
 			bypassCSP: true,
 			stream: true,
+			corsEnabled: true,
 		},
 	},
 ]);

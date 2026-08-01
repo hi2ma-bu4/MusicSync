@@ -28,13 +28,27 @@ export function registerIpcHandlers() {
 	});
 	protocol.handle("media", async (request) => {
 		try {
+			if (request.method === "OPTIONS") {
+				return new Response(null, {
+					status: 204,
+					headers: {
+						"Access-Control-Allow-Origin": "*",
+						"Access-Control-Allow-Methods": "GET, HEAD, OPTIONS",
+						"Access-Control-Allow-Headers": "*",
+					},
+				});
+			}
+
 			const url = new URL(request.url);
 			const hexStr = url.pathname.slice(1);
 			const decodedPath = Buffer.from(hexStr, "hex").toString("utf-8");
 
 			if (!fs.existsSync(decodedPath)) {
 				console.error(`[media protocol] File not found on disk: "${decodedPath}"`);
-				return new Response("Not Found", { status: 404 });
+				return new Response("Not Found", {
+					status: 404,
+					headers: { "Access-Control-Allow-Origin": "*" },
+				});
 			}
 
 			const stat = fs.statSync(decodedPath);
@@ -71,6 +85,7 @@ export function registerIpcHandlers() {
 						"Accept-Ranges": "bytes",
 						"Content-Length": String(chunkSize),
 						"Content-Type": contentType,
+						"Access-Control-Allow-Origin": "*",
 					},
 				});
 			} else {
@@ -83,6 +98,7 @@ export function registerIpcHandlers() {
 						"Content-Length": String(fileSize),
 						"Content-Type": contentType,
 						"Accept-Ranges": "bytes",
+						"Access-Control-Allow-Origin": "*",
 					},
 				});
 			}
