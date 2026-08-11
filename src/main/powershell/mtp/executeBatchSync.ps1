@@ -1,10 +1,26 @@
 $ops = $params.operations
 
 $shell = New-Object -ComObject Shell.Application
-$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-if (-not $phoneItem) {
-    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+$drives = $shell.NameSpace(17)
+$phoneItem = $null
+if ($drives) {
+    $driveItems = $drives.Items()
+    foreach ($item in $driveItems) {
+        if ($item.Name -eq $phoneName) {
+            $phoneItem = $item
+            break
+        }
+    }
+    if (-not $phoneItem) {
+        foreach ($item in $driveItems) {
+            if ($item.Name -like "*$phoneName*") {
+                $phoneItem = $item
+                break
+            }
+        }
+    }
 }
+
 if (-not $phoneItem) {
     throw "Phone not found: $phoneName"
 }

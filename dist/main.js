@@ -221,7 +221,7 @@ var init_deleteFile = __esm({
 var executeBatchSync_default;
 var init_executeBatchSync = __esm({
   "src/main/powershell/mtp/executeBatchSync.ps1"() {
-    executeBatchSync_default = '$ops = $params.operations\n\n$shell = New-Object -ComObject Shell.Application\n$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\nif (-not $phoneItem) {\n    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n}\nif (-not $phoneItem) {\n    throw "Phone not found: $phoneName"\n}\n\n$consecutiveFailures = 0\n$failedTrackIds = @()\n$total = $ops.Count\n$completed = 0\n\nforeach ($op in $ops) {\n    $completed++\n    $type = $op.type\n    $trackId = $op.trackId\n    $success = $false\n    $errorMsg = ""\n\n    try {\n        if ($type -eq "delete") {\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPathInsideSub = $remoteDest\n            if ($relPathInsideSub -match "^$subPath/(.*)$") {\n                $relPathInsideSub = $Matches[1]\n            }\n            $fullPath = "$subPath/$relPathInsideSub"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullPath\n            if ($fileItem) {\n                $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n                $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n                $tempFolder = $shell.NameSpace($tempDir)\n                $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n                for ($i = 0; $i -lt 50; $i++) {\n                    if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n                    Start-Sleep -Milliseconds 50\n                }\n                Remove-Item $tempDir -Recurse -Force\n            }\n            $success = $true\n        }\n        elseif ($type -eq "move") {\n            $oldRemoteSrc = $op.oldRemoteSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D (${completed}/${total}): ${oldRemoteSrc}"\n\n            $oldRelPath = $oldRemoteSrc\n            if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }\n            $newRelPath = $remoteDest\n            if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }\n\n            $newRelDir = Split-Path $newRelPath\n            $newRelDir = $newRelDir.Replace("\\", "/")\n            if ($newRelDir -eq ".") { $newRelDir = "" }\n            $newFileName = Split-Path $newRelPath -Leaf\n            $oldFileName = Split-Path $oldRelPath -Leaf\n\n            $fullOldPath = "$subPath/$oldRelPath"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\n            if (-not $fileItem) {\n                throw "Source file not found: $fullOldPath"\n            }\n\n            $fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n            }\n\n            if ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n                $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n                Start-Sleep -Milliseconds 150\n                $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1\n            }\n\n            if ($fileItem -and $oldFileName -ne $newFileName) {\n                $fileItem.Name = $newFileName\n                Start-Sleep -Milliseconds 100\n            }\n            $success = $true\n        }\n        elseif ($type -eq "copy") {\n            $localSrc = $op.localSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPath = $remoteDest\n            if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }\n            $relativeDestDir = Split-Path $relPath\n            $relativeDestDir = $relativeDestDir.Replace("\\", "/")\n            $destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }\n\n            $fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n            }\n\n            $destFolder = $destFolderItem.GetFolder\n            $destFolder.CopyHere($localSrc, 16)\n\n            $fileName = [System.IO.Path]::GetFileName($localSrc)\n            $pollSuccess = $false\n\n            for ($i = 0; $i -lt 50; $i++) {\n                $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n                if (-not $phoneItem) {\n                    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n                }\n                $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n                if ($destFolderItem) {\n                    $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n                    if ($item) {\n                        Start-Sleep -Milliseconds 250\n                        $pollSuccess = $true\n                        break\n                    }\n                }\n                Start-Sleep -Milliseconds 100\n            }\n\n            if ($pollSuccess) {\n                $success = $true\n            }\n            else {\n                throw "Copy failed or verification timed out for: $fileName"\n            }\n        }\n    }\n    catch {\n        $errorMsg = $_.ToString()\n        $success = $false\n    }\n\n    if ($success) {\n        $consecutiveFailures = 0\n        Write-Output "PROGRESS_UPDATE:SUCCESS_OP:${trackId}"\n    }\n    else {\n        $consecutiveFailures++\n        $failedTrackIds += $trackId\n        Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"\n\n        if ($consecutiveFailures -ge 3) {\n            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:${consecutiveFailures}"\n            # Wait for Node.js reply on stdin\n            $reply = [Console]::In.ReadLine()\n            if ($reply -eq "ABORT") {\n                Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"\n                break\n            }\n            else {\n                $consecutiveFailures = 0\n            }\n        }\n    }\n}\n\nWrite-Output "JSON_RESULTS_START"\nif ($failedTrackIds.Count -eq 0) {\n    "[]"\n}\nelseif ($failedTrackIds.Count -eq 1) {\n    "[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"\n}\nelse {\n    $failedTrackIds | ConvertTo-Json -Compress\n}\nWrite-Output "JSON_RESULTS_END"\n';
+    executeBatchSync_default = '$ops = $params.operations\n\n$shell = New-Object -ComObject Shell.Application\n$drives = $shell.NameSpace(17)\n$phoneItem = $null\nif ($drives) {\n    $driveItems = $drives.Items()\n    foreach ($item in $driveItems) {\n        if ($item.Name -eq $phoneName) {\n            $phoneItem = $item\n            break\n        }\n    }\n    if (-not $phoneItem) {\n        foreach ($item in $driveItems) {\n            if ($item.Name -like "*$phoneName*") {\n                $phoneItem = $item\n                break\n            }\n        }\n    }\n}\n\nif (-not $phoneItem) {\n    throw "Phone not found: $phoneName"\n}\n\n$consecutiveFailures = 0\n$failedTrackIds = @()\n$total = $ops.Count\n$completed = 0\n\nforeach ($op in $ops) {\n    $completed++\n    $type = $op.type\n    $trackId = $op.trackId\n    $success = $false\n    $errorMsg = ""\n\n    try {\n        if ($type -eq "delete") {\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u524A\u9664\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPathInsideSub = $remoteDest\n            if ($relPathInsideSub -match "^$subPath/(.*)$") {\n                $relPathInsideSub = $Matches[1]\n            }\n            $fullPath = "$subPath/$relPathInsideSub"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullPath\n            if ($fileItem) {\n                $tempDir = [System.IO.Path]::Combine($env:TEMP, [System.IO.Path]::GetRandomFileName())\n                $null = New-Item -ItemType Directory -Path $tempDir -Force\n\n                $tempFolder = $shell.NameSpace($tempDir)\n                $tempFolder.MoveHere($fileItem, 16 + 1024)\n\n                for ($i = 0; $i -lt 50; $i++) {\n                    if ((Get-ChildItem -Path $tempDir).Count -gt 0) { break }\n                    Start-Sleep -Milliseconds 50\n                }\n                Remove-Item $tempDir -Recurse -Force\n            }\n            $success = $true\n        }\n        elseif ($type -eq "move") {\n            $oldRemoteSrc = $op.oldRemoteSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u914D\u7F6E\u6574\u7406\u4E2D (${completed}/${total}): ${oldRemoteSrc}"\n\n            $oldRelPath = $oldRemoteSrc\n            if ($oldRelPath -match "^$subPath/(.*)$") { $oldRelPath = $Matches[1] }\n            $newRelPath = $remoteDest\n            if ($newRelPath -match "^$subPath/(.*)$") { $newRelPath = $Matches[1] }\n\n            $newRelDir = Split-Path $newRelPath\n            $newRelDir = $newRelDir.Replace("\\", "/")\n            if ($newRelDir -eq ".") { $newRelDir = "" }\n            $newFileName = Split-Path $newRelPath -Leaf\n            $oldFileName = Split-Path $oldRelPath -Leaf\n\n            $fullOldPath = "$subPath/$oldRelPath"\n            $fileItem = Get-MtpFolderItem $phoneItem $fullOldPath\n            if (-not $fileItem) {\n                throw "Source file not found: $fullOldPath"\n            }\n\n            $fullNewDir = if ($newRelDir -eq "" -or $newRelDir -eq ".") { $subPath } else { "$subPath/$newRelDir" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullNewDir\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullNewDir\n            }\n\n            if ($destFolderItem.Path -ne $fileItem.Parent.Path) {\n                $destFolderItem.GetFolder.MoveHere($fileItem, 16)\n                Start-Sleep -Milliseconds 150\n                $fileItem = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $oldFileName } | Select-Object -First 1\n            }\n\n            if ($fileItem -and $oldFileName -ne $newFileName) {\n                $fileItem.Name = $newFileName\n                Start-Sleep -Milliseconds 100\n            }\n            $success = $true\n        }\n        elseif ($type -eq "copy") {\n            $localSrc = $op.localSrc\n            $remoteDest = $op.remoteDest\n            Write-Output "PROGRESS_UPDATE:STATUS:\u30B3\u30D4\u30FC\u4E2D (${completed}/${total}): ${remoteDest}"\n\n            $relPath = $remoteDest\n            if ($relPath -match "^$subPath/(.*)$") { $relPath = $Matches[1] }\n            $relativeDestDir = Split-Path $relPath\n            $relativeDestDir = $relativeDestDir.Replace("\\", "/")\n            $destDirInSub = if ($relativeDestDir -eq "." -or $relativeDestDir -eq "") { "" } else { $relativeDestDir }\n\n            $fullPath = if ($destDirInSub -eq "" -or $destDirInSub -eq ".") { $subPath } else { "$subPath/$destDirInSub" }\n            $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n            if (-not $destFolderItem) {\n                $destFolderItem = Ensure-MtpDirectory $phoneItem $fullPath\n            }\n\n            $destFolder = $destFolderItem.GetFolder\n            $destFolder.CopyHere($localSrc, 16)\n\n            $fileName = [System.IO.Path]::GetFileName($localSrc)\n            $pollSuccess = $false\n\n            for ($i = 0; $i -lt 50; $i++) {\n                $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1\n                if (-not $phoneItem) {\n                    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1\n                }\n                $destFolderItem = Get-MtpFolderItem $phoneItem $fullPath\n\n                if ($destFolderItem) {\n                    $item = $destFolderItem.GetFolder.Items() | Where-Object { $_.Name -eq $fileName } | Select-Object -First 1\n                    if ($item) {\n                        Start-Sleep -Milliseconds 250\n                        $pollSuccess = $true\n                        break\n                    }\n                }\n                Start-Sleep -Milliseconds 100\n            }\n\n            if ($pollSuccess) {\n                $success = $true\n            }\n            else {\n                throw "Copy failed or verification timed out for: $fileName"\n            }\n        }\n    }\n    catch {\n        $errorMsg = $_.ToString()\n        $success = $false\n    }\n\n    if ($success) {\n        $consecutiveFailures = 0\n        Write-Output "PROGRESS_UPDATE:SUCCESS_OP:${trackId}"\n    }\n    else {\n        $consecutiveFailures++\n        $failedTrackIds += $trackId\n        Write-Output "PROGRESS_UPDATE:FAILED_OP:${trackId}:${errorMsg}"\n\n        if ($consecutiveFailures -ge 3) {\n            Write-Output "PROGRESS_UPDATE:CONSECUTIVE_FAILURES:${consecutiveFailures}"\n            # Wait for Node.js reply on stdin\n            $reply = [Console]::In.ReadLine()\n            if ($reply -eq "ABORT") {\n                Write-Output "PROGRESS_UPDATE:STATUS:\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u4E2D\u65AD\u3055\u308C\u307E\u3057\u305F\u3002"\n                break\n            }\n            else {\n                $consecutiveFailures = 0\n            }\n        }\n    }\n}\n\nWrite-Output "JSON_RESULTS_START"\nif ($failedTrackIds.Count -eq 0) {\n    "[]"\n}\nelseif ($failedTrackIds.Count -eq 1) {\n    "[" + ($failedTrackIds[0] | ConvertTo-Json -Compress) + "]"\n}\nelse {\n    $failedTrackIds | ConvertTo-Json -Compress\n}\nWrite-Output "JSON_RESULTS_END"\n';
   }
 });
 
@@ -229,7 +229,8 @@ var init_executeBatchSync = __esm({
 var findMusicFiles_default;
 var init_findMusicFiles = __esm({
   "src/main/powershell/mtp/findMusicFiles.ps1"() {
-    findMusicFiles_default = `$shell = New-Object -ComObject Shell.Application
+    findMusicFiles_default = `Write-Output "PROGRESS_UPDATE:MTP\u30C7\u30D0\u30A4\u30B9\u63A5\u7D9A\u3092\u53D6\u5F97\u4E2D..."
+$shell = New-Object -ComObject Shell.Application
 $drives = $shell.NameSpace(17)
 if (-not $drives) {
     Write-Output "JSON_RESULTS_START"
@@ -238,9 +239,22 @@ if (-not $drives) {
     exit 0
 }
 
-$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+Write-Output "PROGRESS_UPDATE:\u30C7\u30D0\u30A4\u30B9\u300C$phoneName\u300D\u3092\u63A2\u7D22\u4E2D..."
+$phoneItem = $null
+$driveItems = $drives.Items()
+foreach ($item in $driveItems) {
+    if ($item.Name -eq $phoneName) {
+        $phoneItem = $item
+        break
+    }
+}
 if (-not $phoneItem) {
-    $phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+    foreach ($item in $driveItems) {
+        if ($item.Name -like "*$phoneName*") {
+            $phoneItem = $item
+            break
+        }
+    }
 }
 
 if (-not $phoneItem) {
@@ -250,6 +264,7 @@ if (-not $phoneItem) {
     exit 0
 }
 
+Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u300C$subPath\u300D\u3092\u63A2\u7D22\u4E2D..."
 $targetItem = Get-MtpFolderItem $phoneItem $subPath
 if (-not $targetItem) {
     [Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
@@ -258,6 +273,8 @@ if (-not $targetItem) {
     Write-Output "JSON_RESULTS_END"
     exit 0
 }
+
+Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D..."
 
 $global:scannedCount = 0
 function Scan-Folder($folderItem, $relPath) {
@@ -278,7 +295,7 @@ function Scan-Folder($folderItem, $relPath) {
             if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
                 $global:scannedCount++
                 if ($global:scannedCount % 5 -eq 0) {
-                    Write-Output "PROGRESS_UPDATE:  r  t @ C    X L      ... (\${global:scannedCount}  )"
+                    Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
                 }
                 # Retrieve size using ExtendedProperty (System.Size) first (precise & fast)
                 $rawSize = $item.ExtendedProperty("System.Size")
@@ -381,9 +398,24 @@ var init_getFileSizes = __esm({
     getFileSizes_default = `$relativePaths = $params.relativePaths
 
 $shell = New-Object -ComObject Shell.Application
-$phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
-if (-not $phoneItem) {
-    $phoneItem = $shell.NameSpace(17).Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+$drives = $shell.NameSpace(17)
+$phoneItem = $null
+if ($drives) {
+    $driveItems = $drives.Items()
+    foreach ($item in $driveItems) {
+        if ($item.Name -eq $phoneName) {
+            $phoneItem = $item
+            break
+        }
+    }
+    if (-not $phoneItem) {
+        foreach ($item in $driveItems) {
+            if ($item.Name -like "*$phoneName*") {
+                $phoneItem = $item
+                break
+            }
+        }
+    }
 }
 
 if (-not $phoneItem) {

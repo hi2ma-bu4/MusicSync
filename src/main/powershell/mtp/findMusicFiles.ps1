@@ -1,3 +1,4 @@
+Write-Output "PROGRESS_UPDATE:MTPデバイス接続を取得中..."
 $shell = New-Object -ComObject Shell.Application
 $drives = $shell.NameSpace(17)
 if (-not $drives) {
@@ -7,9 +8,22 @@ if (-not $drives) {
     exit 0
 }
 
-$phoneItem = $drives.Items() | Where-Object { $_.Name -eq $phoneName } | Select-Object -First 1
+Write-Output "PROGRESS_UPDATE:デバイス「$phoneName」を探索中..."
+$phoneItem = $null
+$driveItems = $drives.Items()
+foreach ($item in $driveItems) {
+    if ($item.Name -eq $phoneName) {
+        $phoneItem = $item
+        break
+    }
+}
 if (-not $phoneItem) {
-    $phoneItem = $drives.Items() | Where-Object { $_.Name -like "*$phoneName*" } | Select-Object -First 1
+    foreach ($item in $driveItems) {
+        if ($item.Name -like "*$phoneName*") {
+            $phoneItem = $item
+            break
+        }
+    }
 }
 
 if (-not $phoneItem) {
@@ -19,6 +33,7 @@ if (-not $phoneItem) {
     exit 0
 }
 
+Write-Output "PROGRESS_UPDATE:比較先フォルダ「$subPath」を探索中..."
 $targetItem = Get-MtpFolderItem $phoneItem $subPath
 if (-not $targetItem) {
     [Console]::Error.WriteLine("[findMusicFiles] Subpath '$subPath' not found on device.")
@@ -27,6 +42,8 @@ if (-not $targetItem) {
     Write-Output "JSON_RESULTS_END"
     exit 0
 }
+
+Write-Output "PROGRESS_UPDATE:比較先フォルダ内のファイルをスキャン中..."
 
 $global:scannedCount = 0
 function Scan-Folder($folderItem, $relPath) {
@@ -47,7 +64,7 @@ function Scan-Folder($folderItem, $relPath) {
             if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
                 $global:scannedCount++
                 if ($global:scannedCount % 5 -eq 0) {
-                    Write-Output "PROGRESS_UPDATE:  r  t @ C    X L      ... (${global:scannedCount}  )"
+                    Write-Output "PROGRESS_UPDATE:比較先ファイルをスキャン中... (${global:scannedCount}曲)"
                 }
                 # Retrieve size using ExtendedProperty (System.Size) first (precise & fast)
                 $rawSize = $item.ExtendedProperty("System.Size")
