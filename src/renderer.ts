@@ -4,7 +4,7 @@ import "./style.css";
 import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
-import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes, thumbnailLoader } from "./renderer/components/treeView";
+import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes, thumbnailLoader, restoreScrollPosition } from "./renderer/components/treeView";
 import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist, highlightElement } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import type { ScanResultItem } from "./renderer/types";
@@ -915,11 +915,10 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 	elBtnSearchClear.classList.add("hidden");
 	elSearchCombobox.classList.add("hidden");
 
-	// Reset filter first, so state.filteredTracks is fully populated with all tracks!
-	applyFilterAndRender();
-
-	// Reset stored scroll positions to avoid scroll restore conflicts on jump target
 	if (tabId === "track") {
+		// Switch to track tab first to populate state.filteredTracks in track-sorted order!
+		switchTab("track");
+
 		const track = state.filteredTracks.find((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
 		if (track) {
 			const idx = state.filteredTracks.indexOf(track);
@@ -929,32 +928,36 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 				const centeredScrollTop = Math.max(0, idx * 30 - viewportHeight / 2 + 15);
 				state.tabScrollPositions.track = centeredScrollTop;
 				state.jumpTargetId = `track-row-${track.id}`;
+
+				// Scroll and highlight instantly!
+				if (vsViewportEl) {
+					restoreScrollPosition(vsViewportEl, centeredScrollTop);
+				}
 			}
 		}
 	} else {
 		state.tabScrollPositions[tabId] = 0;
-	}
-
-	// 2. Switch tab and auto-expand target group
-	if (tabId === "artist") {
-		let normalizedKey = normalizeArtistForIntegration(targetName);
-		const artistKey = getSafeId("artist", normalizedKey);
-		state.expandedGroups.add(artistKey);
-		state.jumpTargetId = `hdr-${artistKey}`;
-		switchTab("artist");
-	} else if (tabId === "album") {
-		const albumKey = getSafeId("album", targetName);
-		state.expandedGroups.add(albumKey);
-		state.jumpTargetId = `hdr-${albumKey}`;
-		switchTab("album");
-	} else if (tabId === "genre") {
-		const genreKey = getSafeId("genre", targetName);
-		state.expandedGroups.add(genreKey);
-		state.jumpTargetId = `hdr-${genreKey}`;
-		switchTab("genre");
-	} else if (tabId === "track") {
-		switchTab("track");
+		// Reset filter and render instantly so the element exists on screen
 		applyFilterAndRender();
+
+		// Switch tab and auto-expand target group
+		if (tabId === "artist") {
+			let normalizedKey = normalizeArtistForIntegration(targetName);
+			const artistKey = getSafeId("artist", normalizedKey);
+			state.expandedGroups.add(artistKey);
+			state.jumpTargetId = `hdr-${artistKey}`;
+			switchTab("artist");
+		} else if (tabId === "album") {
+			const albumKey = getSafeId("album", targetName);
+			state.expandedGroups.add(albumKey);
+			state.jumpTargetId = `hdr-${albumKey}`;
+			switchTab("album");
+		} else if (tabId === "genre") {
+			const genreKey = getSafeId("genre", targetName);
+			state.expandedGroups.add(genreKey);
+			state.jumpTargetId = `hdr-${genreKey}`;
+			switchTab("genre");
+		}
 	}
 }
 (window as any).navigateToSuggestion = navigateToSuggestion;
@@ -975,9 +978,7 @@ function renderActiveView() {
 		elTreeContainer.onscroll = null; // Clear tree container scroll listener
 		elTrackContainer.classList.remove("hidden");
 		if (state.tabScrollPositions.track !== undefined && state.tabScrollPositions.track !== null) {
-			requestAnimationFrame(() => {
-				vsViewport.scrollTop = state.tabScrollPositions.track;
-			});
+			restoreScrollPosition(vsViewport, state.tabScrollPositions.track);
 		}
 	} else {
 		elTreeContainer.classList.remove("hidden");
