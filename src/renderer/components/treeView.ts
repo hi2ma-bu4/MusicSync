@@ -187,7 +187,6 @@ function renderAlbumCardInnerHtml(albumKey: string, albumName: string, artistNam
 function applyAlbumArtBackground(el: HTMLElement, albumName: string) {
 	thumbnailLoader.register(el, albumName, (dataUri) => {
 		if (dataUri) {
-			if (!document.body.contains(el)) return;
 			const bgOverlay = document.createElement("div");
 			bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
 			bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
