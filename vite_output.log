@@ -3,7 +3,7 @@
 > vite --config vite.config.mjs
 
 
-  VITE v8.1.5  ready in 360 ms
+  VITE v8.1.5  ready in 331 ms
 
   ➜  Local:   http://localhost:5173/
   ➜  Network: use --host to expose

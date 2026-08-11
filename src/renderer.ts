@@ -915,6 +915,9 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 	elBtnSearchClear.classList.add("hidden");
 	elSearchCombobox.classList.add("hidden");
 
+	// Reset filter first, so state.filteredTracks is fully populated with all tracks!
+	applyFilterAndRender();
+
 	// Reset stored scroll positions to avoid scroll restore conflicts on jump target
 	if (tabId === "track") {
 		const track = state.filteredTracks.find((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
@@ -931,9 +934,6 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 	} else {
 		state.tabScrollPositions[tabId] = 0;
 	}
-
-	// Reset filter and render instantly so the element exists on screen
-	applyFilterAndRender();
 
 	// 2. Switch tab and auto-expand target group
 	if (tabId === "artist") {
@@ -954,6 +954,7 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 		switchTab("genre");
 	} else if (tabId === "track") {
 		switchTab("track");
+		applyFilterAndRender();
 	}
 }
 (window as any).navigateToSuggestion = navigateToSuggestion;
@@ -973,8 +974,10 @@ function renderActiveView() {
 		elTreeContainer.innerHTML = ""; // Clear inactive tree container DOM
 		elTreeContainer.onscroll = null; // Clear tree container scroll listener
 		elTrackContainer.classList.remove("hidden");
-		if (state.tabScrollPositions.track) {
-			vsViewport.scrollTop = state.tabScrollPositions.track;
+		if (state.tabScrollPositions.track !== undefined && state.tabScrollPositions.track !== null) {
+			requestAnimationFrame(() => {
+				vsViewport.scrollTop = state.tabScrollPositions.track;
+			});
 		}
 	} else {
 		elTreeContainer.classList.remove("hidden");

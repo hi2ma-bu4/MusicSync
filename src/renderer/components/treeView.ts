@@ -184,19 +184,16 @@ function renderAlbumCardInnerHtml(albumKey: string, albumName: string, artistNam
 	return inner;
 }
 
-function applyAlbumArtBackground(elementId: string, albumName: string) {
-	const el = document.getElementById(elementId);
-	if (!el) return;
+function applyAlbumArtBackground(el: HTMLElement, albumName: string) {
 	thumbnailLoader.register(el, albumName, (dataUri) => {
 		if (dataUri) {
-			const currentEl = document.getElementById(elementId);
-			if (!currentEl) return;
+			if (!document.body.contains(el)) return;
 			const bgOverlay = document.createElement("div");
 			bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
 			bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
-			currentEl.prepend(bgOverlay);
+			el.prepend(bgOverlay);
 
-			Array.from(currentEl.children).forEach((child) => {
+			Array.from(el.children).forEach((child) => {
 				if (child !== bgOverlay) {
 					const htmlChild = child as HTMLElement;
 					htmlChild.classList.add("relative", "z-10");
@@ -1002,7 +999,7 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 
 			elChildren.appendChild(divAlbum);
 			setCheckboxState(`chk-${albumKey}`, albumTracks);
-			applyAlbumArtBackground(`album-card-${albumKey}`, albumName);
+			applyAlbumArtBackground(divAlbum, albumName);
 
 			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
 			chkAlbum.addEventListener("click", (e) => {
@@ -1486,11 +1483,10 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				fragment.appendChild(div);
 
 				// Setup listeners synchronously inside document fragment
-				const cardId = `album-card-${albumKey}`;
 				const chkAlbum = div.querySelector(`#chk-${albumKey}`) as HTMLInputElement;
 				if (chkAlbum) {
 					setCheckboxStateElement(chkAlbum, albumTracks);
-					applyAlbumArtBackground(cardId, albumName);
+					applyAlbumArtBackground(div, albumName);
 
 					chkAlbum.addEventListener("click", (e) => {
 						e.stopPropagation();
