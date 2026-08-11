@@ -43,17 +43,18 @@ foreach ($parent in $grouped.Keys) {
             foreach ($item in $folder.Items()) {
                 if ($item.Name -in $files) {
                     $rawSize = $item.ExtendedProperty("System.Size")
-                    if ($null -eq $rawSize) { $rawSize = $item.Size }
                     if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+                    if ($null -eq $rawSize) { $rawSize = $item.Size }
 
                     $size = 0
                     if ($null -ne $rawSize -and $rawSize -ne "") {
                         try { $size = [int64]$rawSize } catch {}
                     }
 
+                    # Fallback to GetDetailsOf only if size is 0 and we couldn't get it via ExtendedProperty
                     if ($size -eq 0) {
                         $sizeStr = $folder.GetDetailsOf($item, 2)
-                        if ($sizeStr -and $sizeStr -match '([\d\.,\s]+)\s*(KB|MB|GB|B|ƒoƒCƒg)?') {
+                        if ($sizeStr -and $sizeStr -match '([\d\.,\s]+)\s*(KB|MB|GB|B|\x83o\x83C\x83g)?') {
                             $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
                             $unit = $Matches[2]
                             if ($unit -eq "KB") { $size = [int64]($val * 1024) }

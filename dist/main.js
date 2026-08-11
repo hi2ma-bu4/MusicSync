@@ -278,21 +278,22 @@ function Scan-Folder($folderItem, $relPath) {
             if ($ext -in ".mp3", ".m4a", ".aac", ".flac", ".wav", ".ogg", ".wma") {
                 $global:scannedCount++
                 if ($global:scannedCount % 5 -eq 0) {
-                    Write-Output "PROGRESS_UPDATE:\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u3092\u30B9\u30AD\u30E3\u30F3\u4E2D... (\${global:scannedCount}\u66F2)"
+                    Write-Output "PROGRESS_UPDATE:  r  t @ C    X L      ... (\${global:scannedCount}  )"
                 }
-                # Retrieve size and modification date using direct properties or GetDetailsOf fallback
+                # Retrieve size using ExtendedProperty (System.Size) first (precise & fast)
                 $rawSize = $item.ExtendedProperty("System.Size")
-                if ($null -eq $rawSize) { $rawSize = $item.Size }
                 if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+                if ($null -eq $rawSize) { $rawSize = $item.Size }
 
                 $size = 0
                 if ($null -ne $rawSize -and $rawSize -ne "") {
                     try { $size = [int64]$rawSize } catch {}
                 }
 
+                # Fallback to GetDetailsOf only if size is 0 and we couldn't get it via ExtendedProperty
                 if ($size -eq 0) {
                     $sizeStr = $folder.GetDetailsOf($item, 2)
-                    if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                    if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\\x83o\\x83C\\x83g)?') {
                         $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
                         $unit = $Matches[2]
                         if ($unit -eq "KB") { $size = [int64]($val * 1024) }
@@ -302,21 +303,41 @@ function Scan-Folder($folderItem, $relPath) {
                     }
                 }
 
+                # Retrieve modification date using ExtendedProperty (System.DateModified) first (precise & fast)
                 $mtimeMs = 0
-                $dateStr = $folder.GetDetailsOf($item, 3)
-                if ($dateStr) {
+                $rawDate = $item.ExtendedProperty("System.DateModified")
+                if ($rawDate) {
                     try {
-                        $date = Get-Date $dateStr
+                        $date = Get-Date $rawDate
                         $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
                     }
                     catch {
-                        Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
+                        Write-Warning "Failed to parse System.DateModified '$rawDate' for $name : $_"
                     }
                 }
+
+                # Fallback to GetDetailsOf only if ExtendedProperty failed
+                if ($mtimeMs -eq 0) {
+                    $dateStr = $folder.GetDetailsOf($item, 3)
+                    if ($dateStr) {
+                        try {
+                            $date = Get-Date $dateStr
+                            $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                        }
+                        catch {
+                            Write-Warning "Failed to parse date string '$dateStr' for $name : $_"
+                        }
+                    }
+                }
+
+                # Second fallback to ModifyDate if mtimeMs is still 0 (discard if it is the 1899-12-30 placeholder date)
                 if ($mtimeMs -eq 0 -and $item.ModifyDate) {
                     try {
                         $date = Get-Date $item.ModifyDate
-                        $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                        $chkYear = $date.Year
+                        if ($chkYear -gt 1900) {
+                            $mtimeMs = [System.DateTimeOffset]::new($date).ToUnixTimeMilliseconds()
+                        }
                     }
                     catch {
                         Write-Warning "Failed to parse direct ModifyDate for $name : $_"
@@ -402,17 +423,18 @@ foreach ($parent in $grouped.Keys) {
             foreach ($item in $folder.Items()) {
                 if ($item.Name -in $files) {
                     $rawSize = $item.ExtendedProperty("System.Size")
-                    if ($null -eq $rawSize) { $rawSize = $item.Size }
                     if ($null -eq $rawSize) { $rawSize = $item.ExtendedProperty("Size") }
+                    if ($null -eq $rawSize) { $rawSize = $item.Size }
 
                     $size = 0
                     if ($null -ne $rawSize -and $rawSize -ne "") {
                         try { $size = [int64]$rawSize } catch {}
                     }
 
+                    # Fallback to GetDetailsOf only if size is 0 and we couldn't get it via ExtendedProperty
                     if ($size -eq 0) {
                         $sizeStr = $folder.GetDetailsOf($item, 2)
-                        if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\u30D0\u30A4\u30C8)?') {
+                        if ($sizeStr -and $sizeStr -match '([\\d\\.,\\s]+)\\s*(KB|MB|GB|B|\\x83o\\x83C\\x83g)?') {
                             $val = [double]($Matches[1].Replace(",", "").Replace(" ", ""))
                             $unit = $Matches[2]
                             if ($unit -eq "KB") { $size = [int64]($val * 1024) }
