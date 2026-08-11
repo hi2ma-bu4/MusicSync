@@ -642,3 +642,10 @@ export function formatDeltaDurationHHMMSS(seconds: number): string {
 	const absSec = Math.abs(seconds);
 	return sign + formatDurationHHMMSS(absSec);
 }
+
+export function highlightElement(el: HTMLElement) {
+	el.classList.add("jump-highlight-active");
+	setTimeout(() => {
+		el.classList.remove("jump-highlight-active");
+	}, 2000);
+}
