@@ -1237,6 +1237,9 @@ function updateMasterCheckboxState() {
 }
 
 function applyFilterAndRender() {
+	// Clear pending obsolete thumbnail queues
+	thumbnailLoader.clearPending();
+
 	// 0. Update priority cache based on the current checked states
 	state.trackPriorityCache.clear();
 	state.scannedTracks.forEach((track) => {

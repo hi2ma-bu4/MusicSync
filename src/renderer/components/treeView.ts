@@ -3,15 +3,18 @@ import { CONFIG, pushHistoryState, state } from "../state";
 import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist, highlightElement } from "./utils";
 
 class ThumbnailLoader {
-	private maxConcurrency = 3;
 	private activeCount = 0;
 	private pendingHigh: { albumName: string; callback: (uri: string | null) => void }[] = [];
 	private pendingLow: { albumName: string; callback: (uri: string | null) => void }[] = [];
 	private cache = new Map<string, string | null>(); // albumName -> dataUri
 	private loadingPromises = new Map<string, Promise<string | null>>(); // albumName -> Promise
-	private observer: IntersectionObserver;
+	private observer!: IntersectionObserver;
 
 	constructor() {
+		this.initObserver();
+	}
+
+	private initObserver() {
 		this.observer = new IntersectionObserver((entries) => {
 			entries.forEach((entry) => {
 				if (entry.isIntersecting) {
@@ -21,7 +24,9 @@ class ThumbnailLoader {
 						// Elevate priority of this album
 						this.elevate(albumName);
 						// We can unobserve since we started loading it
-						this.observer.unobserve(el);
+						try {
+							this.observer.unobserve(el);
+						} catch (e) {}
 					}
 				}
 			});
@@ -35,7 +40,9 @@ class ThumbnailLoader {
 		}
 
 		el.setAttribute("data-lazy-album", albumName);
-		this.observer.observe(el);
+		try {
+			this.observer.observe(el);
+		} catch (e) {}
 
 		// Add to low priority queue by default
 		this.pendingLow.push({ albumName, callback });
@@ -53,7 +60,9 @@ class ThumbnailLoader {
 	}
 
 	private async processNext() {
-		if (this.activeCount >= this.maxConcurrency) return;
+		// Dynamic concurrency limits: 3 for visible on-screen tasks, 1 for off-screen background tasks
+		const allowedConcurrency = this.pendingHigh.length > 0 ? 3 : 1;
+		if (this.activeCount >= allowedConcurrency) return;
 
 		// Get next item (prioritize pendingHigh)
 		let nextItem = this.pendingHigh.shift();
@@ -98,14 +107,19 @@ class ThumbnailLoader {
 		}
 	}
 
-	clearCache() {
-		this.cache.clear();
-		this.loadingPromises.clear();
+	clearPending() {
 		this.pendingHigh = [];
 		this.pendingLow = [];
 		try {
 			this.observer.disconnect();
 		} catch (e) {}
+		this.initObserver();
+	}
+
+	clearCache() {
+		this.cache.clear();
+		this.loadingPromises.clear();
+		this.clearPending();
 	}
 }
 
@@ -175,12 +189,14 @@ function applyAlbumArtBackground(elementId: string, albumName: string) {
 	if (!el) return;
 	thumbnailLoader.register(el, albumName, (dataUri) => {
 		if (dataUri) {
+			const currentEl = document.getElementById(elementId);
+			if (!currentEl) return;
 			const bgOverlay = document.createElement("div");
 			bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
 			bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
-			el.prepend(bgOverlay);
+			currentEl.prepend(bgOverlay);
 
-			Array.from(el.children).forEach((child) => {
+			Array.from(currentEl.children).forEach((child) => {
 				if (child !== bgOverlay) {
 					const htmlChild = child as HTMLElement;
 					htmlChild.classList.add("relative", "z-10");
