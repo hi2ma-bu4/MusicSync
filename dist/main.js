@@ -144,7 +144,8 @@ async function getTrackMetadata(filePath, relativePath) {
       composer,
       year: yearStr,
       comment: commentStr,
-      duration
+      duration,
+      ino: stats.ino
     };
   } catch (err) {
     const stats = await fs.promises.stat(filePath);
@@ -166,9 +167,25 @@ async function getTrackMetadata(filePath, relativePath) {
       composer: "",
       year: "",
       comment: "",
-      duration: 0
+      duration: 0,
+      ino: stats.ino
     };
   }
+}
+async function prefetchSequential(items, fn, lookahead = 4) {
+  const results = new Array(items.length);
+  const promises = [];
+  for (let i = 0; i < Math.min(lookahead, items.length); i++) {
+    promises.push(fn(items[i]));
+  }
+  for (let i = 0; i < items.length; i++) {
+    results[i] = await promises[i];
+    const nextIdx = i + lookahead;
+    if (nextIdx < items.length) {
+      promises.push(fn(items[nextIdx]));
+    }
+  }
+  return results;
 }
 var init_utils = __esm({
   "src/main/utils.ts"() {
@@ -2200,91 +2217,261 @@ async function runScan(profile, event) {
     }
     return index;
   };
+  const buildInoIndex = (cache) => {
+    const index = /* @__PURE__ */ new Map();
+    for (const key of Object.keys(cache)) {
+      const meta = cache[key];
+      if (meta && meta.ino !== void 0) {
+        index.set(meta.ino, meta);
+      }
+    }
+    return index;
+  };
   const itunesSecondaryIndex = buildSecondaryIndex(itunesCache);
   const phoneSecondaryIndex = buildSecondaryIndex(phoneCache);
+  const itunesInoIndex = buildInoIndex(itunesCache);
+  const phoneInoIndex = buildInoIndex(phoneCache);
   const newItunesCache = {};
   const newPhoneCache = {};
   const itunesTracks = [];
   const phoneTracks = [];
-  let current = 0;
-  let total = itunesFiles.length;
-  for (const file of itunesFiles) {
-    if (activeScanCancelled) {
-      throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
-    }
-    current++;
-    if (current % 100 === 0 || current === total) {
-      const pct = 15 + Math.round(current / total * 35);
-      sendProgress("itunes_parse", `iTunes\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
-    }
-    try {
-      const stats = await fs3.promises.stat(file.filePath);
+  sendProgress("itunes_parse", "iTunes\u30D5\u30A1\u30A4\u30EB\u306E\u30B9\u30C6\u30FC\u30BF\u30B9\u60C5\u5831\u3092\u5148\u8AAD\u307F\u4E2D...", 15);
+  const itunesStatted = await prefetchSequential(
+    itunesFiles,
+    async (file) => {
+      if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+      try {
+        const stats = await fs3.promises.stat(file.filePath);
+        return { ...file, stats, valid: true };
+      } catch (e) {
+        console.error("Error statting iTunes file", file.filePath, e);
+        return { ...file, stats: null, valid: false };
+      }
+    },
+    4
+  );
+  if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+  const itunesValid = itunesStatted.filter((f) => f.valid);
+  itunesValid.sort((a, b) => a.stats.ino - b.stats.ino);
+  const itunesParsedResults = await prefetchSequential(
+    itunesValid,
+    async (item) => {
+      if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+      const file = { filePath: item.filePath, relativePath: item.relativePath };
+      const stats = item.stats;
       let meta = itunesCache[file.relativePath];
       if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
-        newItunesCache[file.relativePath] = meta;
-      } else {
-        const key = `${stats.size}_${stats.mtimeMs}`;
-        const cachedMeta = itunesSecondaryIndex.get(key);
-        if (cachedMeta) {
-          meta = {
-            ...cachedMeta,
-            filePath: file.filePath,
-            relativePath: file.relativePath
-          };
-          newItunesCache[file.relativePath] = meta;
-        } else {
-          meta = await getTrackMetadata(file.filePath, file.relativePath);
-          newItunesCache[file.relativePath] = meta;
-        }
+        meta.ino = stats.ino;
+        return { file, meta };
       }
-      meta.id = `itunes_${file.relativePath}`;
-      itunesTracks.push(meta);
-    } catch (e) {
-      console.error("Error stats itunes file", file.filePath, e);
+      const cachedByIno = itunesInoIndex.get(stats.ino);
+      if (cachedByIno && cachedByIno.mtimeMs === stats.mtimeMs && cachedByIno.size === stats.size) {
+        meta = {
+          ...cachedByIno,
+          filePath: file.filePath,
+          relativePath: file.relativePath,
+          ino: stats.ino
+        };
+        return { file, meta };
+      }
+      const key = `${stats.size}_${stats.mtimeMs}`;
+      const cachedMeta = itunesSecondaryIndex.get(key);
+      if (cachedMeta) {
+        meta = {
+          ...cachedMeta,
+          filePath: file.filePath,
+          relativePath: file.relativePath,
+          ino: stats.ino
+        };
+        return { file, meta };
+      }
+      try {
+        meta = await getTrackMetadata(file.filePath, file.relativePath);
+        meta.ino = stats.ino;
+        return { file, meta };
+      } catch (err) {
+        console.error("Failed to parse iTunes track:", file.filePath, err);
+        const fallback = {
+          id: "",
+          filePath: file.filePath,
+          relativePath: file.relativePath,
+          title: path3.basename(file.filePath, path3.extname(file.filePath)),
+          artist: "Unknown Artist",
+          album: "Unknown Album",
+          track: "",
+          genre: "Unknown Genre",
+          size: stats.size,
+          mtimeMs: stats.mtimeMs,
+          hasCoverArt: false,
+          coverArtSize: 0,
+          disc: "",
+          albumartist: "",
+          composer: "",
+          year: "",
+          comment: "",
+          duration: 0,
+          ino: stats.ino
+        };
+        return { file, meta: fallback };
+      }
+    },
+    2
+  );
+  let itunesCurrent = 0;
+  let itunesTotal = itunesParsedResults.length;
+  for (const res of itunesParsedResults) {
+    if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+    itunesCurrent++;
+    if (itunesCurrent % 100 === 0 || itunesCurrent === itunesTotal) {
+      const pct = 15 + Math.round(itunesCurrent / itunesTotal * 35);
+      sendProgress("itunes_parse", `iTunes\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${itunesCurrent}/${itunesTotal})`, pct, { count: itunesCurrent, total: itunesTotal });
     }
+    const meta = res.meta;
+    meta.id = `itunes_${res.file.relativePath}`;
+    itunesTracks.push(meta);
+    newItunesCache[res.file.relativePath] = meta;
   }
   saveCache(profileId, "itunes", newItunesCache);
-  current = 0;
-  total = phoneFiles.length;
-  for (const file of phoneFiles) {
-    if (activeScanCancelled) {
-      throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
-    }
-    current++;
-    if (current % 100 === 0 || current === total) {
-      const pct = 50 + Math.round(current / total * 35);
-      sendProgress("phone_parse", `\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
-    }
-    try {
-      let size = file.size;
-      let mtimeMs = file.mtimeMs;
-      if (size === void 0 || mtimeMs === void 0) {
-        const stats = await fs3.promises.stat(file.filePath);
-        size = stats.size;
-        mtimeMs = stats.mtimeMs;
-      }
-      let meta = phoneCache[file.relativePath];
-      if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
-        newPhoneCache[file.relativePath] = meta;
-      } else {
-        const key = `${size}_${mtimeMs}`;
+  if (profile.storageType === "local") {
+    sendProgress("phone_parse", "\u6BD4\u8F03\u5148\u30D5\u30A1\u30A4\u30EB\u306E\u30B9\u30C6\u30FC\u30BF\u30B9\u60C5\u5831\u3092\u5148\u8AAD\u307F\u4E2D...", 50);
+    const phoneStatted = await prefetchSequential(
+      phoneFiles,
+      async (file) => {
+        if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+        try {
+          const stats = await fs3.promises.stat(file.filePath);
+          return { ...file, stats, valid: true };
+        } catch (e) {
+          console.error("Error statting Phone file", file.filePath, e);
+          return { ...file, stats: null, valid: false };
+        }
+      },
+      4
+    );
+    if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+    const phoneValid = phoneStatted.filter((f) => f.valid);
+    phoneValid.sort((a, b) => a.stats.ino - b.stats.ino);
+    const phoneParsedResults = await prefetchSequential(
+      phoneValid,
+      async (item) => {
+        if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+        const file = { filePath: item.filePath, relativePath: item.relativePath };
+        const stats = item.stats;
+        let meta = phoneCache[file.relativePath];
+        if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
+          meta.ino = stats.ino;
+          return { file, meta };
+        }
+        const cachedByIno = phoneInoIndex.get(stats.ino);
+        if (cachedByIno && cachedByIno.mtimeMs === stats.mtimeMs && cachedByIno.size === stats.size) {
+          meta = {
+            ...cachedByIno,
+            filePath: file.filePath,
+            relativePath: file.relativePath,
+            ino: stats.ino
+          };
+          return { file, meta };
+        }
+        const key = `${stats.size}_${stats.mtimeMs}`;
         const cachedMeta = phoneSecondaryIndex.get(key);
         if (cachedMeta) {
           meta = {
             ...cachedMeta,
             filePath: file.filePath,
-            relativePath: file.relativePath
+            relativePath: file.relativePath,
+            ino: stats.ino
           };
+          return { file, meta };
+        }
+        try {
+          meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
+          meta.ino = stats.ino;
+          return { file, meta };
+        } catch (err) {
+          console.error("Failed to parse Phone track:", file.filePath, err);
+          const fallback = {
+            id: "",
+            filePath: file.filePath,
+            relativePath: file.relativePath,
+            title: path3.basename(file.filePath, path3.extname(file.filePath)),
+            artist: "Unknown Artist",
+            album: "Unknown Album",
+            track: "",
+            genre: "Unknown Genre",
+            size: stats.size,
+            mtimeMs: stats.mtimeMs,
+            hasCoverArt: false,
+            coverArtSize: 0,
+            disc: "",
+            albumartist: "",
+            composer: "",
+            year: "",
+            comment: "",
+            duration: 0,
+            ino: stats.ino
+          };
+          return { file, meta: fallback };
+        }
+      },
+      2
+    );
+    let phoneCurrent = 0;
+    let phoneTotal = phoneParsedResults.length;
+    for (const res of phoneParsedResults) {
+      if (activeScanCancelled) throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+      phoneCurrent++;
+      if (phoneCurrent % 100 === 0 || phoneCurrent === phoneTotal) {
+        const pct = 50 + Math.round(phoneCurrent / phoneTotal * 35);
+        sendProgress("phone_parse", `\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${phoneCurrent}/${phoneTotal})`, pct, { count: phoneCurrent, total: phoneTotal });
+      }
+      const meta = res.meta;
+      meta.id = `phone_${res.file.relativePath}`;
+      phoneTracks.push(meta);
+      newPhoneCache[res.file.relativePath] = meta;
+    }
+  } else {
+    let current = 0;
+    let total = phoneFiles.length;
+    for (const file of phoneFiles) {
+      if (activeScanCancelled) {
+        throw new Error("\u30B9\u30AD\u30E3\u30F3\u51E6\u7406\u304C\u30E6\u30FC\u30B6\u30FC\u306B\u3088\u308A\u30AD\u30E3\u30F3\u30BB\u30EB\u3055\u308C\u307E\u3057\u305F\u3002");
+      }
+      current++;
+      if (current % 100 === 0 || current === total) {
+        const pct = 50 + Math.round(current / total * 35);
+        sendProgress("phone_parse", `\u6BD4\u8F03\u5148\u30D5\u30A9\u30EB\u30C0\u5185\u306E\u66F2\u60C5\u5831\u3092\u89E3\u6790\u4E2D... (${current}/${total})`, pct, { count: current, total });
+      }
+      try {
+        let size = file.size;
+        let mtimeMs = file.mtimeMs;
+        if (size === void 0 || mtimeMs === void 0) {
+          const stats = await fs3.promises.stat(file.filePath);
+          size = stats.size;
+          mtimeMs = stats.mtimeMs;
+        }
+        let meta = phoneCache[file.relativePath];
+        if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
           newPhoneCache[file.relativePath] = meta;
         } else {
-          meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
-          newPhoneCache[file.relativePath] = meta;
+          const key = `${size}_${mtimeMs}`;
+          const cachedMeta = phoneSecondaryIndex.get(key);
+          if (cachedMeta) {
+            meta = {
+              ...cachedMeta,
+              filePath: file.filePath,
+              relativePath: file.relativePath
+            };
+            newPhoneCache[file.relativePath] = meta;
+          } else {
+            meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
+            newPhoneCache[file.relativePath] = meta;
+          }
         }
+        meta.id = `phone_${file.relativePath}`;
+        phoneTracks.push(meta);
+      } catch (e) {
+        console.error("Error stats phone file", file.filePath, e);
       }
-      meta.id = `phone_${file.relativePath}`;
-      phoneTracks.push(meta);
-    } catch (e) {
-      console.error("Error stats phone file", file.filePath, e);
     }
   }
   saveCache(profileId, "phone", newPhoneCache);

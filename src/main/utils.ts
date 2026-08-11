@@ -122,6 +122,7 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			year: yearStr,
 			comment: commentStr,
 			duration,
+			ino: stats.ino,
 		};
 	} catch (err) {
 		const stats = await fs.promises.stat(filePath);
@@ -144,6 +145,36 @@ export async function getTrackMetadata(filePath: string, relativePath: string): 
 			year: "",
 			comment: "",
 			duration: 0,
+			ino: stats.ino,
 		};
 	}
+}
+
+/**
+ * Prefetches items sequentially with a lookahead (K-prefetch) window.
+ * Ensures strict sequential resolution order of the promises while maintaining a pool
+ * of up to `lookahead` asynchronous operations concurrently to hide I/O latency.
+ */
+export async function prefetchSequential<T, R>(
+	items: T[],
+	fn: (item: T) => Promise<R>,
+	lookahead: number = 4
+): Promise<R[]> {
+	const results: R[] = new Array(items.length);
+	const promises: Promise<R>[] = [];
+
+	for (let i = 0; i < Math.min(lookahead, items.length); i++) {
+		promises.push(fn(items[i]));
+	}
+
+	for (let i = 0; i < items.length; i++) {
+		results[i] = await promises[i];
+
+		const nextIdx = i + lookahead;
+		if (nextIdx < items.length) {
+			promises.push(fn(items[nextIdx]));
+		}
+	}
+
+	return results;
 }
