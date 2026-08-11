@@ -9,6 +9,39 @@ import { findMusicFiles, getTrackMetadata, normText, normTrack } from "./utils";
 // Global scan results cache in-memory
 export const lastScanResults: Record<string, ScanResultItem[]> = {};
 
+function isDistinctTrack(I: TrackMetadata, P: TrackMetadata): boolean {
+	// 1. Compare track total (トラック最大数, e.g., "1/5" vs "1/15")
+	const iTrackTotal = I.track?.split("/")[1]?.trim();
+	const pTrackTotal = P.track?.split("/")[1]?.trim();
+	if (iTrackTotal && pTrackTotal && iTrackTotal !== pTrackTotal) {
+		return true;
+	}
+
+	// 2. Compare disc number (ディスク番号, e.g., "1" vs "2")
+	const iDiscNo = I.disc?.split("/")[0]?.trim();
+	const pDiscNo = P.disc?.split("/")[0]?.trim();
+	if (iDiscNo && pDiscNo && iDiscNo !== pDiscNo) {
+		return true;
+	}
+
+	// 3. Compare disc total (ディスク最大数, e.g., "1/1" vs "1/2")
+	const iDiscTotal = I.disc?.split("/")[1]?.trim();
+	const pDiscTotal = P.disc?.split("/")[1]?.trim();
+	if (iDiscTotal && pDiscTotal && iDiscTotal !== pDiscTotal) {
+		return true;
+	}
+
+	// 4. Compare Album Art (presence and size)
+	if (I.hasCoverArt !== P.hasCoverArt) {
+		return true;
+	}
+	if (I.hasCoverArt && P.hasCoverArt && I.coverArtSize !== P.coverArtSize) {
+		return true;
+	}
+
+	return false;
+}
+
 const cachesDir = path.join(app.getPath("userData"), "caches");
 if (!fs.existsSync(cachesDir)) {
 	fs.mkdirSync(cachesDir, { recursive: true });
@@ -290,6 +323,7 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 
 		for (const P of candidates) {
 			if (matchedPhoneIds.has(P.id)) continue;
+			if (isDistinctTrack(I, P)) continue;
 
 			let score = 0;
 

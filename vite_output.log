@@ -1,0 +1,9 @@
+
+> musicsync@0.5.21 dev
+> vite --config vite.config.mjs
+
+
+  VITE v8.1.5  ready in 338 ms
+
+  ➜  Local:   http://localhost:5173/
+  ➜  Network: use --host to expose
