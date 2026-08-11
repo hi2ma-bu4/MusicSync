@@ -2083,6 +2083,30 @@ import { app, dialog as dialog2 } from "electron";
 import fs3 from "node:fs";
 import path3 from "node:path";
 var lastScanResults = {};
+function isDistinctTrack(I, P) {
+  const iTrackTotal = I.track?.split("/")[1]?.trim();
+  const pTrackTotal = P.track?.split("/")[1]?.trim();
+  if (iTrackTotal && pTrackTotal && iTrackTotal !== pTrackTotal) {
+    return true;
+  }
+  const iDiscNo = I.disc?.split("/")[0]?.trim();
+  const pDiscNo = P.disc?.split("/")[0]?.trim();
+  if (iDiscNo && pDiscNo && iDiscNo !== pDiscNo) {
+    return true;
+  }
+  const iDiscTotal = I.disc?.split("/")[1]?.trim();
+  const pDiscTotal = P.disc?.split("/")[1]?.trim();
+  if (iDiscTotal && pDiscTotal && iDiscTotal !== pDiscTotal) {
+    return true;
+  }
+  if (I.hasCoverArt !== P.hasCoverArt) {
+    return true;
+  }
+  if (I.hasCoverArt && P.hasCoverArt && I.coverArtSize !== P.coverArtSize) {
+    return true;
+  }
+  return false;
+}
 var cachesDir = path3.join(app.getPath("userData"), "caches");
 if (!fs3.existsSync(cachesDir)) {
   fs3.mkdirSync(cachesDir, { recursive: true });
@@ -2314,6 +2338,7 @@ async function runScan(profile, event) {
     const nonEmptyCount = (iArtistNorm !== "" ? 1 : 0) + (iAlbumNorm !== "" ? 1 : 0) + (iTitleNorm !== "" ? 1 : 0) + (iTrackNorm !== "" ? 1 : 0);
     for (const P of candidates) {
       if (matchedPhoneIds.has(P.id)) continue;
+      if (isDistinctTrack(I, P)) continue;
       let score = 0;
       const pArtistNorm = normText(P.artist);
       if (iArtistNorm === pArtistNorm && iArtistNorm !== "") {
@@ -2962,16 +2987,18 @@ function registerIpcHandlers() {
           })
         );
       } else if (params.albumSelectionState) {
+        const selectLabel = params.isArtistTabAlbum ? "\u3053\u306E\u30A2\u30EB\u30D0\u30E0\u306E\u5168\u66F2\u3092\u9078\u629E" : "\u3059\u3079\u3066\u9078\u629E";
+        const deselectLabel = params.isArtistTabAlbum ? "\u3053\u306E\u30A2\u30EB\u30D0\u30E0\u306E\u5168\u66F2\u3092\u9078\u629E\u89E3\u9664" : "\u3059\u3079\u3066\u89E3\u9664";
         menu.append(
           new MenuItem({
-            label: "\u3059\u3079\u3066\u9078\u629E",
+            label: selectLabel,
             enabled: params.albumSelectionState.canSelectAll,
             click: () => sendCommand("select-all-album", params.album)
           })
         );
         menu.append(
           new MenuItem({
-            label: "\u3059\u3079\u3066\u89E3\u9664",
+            label: deselectLabel,
             enabled: params.albumSelectionState.canDeselectAll,
             click: () => sendCommand("deselect-all-album", params.album)
           })
@@ -3007,7 +3034,7 @@ function registerIpcHandlers() {
           );
         }
       }
-      if (params.album && !params.albumSelectionState) {
+      if (params.album && (!params.albumSelectionState || params.isArtistTabAlbum)) {
         menu.append(
           new MenuItem({
             label: `\u30A2\u30EB\u30D0\u30E0\u300C${params.album}\u300D\u306E\u66F2\u3092\u8868\u793A`,
@@ -3268,72 +3295,100 @@ function registerIpcHandlers() {
       }
     });
   }
-  ipcMain.handle("get-thumbnail", async (_event, profileId, albumName) => {
-    try {
-      if (!profileId || !albumName) return null;
-      const albumHex = Buffer.from(albumName).toString("hex");
-      const thumbnailsDir = path5.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
-      if (!fs5.existsSync(thumbnailsDir)) {
-        fs5.mkdirSync(thumbnailsDir, { recursive: true });
+  class ConcurrencyLimiter {
+    maxConcurrency;
+    activeCount = 0;
+    queue = [];
+    constructor(maxConcurrency) {
+      this.maxConcurrency = maxConcurrency;
+    }
+    async run(fn) {
+      if (this.activeCount >= this.maxConcurrency) {
+        await new Promise((resolve) => {
+          this.queue.push(resolve);
+        });
       }
-      const pngPath = path5.join(thumbnailsDir, `${albumHex}.png`);
-      const metaPath = path5.join(thumbnailsDir, `${albumHex}.meta.json`);
-      const results = lastScanResults[profileId] || [];
-      const trackItem = results.find((t) => {
-        const meta = t.itunesTrack || t.phoneTrack;
-        return meta && meta.album === albumName && meta.hasCoverArt;
-      });
-      if (!trackItem) {
+      this.activeCount++;
+      try {
+        return await fn();
+      } finally {
+        this.activeCount--;
+        if (this.queue.length > 0) {
+          const next = this.queue.shift();
+          if (next) next();
+        }
+      }
+    }
+  }
+  const thumbnailLimiter = new ConcurrencyLimiter(4);
+  ipcMain.handle("get-thumbnail", async (_event, profileId, albumName) => {
+    return thumbnailLimiter.run(async () => {
+      try {
+        if (!profileId || !albumName) return null;
+        const albumHex = Buffer.from(albumName).toString("hex");
+        const thumbnailsDir = path5.join(app2.getPath("userData"), "caches", "thumbnails", profileId);
+        if (!fs5.existsSync(thumbnailsDir)) {
+          fs5.mkdirSync(thumbnailsDir, { recursive: true });
+        }
+        const pngPath = path5.join(thumbnailsDir, `${albumHex}.png`);
+        const metaPath = path5.join(thumbnailsDir, `${albumHex}.meta.json`);
+        const results = lastScanResults[profileId] || [];
+        const trackItem = results.find((t) => {
+          const meta = t.itunesTrack || t.phoneTrack;
+          return meta && meta.album === albumName && meta.hasCoverArt;
+        });
+        if (!trackItem) {
+          return null;
+        }
+        const track = trackItem.itunesTrack || trackItem.phoneTrack;
+        if (!track) return null;
+        let needRegenerate = true;
+        if (fs5.existsSync(pngPath) && fs5.existsSync(metaPath)) {
+          try {
+            const meta = JSON.parse(fs5.readFileSync(metaPath, "utf-8"));
+            if (meta.size === track.coverArtSize) {
+              needRegenerate = false;
+            }
+          } catch (e) {
+          }
+        }
+        if (needRegenerate) {
+          const { nativeImage: nativeImage2 } = await import("electron");
+          if (!fs5.existsSync(track.filePath)) {
+            return null;
+          }
+          const result = await parseMetadataWithWorker(track.filePath);
+          if (!result.pictureData) {
+            return null;
+          }
+          const img = nativeImage2.createFromBuffer(Buffer.from(result.pictureData));
+          const size = img.getSize();
+          let pngBuf;
+          if (size.width <= 150 && size.height <= 150) {
+            pngBuf = img.toPNG();
+          } else {
+            let newWidth = 150;
+            let newHeight = 150;
+            if (size.width >= size.height) {
+              newWidth = 150;
+              newHeight = Math.max(1, Math.round(size.height * 150 / size.width));
+            } else {
+              newHeight = 150;
+              newWidth = Math.max(1, Math.round(size.width * 150 / size.height));
+            }
+            const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
+            pngBuf = resized.toPNG();
+          }
+          fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
+          fs5.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
+        }
+        const cachedBuf = fs5.readFileSync(pngPath);
+        return `data:image/png;base64,${cachedBuf.toString("base64")}`;
+      } catch (e) {
+        console.error("Failed to get or generate thumbnail", e);
         return null;
       }
-      const track = trackItem.itunesTrack || trackItem.phoneTrack;
-      if (!track) return null;
-      let needRegenerate = true;
-      if (fs5.existsSync(pngPath) && fs5.existsSync(metaPath)) {
-        try {
-          const meta = JSON.parse(fs5.readFileSync(metaPath, "utf-8"));
-          if (meta.size === track.coverArtSize) {
-            needRegenerate = false;
-          }
-        } catch (e) {
-        }
-      }
-      if (needRegenerate) {
-        const { nativeImage: nativeImage2 } = await import("electron");
-        if (!fs5.existsSync(track.filePath)) {
-          return null;
-        }
-        const result = await parseMetadataWithWorker(track.filePath);
-        if (!result.pictureData) {
-          return null;
-        }
-        const img = nativeImage2.createFromBuffer(Buffer.from(result.pictureData));
-        const size = img.getSize();
-        let pngBuf;
-        if (size.width <= 150 && size.height <= 150) {
-          pngBuf = img.toPNG();
-        } else {
-          let newWidth = 150;
-          let newHeight = 150;
-          if (size.width >= size.height) {
-            newWidth = 150;
-            newHeight = Math.max(1, Math.round(size.height * 150 / size.width));
-          } else {
-            newHeight = 150;
-            newWidth = Math.max(1, Math.round(size.width * 150 / size.height));
-          }
-          const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
-          pngBuf = resized.toPNG();
-        }
-        fs5.writeFileSync(pngPath, Buffer.from(pngBuf));
-        fs5.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
-      }
-      const cachedBuf = fs5.readFileSync(pngPath);
-      return `data:image/png;base64,${cachedBuf.toString("base64")}`;
-    } catch (e) {
-      console.error("Failed to get or generate thumbnail", e);
-      return null;
-    }
+    });
   });
   ipcMain.handle("copy-album-art", async (_event, profileId, albumName) => {
     try {

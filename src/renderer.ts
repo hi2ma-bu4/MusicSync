@@ -4,8 +4,8 @@ import "./style.css";
 import { api, isMock } from "./renderer/api";
 import { initModals, showCustomAlert, showCustomConfirm, updateDynamicColors } from "./renderer/components/modals";
 import { renderVirtualTracks } from "./renderer/components/tableView";
-import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes } from "./renderer/components/treeView";
-import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist } from "./renderer/components/utils";
+import { alignGridDrawer, clearIndexMapsCache, renderAlbumView, renderArtistView, renderGenreView, updateAllTreeCheckboxes, thumbnailLoader } from "./renderer/components/treeView";
+import { compareGroups, compareTracks, formatBytes, formatDeltaBytes, formatDeltaDurationHHMMSS, formatDurationHHMMSS, getCheckboxChangesCount, getSafeId, isTrackChecked, normalizeArtistForIntegration, resetCheckboxesToDefault, setTrackCheckedState, splitAndNormalizeArtist, highlightElement } from "./renderer/components/utils";
 import { clearHistory, CONFIG, handleRedo, handleUndo, pushHistoryState, state } from "./renderer/state";
 import type { ScanResultItem } from "./renderer/types";
 import { DEFAULT_DELIMITERS } from "./shared/constants";
@@ -487,6 +487,7 @@ async function selectProfile(id: string) {
 	// Clear stats and map caches when profile changes
 	clearStatsSummaryCache();
 	clearIndexMapsCache();
+	thumbnailLoader.clearCache();
 
 	// Load profile-specific settings merged with global fallbacks
 	const globalSettings = await api.getSettings();
@@ -811,19 +812,17 @@ function renderSearchCombobox() {
 				});
 
 				// Lazy load album art
-				setTimeout(() => {
-					const img = row.querySelector(".search-combobox-album-art") as HTMLImageElement;
-					const placeholder = row.querySelector(".search-combobox-art-placeholder") as HTMLElement;
-					if (img && state.currentProfileId) {
-						api.getThumbnail(state.currentProfileId, item).then((dataUri) => {
-							if (dataUri) {
-								img.src = dataUri;
-								img.classList.remove("hidden");
-								if (placeholder) placeholder.classList.add("hidden");
-							}
-						});
+				thumbnailLoader.register(row, item, (dataUri) => {
+					if (dataUri) {
+						const img = row.querySelector(".search-combobox-album-art") as HTMLImageElement;
+						const placeholder = row.querySelector(".search-combobox-art-placeholder") as HTMLElement;
+						if (img) {
+							img.src = dataUri;
+							img.classList.remove("hidden");
+							if (placeholder) placeholder.classList.add("hidden");
+						}
 					}
-				}, 10);
+				});
 			} else if (cat.name === "artist") {
 				let artistText = item.splitName;
 				if (item.originalArtist) {
@@ -873,19 +872,19 @@ function renderSearchCombobox() {
 				});
 
 				// Lazy load track album art
-				setTimeout(() => {
-					const img = row.querySelector(".search-combobox-track-art") as HTMLImageElement;
-					const placeholder = row.querySelector(".search-combobox-track-placeholder") as HTMLElement;
-					if (img && trackAlbum && state.currentProfileId) {
-						api.getThumbnail(state.currentProfileId, trackAlbum).then((dataUri) => {
-							if (dataUri) {
+				if (trackAlbum) {
+					thumbnailLoader.register(row, trackAlbum, (dataUri) => {
+						if (dataUri) {
+							const img = row.querySelector(".search-combobox-track-art") as HTMLImageElement;
+							const placeholder = row.querySelector(".search-combobox-track-placeholder") as HTMLElement;
+							if (img) {
 								img.src = dataUri;
 								img.classList.remove("hidden");
 								if (placeholder) placeholder.classList.add("hidden");
 							}
-						});
-					}
-				}, 10);
+						}
+					});
+				}
 			}
 			listContainer.appendChild(row);
 		});
@@ -918,9 +917,16 @@ function navigateToSuggestion(tabId: "artist" | "album" | "genre" | "track", tar
 
 	// Reset stored scroll positions to avoid scroll restore conflicts on jump target
 	if (tabId === "track") {
-		const idx = state.filteredTracks.findIndex((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
-		if (idx !== -1) {
-			state.tabScrollPositions.track = idx * 30;
+		const track = state.filteredTracks.find((t) => (t.itunesTrack || t.phoneTrack)?.title === targetName);
+		if (track) {
+			const idx = state.filteredTracks.indexOf(track);
+			if (idx !== -1) {
+				const vsViewportEl = document.getElementById("virtual-scroll-viewport");
+				const viewportHeight = vsViewportEl ? vsViewportEl.offsetHeight : 500;
+				const centeredScrollTop = Math.max(0, idx * 30 - viewportHeight / 2 + 15);
+				state.tabScrollPositions.track = centeredScrollTop;
+				state.jumpTargetId = `track-row-${track.id}`;
+			}
 		}
 	} else {
 		state.tabScrollPositions[tabId] = 0;
@@ -980,7 +986,17 @@ function renderActiveView() {
 	if (state.activeTab === "artist") renderArtistView(elTreeContainer, callbacks);
 	else if (state.activeTab === "album") renderAlbumView(elTreeContainer, callbacks);
 	else if (state.activeTab === "genre") renderGenreView(elTreeContainer, callbacks);
-	else if (state.activeTab === "track") renderVirtualTracks(vsViewport, vsCanvas, vsContent, callbacks);
+	else if (state.activeTab === "track") {
+		renderVirtualTracks(vsViewport, vsCanvas, vsContent, callbacks);
+		if (state.jumpTargetId && state.jumpTargetId.startsWith("track-row-")) {
+			const targetTrackId = state.jumpTargetId.substring("track-row-".length);
+			const rowEl = vsContent.querySelector(`[data-track-id="${targetTrackId}"]`) as HTMLElement;
+			if (rowEl) {
+				highlightElement(rowEl);
+			}
+			state.jumpTargetId = null;
+		}
+	}
 
 	updateAllTreeCheckboxes();
 }
@@ -1931,6 +1947,14 @@ function setupEventListeners() {
 				updateSummaryBar,
 				updateMasterCheckboxState,
 			});
+			if (state.jumpTargetId && state.jumpTargetId.startsWith("track-row-")) {
+				const targetTrackId = state.jumpTargetId.substring("track-row-".length);
+				const rowEl = vsContent.querySelector(`[data-track-id="${targetTrackId}"]`) as HTMLElement;
+				if (rowEl) {
+					highlightElement(rowEl);
+				}
+				state.jumpTargetId = null;
+			}
 		}
 	});
 
@@ -2121,11 +2145,14 @@ function setupEventListeners() {
 			const allChecked = albumTracks.length > 0 && albumTracks.every((t) => isTrackChecked(t));
 			const noneChecked = albumTracks.length > 0 && albumTracks.every((t) => !isTrackChecked(t));
 
+			const isArtistTabAlbum = state.activeTab === "artist";
+
 			api.showContextMenu({
 				artist,
 				artists,
 				album,
 				genre,
+				isArtistTabAlbum,
 				albumSelectionState: {
 					canSelectAll: !allChecked,
 					canDeselectAll: !noneChecked,

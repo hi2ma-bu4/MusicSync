@@ -203,6 +203,7 @@ export function registerIpcHandlers() {
 				isStatus?: boolean;
 				statusId?: string;
 				statusLabel?: string;
+				isArtistTabAlbum?: boolean;
 				albumSelectionState?: {
 					canSelectAll: boolean;
 					canDeselectAll: boolean;
@@ -308,16 +309,19 @@ export function registerIpcHandlers() {
 					}),
 				);
 			} else if (params.albumSelectionState) {
+				const selectLabel = params.isArtistTabAlbum ? "このアルバムの全曲を選択" : "すべて選択";
+				const deselectLabel = params.isArtistTabAlbum ? "このアルバムの全曲を選択解除" : "すべて解除";
+
 				menu.append(
 					new MenuItem({
-						label: "すべて選択",
+						label: selectLabel,
 						enabled: params.albumSelectionState.canSelectAll,
 						click: () => sendCommand("select-all-album", params.album!),
 					}),
 				);
 				menu.append(
 					new MenuItem({
-						label: "すべて解除",
+						label: deselectLabel,
 						enabled: params.albumSelectionState.canDeselectAll,
 						click: () => sendCommand("deselect-all-album", params.album!),
 					}),
@@ -356,7 +360,7 @@ export function registerIpcHandlers() {
 				}
 			}
 
-			if (params.album && !params.albumSelectionState) {
+			if (params.album && (!params.albumSelectionState || params.isArtistTabAlbum)) {
 				menu.append(
 					new MenuItem({
 						label: `アルバム「${params.album}」の曲を表示`,
@@ -648,87 +652,119 @@ export function registerIpcHandlers() {
 		});
 	}
 
-	ipcMain.handle("get-thumbnail", async (_event, profileId: string, albumName: string) => {
-		try {
-			if (!profileId || !albumName) return null;
-			const albumHex = Buffer.from(albumName).toString("hex");
-			const thumbnailsDir = path.join(app.getPath("userData"), "caches", "thumbnails", profileId);
-			if (!fs.existsSync(thumbnailsDir)) {
-				fs.mkdirSync(thumbnailsDir, { recursive: true });
-			}
+	class ConcurrencyLimiter {
+		private maxConcurrency: number;
+		private activeCount = 0;
+		private queue: (() => void)[] = [];
 
-			const pngPath = path.join(thumbnailsDir, `${albumHex}.png`);
-			const metaPath = path.join(thumbnailsDir, `${albumHex}.meta.json`);
-
-			// Find track in scan results
-			const results = lastScanResults[profileId] || [];
-			const trackItem = results.find((t) => {
-				const meta = t.itunesTrack || t.phoneTrack;
-				return meta && meta.album === albumName && meta.hasCoverArt;
-			});
-
-			if (!trackItem) {
-				return null; // No cover art for this album
-			}
-
-			const track = trackItem.itunesTrack || trackItem.phoneTrack;
-			if (!track) return null;
-
-			let needRegenerate = true;
-
-			if (fs.existsSync(pngPath) && fs.existsSync(metaPath)) {
-				try {
-					const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
-					if (meta.size === track.coverArtSize) {
-						needRegenerate = false;
-					}
-				} catch (e) {
-					// Ignore
-				}
-			}
-
-			if (needRegenerate) {
-				const { nativeImage } = await import("electron");
-
-				if (!fs.existsSync(track.filePath)) {
-					return null;
-				}
-
-				const result = await parseMetadataWithWorker(track.filePath);
-				if (!result.pictureData) {
-					return null;
-				}
-
-				const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
-				const size = img.getSize();
-				let pngBuf: Buffer;
-
-				if (size.width <= 150 && size.height <= 150) {
-					pngBuf = img.toPNG();
-				} else {
-					let newWidth = 150;
-					let newHeight = 150;
-					if (size.width >= size.height) {
-						newWidth = 150;
-						newHeight = Math.max(1, Math.round((size.height * 150) / size.width));
-					} else {
-						newHeight = 150;
-						newWidth = Math.max(1, Math.round((size.width * 150) / size.height));
-					}
-					const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
-					pngBuf = resized.toPNG();
-				}
-
-				fs.writeFileSync(pngPath, Buffer.from(pngBuf));
-				fs.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
-			}
-
-			const cachedBuf = fs.readFileSync(pngPath);
-			return `data:image/png;base64,${cachedBuf.toString("base64")}`;
-		} catch (e) {
-			console.error("Failed to get or generate thumbnail", e);
-			return null;
+		constructor(maxConcurrency: number) {
+			this.maxConcurrency = maxConcurrency;
 		}
+
+		async run<T>(fn: () => Promise<T>): Promise<T> {
+			if (this.activeCount >= this.maxConcurrency) {
+				await new Promise<void>((resolve) => {
+					this.queue.push(resolve);
+				});
+			}
+			this.activeCount++;
+			try {
+				return await fn();
+			} finally {
+				this.activeCount--;
+				if (this.queue.length > 0) {
+					const next = this.queue.shift();
+					if (next) next();
+				}
+			}
+		}
+	}
+
+	const thumbnailLimiter = new ConcurrencyLimiter(4);
+
+	ipcMain.handle("get-thumbnail", async (_event, profileId: string, albumName: string) => {
+		return thumbnailLimiter.run(async () => {
+			try {
+				if (!profileId || !albumName) return null;
+				const albumHex = Buffer.from(albumName).toString("hex");
+				const thumbnailsDir = path.join(app.getPath("userData"), "caches", "thumbnails", profileId);
+				if (!fs.existsSync(thumbnailsDir)) {
+					fs.mkdirSync(thumbnailsDir, { recursive: true });
+				}
+
+				const pngPath = path.join(thumbnailsDir, `${albumHex}.png`);
+				const metaPath = path.join(thumbnailsDir, `${albumHex}.meta.json`);
+
+				// Find track in scan results
+				const results = lastScanResults[profileId] || [];
+				const trackItem = results.find((t) => {
+					const meta = t.itunesTrack || t.phoneTrack;
+					return meta && meta.album === albumName && meta.hasCoverArt;
+				});
+
+				if (!trackItem) {
+					return null; // No cover art for this album
+				}
+
+				const track = trackItem.itunesTrack || trackItem.phoneTrack;
+				if (!track) return null;
+
+				let needRegenerate = true;
+
+				if (fs.existsSync(pngPath) && fs.existsSync(metaPath)) {
+					try {
+						const meta = JSON.parse(fs.readFileSync(metaPath, "utf-8"));
+						if (meta.size === track.coverArtSize) {
+							needRegenerate = false;
+						}
+					} catch (e) {
+						// Ignore
+					}
+				}
+
+				if (needRegenerate) {
+					const { nativeImage } = await import("electron");
+
+					if (!fs.existsSync(track.filePath)) {
+						return null;
+					}
+
+					const result = await parseMetadataWithWorker(track.filePath);
+					if (!result.pictureData) {
+						return null;
+					}
+
+					const img = nativeImage.createFromBuffer(Buffer.from(result.pictureData));
+					const size = img.getSize();
+					let pngBuf: Buffer;
+
+					if (size.width <= 150 && size.height <= 150) {
+						pngBuf = img.toPNG();
+					} else {
+						let newWidth = 150;
+						let newHeight = 150;
+						if (size.width >= size.height) {
+							newWidth = 150;
+							newHeight = Math.max(1, Math.round((size.height * 150) / size.width));
+						} else {
+							newHeight = 150;
+							newWidth = Math.max(1, Math.round((size.width * 150) / size.height));
+						}
+						const resized = img.resize({ width: newWidth, height: newHeight, quality: "better" });
+						pngBuf = resized.toPNG();
+					}
+
+					fs.writeFileSync(pngPath, Buffer.from(pngBuf));
+					fs.writeFileSync(metaPath, JSON.stringify({ size: track.coverArtSize }), "utf-8");
+				}
+
+				const cachedBuf = fs.readFileSync(pngPath);
+				return `data:image/png;base64,${cachedBuf.toString("base64")}`;
+			} catch (e) {
+				console.error("Failed to get or generate thumbnail", e);
+				return null;
+			}
+		});
 	});
 
 	ipcMain.handle("copy-album-art", async (_event, profileId: string, albumName: string) => {

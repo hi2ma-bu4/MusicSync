@@ -1,6 +1,115 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist, highlightElement } from "./utils";
+
+class ThumbnailLoader {
+	private maxConcurrency = 3;
+	private activeCount = 0;
+	private pendingHigh: { albumName: string; callback: (uri: string | null) => void }[] = [];
+	private pendingLow: { albumName: string; callback: (uri: string | null) => void }[] = [];
+	private cache = new Map<string, string | null>(); // albumName -> dataUri
+	private loadingPromises = new Map<string, Promise<string | null>>(); // albumName -> Promise
+	private observer: IntersectionObserver;
+
+	constructor() {
+		this.observer = new IntersectionObserver((entries) => {
+			entries.forEach((entry) => {
+				if (entry.isIntersecting) {
+					const el = entry.target as HTMLElement;
+					const albumName = el.getAttribute("data-lazy-album");
+					if (albumName) {
+						// Elevate priority of this album
+						this.elevate(albumName);
+						// We can unobserve since we started loading it
+						this.observer.unobserve(el);
+					}
+				}
+			});
+		}, { rootMargin: "100px" }); // Start loading slightly before it enters viewport
+	}
+
+	register(el: HTMLElement, albumName: string, callback: (uri: string | null) => void) {
+		if (this.cache.has(albumName)) {
+			callback(this.cache.get(albumName)!);
+			return;
+		}
+
+		el.setAttribute("data-lazy-album", albumName);
+		this.observer.observe(el);
+
+		// Add to low priority queue by default
+		this.pendingLow.push({ albumName, callback });
+		this.processNext();
+	}
+
+	private elevate(albumName: string) {
+		// Find in pendingLow and move to pendingHigh
+		const idx = this.pendingLow.findIndex((item) => item.albumName === albumName);
+		if (idx !== -1) {
+			const item = this.pendingLow.splice(idx, 1)[0];
+			this.pendingHigh.push(item);
+			this.processNext();
+		}
+	}
+
+	private async processNext() {
+		if (this.activeCount >= this.maxConcurrency) return;
+
+		// Get next item (prioritize pendingHigh)
+		let nextItem = this.pendingHigh.shift();
+		if (!nextItem) {
+			nextItem = this.pendingLow.shift();
+		}
+
+		if (!nextItem) return;
+
+		const { albumName, callback } = nextItem;
+
+		if (this.cache.has(albumName)) {
+			callback(this.cache.get(albumName)!);
+			this.processNext();
+			return;
+		}
+
+		this.activeCount++;
+
+		try {
+			let promise = this.loadingPromises.get(albumName);
+			if (!promise) {
+				promise = (async () => {
+					if (!state.currentProfileId) return null;
+					return await api.getThumbnail(state.currentProfileId, albumName);
+				})();
+				this.loadingPromises.set(albumName, promise);
+				promise.then((uri) => {
+					this.cache.set(albumName, uri);
+					this.loadingPromises.delete(albumName);
+				});
+			}
+
+			const uri = await promise;
+			callback(uri);
+		} catch (e) {
+			console.error("Error loading lazy thumbnail:", e);
+			callback(null);
+		} finally {
+			this.activeCount--;
+			this.processNext();
+		}
+	}
+
+	clearCache() {
+		this.cache.clear();
+		this.loadingPromises.clear();
+		this.pendingHigh = [];
+		this.pendingLow = [];
+		try {
+			this.observer.disconnect();
+		} catch (e) {}
+	}
+}
+
+export const thumbnailLoader = new ThumbnailLoader();
 
 let currentTreeViewRenderId = 0;
 
@@ -62,26 +171,24 @@ function renderAlbumCardInnerHtml(albumKey: string, albumName: string, artistNam
 }
 
 function applyAlbumArtBackground(elementId: string, albumName: string) {
-	if (!state.currentProfileId) return;
-	api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
+	const el = document.getElementById(elementId);
+	if (!el) return;
+	thumbnailLoader.register(el, albumName, (dataUri) => {
 		if (dataUri) {
-			const el = document.getElementById(elementId);
-			if (el) {
-				const bgOverlay = document.createElement("div");
-				bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
-				bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
-				el.prepend(bgOverlay);
+			const bgOverlay = document.createElement("div");
+			bgOverlay.className = "absolute inset-0 pointer-events-none bg-contain bg-top-right bg-no-repeat opacity-85 z-0";
+			bgOverlay.style.backgroundImage = `linear-gradient(to right, rgba(31, 41, 55, 1) 0%, rgba(31, 41, 55, 0.9) 40%, rgba(31, 41, 55, 0.2) 85%, rgba(31, 41, 55, 0) 100%), url("${dataUri}")`;
+			el.prepend(bgOverlay);
 
-				Array.from(el.children).forEach((child) => {
-					if (child !== bgOverlay) {
-						const htmlChild = child as HTMLElement;
-						htmlChild.classList.add("relative", "z-10");
-						if (htmlChild.classList.contains("accordion-content")) {
-							htmlChild.style.backgroundColor = "rgba(17, 24, 39, 0.4)";
-						}
+			Array.from(el.children).forEach((child) => {
+				if (child !== bgOverlay) {
+					const htmlChild = child as HTMLElement;
+					htmlChild.classList.add("relative", "z-10");
+					if (htmlChild.classList.contains("accordion-content")) {
+						htmlChild.style.backgroundColor = "rgba(17, 24, 39, 0.4)";
 					}
-				});
-			}
+				}
+			});
 		}
 	});
 }
@@ -480,19 +587,17 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 				row.addEventListener("click", () => onNavigate("album", item));
 
 				// Lazy load album art
-				setTimeout(() => {
-					const img = row.querySelector(".search-album-art") as HTMLImageElement;
-					const placeholder = row.querySelector(".search-art-placeholder") as HTMLElement;
-					if (img && state.currentProfileId) {
-						api.getThumbnail(state.currentProfileId, item).then((dataUri) => {
-							if (dataUri) {
-								img.src = dataUri;
-								img.classList.remove("hidden");
-								if (placeholder) placeholder.classList.add("hidden");
-							}
-						});
+				thumbnailLoader.register(row, item, (dataUri) => {
+					if (dataUri) {
+						const img = row.querySelector(".search-album-art") as HTMLImageElement;
+						const placeholder = row.querySelector(".search-art-placeholder") as HTMLElement;
+						if (img) {
+							img.src = dataUri;
+							img.classList.remove("hidden");
+							if (placeholder) placeholder.classList.add("hidden");
+						}
 					}
-				}, 10);
+				});
 			} else if (cat.name === "artist") {
 				let artistText = item.splitName;
 				if (item.originalArtist) {
@@ -539,19 +644,19 @@ export function renderEnhancedSearchView(container: HTMLElement, onNavigate: (ta
 				row.addEventListener("click", () => onNavigate("track", meta?.title || ""));
 
 				// Lazy load track album art
-				setTimeout(() => {
-					const img = row.querySelector(".search-track-art") as HTMLImageElement;
-					const placeholder = row.querySelector(".search-track-placeholder") as HTMLElement;
-					if (img && trackAlbum && state.currentProfileId) {
-						api.getThumbnail(state.currentProfileId, trackAlbum).then((dataUri) => {
-							if (dataUri) {
+				if (trackAlbum) {
+					thumbnailLoader.register(row, trackAlbum, (dataUri) => {
+						if (dataUri) {
+							const img = row.querySelector(".search-track-art") as HTMLImageElement;
+							const placeholder = row.querySelector(".search-track-placeholder") as HTMLElement;
+							if (img) {
 								img.src = dataUri;
 								img.classList.remove("hidden");
 								if (placeholder) placeholder.classList.add("hidden");
 							}
-						});
-					}
-				}, 10);
+						}
+					});
+				}
 			}
 			listContainer.appendChild(row);
 		});
@@ -752,20 +857,18 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			gridContainer.appendChild(divAlbum);
 			setCheckboxState(`chk-${albumKey}`, albumTracks);
 
-			// Load Album Art thumbnail
-			if (state.currentProfileId) {
-				api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
-					if (dataUri) {
-						const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
-						const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
-						if (img) {
-							img.src = dataUri;
-							img.classList.remove("hidden");
-							if (placeholder) placeholder.classList.add("hidden");
-						}
+			// Load Album Art thumbnail with lazy loader
+			thumbnailLoader.register(divAlbum, albumName, (dataUri) => {
+				if (dataUri) {
+					const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
+					const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
+					if (img) {
+						img.src = dataUri;
+						img.classList.remove("hidden");
+						if (placeholder) placeholder.classList.add("hidden");
 					}
-				});
-			}
+				}
+			});
 
 			// Sub-tracks container (expanded direct-insertion panel below/after)
 			const divTracksContent = document.createElement("div");
@@ -1095,6 +1198,7 @@ export function renderArtistView(container: HTMLElement, cb: RenderCallbacks) {
 				const el = document.getElementById(state.jumpTargetId);
 				if (el) {
 					el.scrollIntoView({ behavior: "auto", block: "center" });
+					highlightElement(el);
 				}
 				state.jumpTargetId = null;
 			} else if (state.isTogglingViewMode && state.closestCardId) {
@@ -1190,20 +1294,18 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 
 				fragment.appendChild(divAlbum);
 
-				// Load Album Art thumbnail
-				if (state.currentProfileId) {
-					api.getThumbnail(state.currentProfileId, albumName).then((dataUri) => {
-						if (dataUri) {
-							const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
-							const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
-							if (img) {
-								img.src = dataUri;
-								img.classList.remove("hidden");
-								if (placeholder) placeholder.classList.add("hidden");
-							}
+				// Load Album Art thumbnail with lazy loader
+				thumbnailLoader.register(divAlbum, albumName, (dataUri) => {
+					if (dataUri) {
+						const img = divAlbum.querySelector(".grid-album-art") as HTMLImageElement;
+						const placeholder = divAlbum.querySelector(".grid-art-placeholder") as HTMLElement;
+						if (img) {
+							img.src = dataUri;
+							img.classList.remove("hidden");
+							if (placeholder) placeholder.classList.add("hidden");
 						}
-					});
-				}
+					}
+				});
 
 				// Sub-tracks container (expanded direct-insertion panel below/after)
 				const divTracksContent = document.createElement("div");
@@ -1290,6 +1392,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 					const el = document.getElementById(state.jumpTargetId) || document.getElementById(state.jumpTargetId.replace("hdr-", "album-card-"));
 					if (el) {
 						el.scrollIntoView({ behavior: "auto", block: "center" });
+						highlightElement(el);
 					}
 					state.jumpTargetId = null;
 				} else if (state.isTogglingViewMode && state.closestCardId) {
@@ -1435,6 +1538,7 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 					const el = document.getElementById(state.jumpTargetId) || document.getElementById(state.jumpTargetId.replace("hdr-", "album-card-"));
 					if (el) {
 						el.scrollIntoView({ behavior: "auto", block: "center" });
+						highlightElement(el);
 					}
 					state.jumpTargetId = null;
 				} else if (state.isTogglingViewMode && state.closestCardId) {
@@ -1597,6 +1701,7 @@ export function renderGenreView(container: HTMLElement, cb: RenderCallbacks) {
 				const el = document.getElementById(state.jumpTargetId);
 				if (el) {
 					el.scrollIntoView({ behavior: "auto", block: "center" });
+					highlightElement(el);
 				}
 				state.jumpTargetId = null;
 			} else if (state.isTogglingViewMode && state.closestCardId) {
