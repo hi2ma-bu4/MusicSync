@@ -4,7 +4,7 @@ import path from "node:path";
 import { activeScanCancelled, resetScanCancelled } from "./cancelState";
 import { getStorageWrapper } from "./storageWrapper";
 import type { ScanResultItem, TrackMetadata } from "./types";
-import { findMusicFiles, getTrackMetadata, normText, normTrack } from "./utils";
+import { findMusicFiles, getTrackMetadata, normText, normTrack, prefetchSequential } from "./utils";
 
 // Global scan results cache in-memory
 export const lastScanResults: Record<string, ScanResultItem[]> = {};
@@ -136,7 +136,7 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	const itunesCache = loadCache(profileId, "itunes");
 	const phoneCache = loadCache(profileId, "phone");
 
-	// Build secondary indices by size and mtime for path-independent lookup
+	// Build indices for path-independent lookup
 	const buildSecondaryIndex = (cache: Record<string, TrackMetadata>) => {
 		const index = new Map<string, TrackMetadata>();
 		for (const key of Object.keys(cache)) {
@@ -148,8 +148,22 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 		return index;
 	};
 
+	const buildInoIndex = (cache: Record<string, TrackMetadata>) => {
+		const index = new Map<number, TrackMetadata>();
+		for (const key of Object.keys(cache)) {
+			const meta = cache[key];
+			if (meta && meta.ino !== undefined) {
+				index.set(meta.ino, meta);
+			}
+		}
+		return index;
+	};
+
 	const itunesSecondaryIndex = buildSecondaryIndex(itunesCache);
 	const phoneSecondaryIndex = buildSecondaryIndex(phoneCache);
+
+	const itunesInoIndex = buildInoIndex(itunesCache);
+	const phoneInoIndex = buildInoIndex(phoneCache);
 
 	const newItunesCache: Record<string, TrackMetadata> = {};
 	const newPhoneCache: Record<string, TrackMetadata> = {};
@@ -157,100 +171,285 @@ export async function runScan(profile: any, event: Electron.IpcMainInvokeEvent):
 	const itunesTracks: TrackMetadata[] = [];
 	const phoneTracks: TrackMetadata[] = [];
 
-	// Parse iTunes tracks with cache
-	let current = 0;
-	let total = itunesFiles.length;
-	for (const file of itunesFiles) {
-		if (activeScanCancelled) {
-			throw new Error("スキャン処理がユーザーによりキャンセルされました。");
-		}
-		current++;
-		if (current % 100 === 0 || current === total) {
-			const pct = 15 + Math.round((current / total) * 35);
-			sendProgress("itunes_parse", `iTunesの曲情報を解析中... (${current}/${total})`, pct, { count: current, total });
-		}
+	// ==========================================
+	// 1. Process iTunes tracks (Local)
+	// ==========================================
+	sendProgress("itunes_parse", "iTunesファイルのステータス情報を先読み中...", 15);
+	// Prefetch sequential stats with lookahead 4 to hide I/O latency
+	const itunesStatted = await prefetchSequential(
+		itunesFiles,
+		async (file) => {
+			if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+			try {
+				const stats = await fs.promises.stat(file.filePath);
+				return { ...file, stats, valid: true };
+			} catch (e) {
+				console.error("Error statting iTunes file", file.filePath, e);
+				return { ...file, stats: null as any, valid: false };
+			}
+		},
+		4
+	);
+	if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
 
-		try {
-			const stats = await fs.promises.stat(file.filePath);
+	const itunesValid = itunesStatted.filter((f) => f.valid);
+	// LBA Sort: sort by inode ascending to minimize head seeks on mechanical drives
+	itunesValid.sort((a, b) => a.stats.ino - b.stats.ino);
+
+	// Parse in LBA order with lookahead 2 prefetching
+	const itunesParsedResults = await prefetchSequential(
+		itunesValid,
+		async (item) => {
+			if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+			const file = { filePath: item.filePath, relativePath: item.relativePath };
+			const stats = item.stats;
 			let meta: TrackMetadata | undefined = itunesCache[file.relativePath];
 
 			if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
-				// Cache hit
-				newItunesCache[file.relativePath] = meta;
-			} else {
-				// Try secondary index lookup by size + mtimeMs
-				const key = `${stats.size}_${stats.mtimeMs}`;
-				const cachedMeta = itunesSecondaryIndex.get(key);
-				if (cachedMeta) {
-					// Cache hit via size + mtimeMs (path reorganized)
-					meta = {
-						...cachedMeta,
-						filePath: file.filePath,
-						relativePath: file.relativePath,
-					};
-					newItunesCache[file.relativePath] = meta;
-				} else {
-					// Parse
-					meta = await getTrackMetadata(file.filePath, file.relativePath);
-					newItunesCache[file.relativePath] = meta;
-				}
+				// Direct cache hit
+				meta.ino = stats.ino;
+				return { file, meta };
 			}
-			meta.id = `itunes_${file.relativePath}`;
-			itunesTracks.push(meta);
-		} catch (e) {
-			console.error("Error stats itunes file", file.filePath, e);
+
+			// Inode cache hit (rename/move)
+			const cachedByIno = itunesInoIndex.get(stats.ino);
+			if (cachedByIno && cachedByIno.mtimeMs === stats.mtimeMs && cachedByIno.size === stats.size) {
+				meta = {
+					...cachedByIno,
+					filePath: file.filePath,
+					relativePath: file.relativePath,
+					ino: stats.ino,
+				};
+				return { file, meta };
+			}
+
+			// Secondary index cache hit (mtime + size)
+			const key = `${stats.size}_${stats.mtimeMs}`;
+			const cachedMeta = itunesSecondaryIndex.get(key);
+			if (cachedMeta) {
+				meta = {
+					...cachedMeta,
+					filePath: file.filePath,
+					relativePath: file.relativePath,
+					ino: stats.ino,
+				};
+				return { file, meta };
+			}
+
+			// Cache miss - parse metadata
+			try {
+				meta = await getTrackMetadata(file.filePath, file.relativePath);
+				meta.ino = stats.ino;
+				return { file, meta };
+			} catch (err) {
+				console.error("Failed to parse iTunes track:", file.filePath, err);
+				const fallback: TrackMetadata = {
+					id: "",
+					filePath: file.filePath,
+					relativePath: file.relativePath,
+					title: path.basename(file.filePath, path.extname(file.filePath)),
+					artist: "Unknown Artist",
+					album: "Unknown Album",
+					track: "",
+					genre: "Unknown Genre",
+					size: stats.size,
+					mtimeMs: stats.mtimeMs,
+					hasCoverArt: false,
+					coverArtSize: 0,
+					disc: "",
+					albumartist: "",
+					composer: "",
+					year: "",
+					comment: "",
+					duration: 0,
+					ino: stats.ino,
+				};
+				return { file, meta: fallback };
+			}
+		},
+		2
+	);
+
+	let itunesCurrent = 0;
+	let itunesTotal = itunesParsedResults.length;
+	for (const res of itunesParsedResults) {
+		if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+		itunesCurrent++;
+		if (itunesCurrent % 100 === 0 || itunesCurrent === itunesTotal) {
+			const pct = 15 + Math.round((itunesCurrent / itunesTotal) * 35);
+			sendProgress("itunes_parse", `iTunesの曲情報を解析中... (${itunesCurrent}/${itunesTotal})`, pct, { count: itunesCurrent, total: itunesTotal });
 		}
+		const meta = res.meta;
+		meta.id = `itunes_${res.file.relativePath}`;
+		itunesTracks.push(meta);
+		newItunesCache[res.file.relativePath] = meta;
 	}
 	saveCache(profileId, "itunes", newItunesCache);
 
-	// Parse Phone tracks with cache
-	current = 0;
-	total = phoneFiles.length;
-	for (const file of phoneFiles) {
-		if (activeScanCancelled) {
-			throw new Error("スキャン処理がユーザーによりキャンセルされました。");
-		}
-		current++;
-		if (current % 100 === 0 || current === total) {
-			const pct = 50 + Math.round((current / total) * 35);
-			sendProgress("phone_parse", `比較先フォルダ内の曲情報を解析中... (${current}/${total})`, pct, { count: current, total });
-		}
+	// ==========================================
+	// 2. Process Phone tracks
+	// ==========================================
+	if (profile.storageType === "local") {
+		sendProgress("phone_parse", "比較先ファイルのステータス情報を先読み中...", 50);
+		// Prefetch sequential stats with lookahead 4
+		const phoneStatted = await prefetchSequential(
+			phoneFiles,
+			async (file) => {
+				if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+				try {
+					const stats = await fs.promises.stat(file.filePath);
+					return { ...file, stats, valid: true };
+				} catch (e) {
+					console.error("Error statting Phone file", file.filePath, e);
+					return { ...file, stats: null as any, valid: false };
+				}
+			},
+			4
+		);
+		if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
 
-		try {
-			let size = file.size;
-			let mtimeMs = file.mtimeMs;
-			if (size === undefined || mtimeMs === undefined) {
-				const stats = await fs.promises.stat(file.filePath);
-				size = stats.size;
-				mtimeMs = stats.mtimeMs;
-			}
-			let meta: TrackMetadata | undefined = phoneCache[file.relativePath];
+		const phoneValid = phoneStatted.filter((f) => f.valid);
+		// LBA Sort: sort by inode ascending
+		phoneValid.sort((a, b) => a.stats.ino - b.stats.ino);
 
-			if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
-				// Cache hit
-				newPhoneCache[file.relativePath] = meta;
-			} else {
-				// Try secondary index lookup by size + mtimeMs
-				const key = `${size}_${mtimeMs}`;
+		// Parse in LBA order with lookahead 2 prefetching
+		const phoneParsedResults = await prefetchSequential(
+			phoneValid,
+			async (item) => {
+				if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+				const file = { filePath: item.filePath, relativePath: item.relativePath };
+				const stats = item.stats;
+				let meta: TrackMetadata | undefined = phoneCache[file.relativePath];
+
+				if (meta && meta.mtimeMs === stats.mtimeMs && meta.size === stats.size) {
+					// Direct cache hit
+					meta.ino = stats.ino;
+					return { file, meta };
+				}
+
+				// Inode cache hit (rename/move)
+				const cachedByIno = phoneInoIndex.get(stats.ino);
+				if (cachedByIno && cachedByIno.mtimeMs === stats.mtimeMs && cachedByIno.size === stats.size) {
+					meta = {
+						...cachedByIno,
+						filePath: file.filePath,
+						relativePath: file.relativePath,
+						ino: stats.ino,
+					};
+					return { file, meta };
+				}
+
+				// Secondary index cache hit (mtime + size)
+				const key = `${stats.size}_${stats.mtimeMs}`;
 				const cachedMeta = phoneSecondaryIndex.get(key);
 				if (cachedMeta) {
-					// Cache hit via size + mtimeMs (path reorganized)
 					meta = {
 						...cachedMeta,
 						filePath: file.filePath,
 						relativePath: file.relativePath,
+						ino: stats.ino,
 					};
+					return { file, meta };
+				}
+
+				// Cache miss - parse metadata
+				try {
+					meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
+					meta.ino = stats.ino;
+					return { file, meta };
+				} catch (err) {
+					console.error("Failed to parse Phone track:", file.filePath, err);
+					const fallback: TrackMetadata = {
+						id: "",
+						filePath: file.filePath,
+						relativePath: file.relativePath,
+						title: path.basename(file.filePath, path.extname(file.filePath)),
+						artist: "Unknown Artist",
+						album: "Unknown Album",
+						track: "",
+						genre: "Unknown Genre",
+						size: stats.size,
+						mtimeMs: stats.mtimeMs,
+						hasCoverArt: false,
+						coverArtSize: 0,
+						disc: "",
+						albumartist: "",
+						composer: "",
+						year: "",
+						comment: "",
+						duration: 0,
+						ino: stats.ino,
+					};
+					return { file, meta: fallback };
+				}
+			},
+			2
+		);
+
+		let phoneCurrent = 0;
+		let phoneTotal = phoneParsedResults.length;
+		for (const res of phoneParsedResults) {
+			if (activeScanCancelled) throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+			phoneCurrent++;
+			if (phoneCurrent % 100 === 0 || phoneCurrent === phoneTotal) {
+				const pct = 50 + Math.round((phoneCurrent / phoneTotal) * 35);
+				sendProgress("phone_parse", `比較先フォルダ内の曲情報を解析中... (${phoneCurrent}/${phoneTotal})`, pct, { count: phoneCurrent, total: phoneTotal });
+			}
+			const meta = res.meta;
+			meta.id = `phone_${res.file.relativePath}`;
+			phoneTracks.push(meta);
+			newPhoneCache[res.file.relativePath] = meta;
+		}
+	} else {
+		// Non-local storage (MTP devices) - Use standard sequential loop unmodified for complete safety
+		let current = 0;
+		let total = phoneFiles.length;
+		for (const file of phoneFiles) {
+			if (activeScanCancelled) {
+				throw new Error("スキャン処理がユーザーによりキャンセルされました。");
+			}
+			current++;
+			if (current % 100 === 0 || current === total) {
+				const pct = 50 + Math.round((current / total) * 35);
+				sendProgress("phone_parse", `比較先フォルダ内の曲情報を解析中... (${current}/${total})`, pct, { count: current, total });
+			}
+
+			try {
+				let size = file.size;
+				let mtimeMs = file.mtimeMs;
+				if (size === undefined || mtimeMs === undefined) {
+					const stats = await fs.promises.stat(file.filePath);
+					size = stats.size;
+					mtimeMs = stats.mtimeMs;
+				}
+				let meta: TrackMetadata | undefined = phoneCache[file.relativePath];
+
+				if (meta && meta.mtimeMs === mtimeMs && meta.size === size) {
+					// Cache hit
 					newPhoneCache[file.relativePath] = meta;
 				} else {
-					// Parse
-					meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
-					newPhoneCache[file.relativePath] = meta;
+					// Try secondary index lookup by size + mtimeMs
+					const key = `${size}_${mtimeMs}`;
+					const cachedMeta = phoneSecondaryIndex.get(key);
+					if (cachedMeta) {
+						// Cache hit via size + mtimeMs (path reorganized)
+						meta = {
+							...cachedMeta,
+							filePath: file.filePath,
+							relativePath: file.relativePath,
+						};
+						newPhoneCache[file.relativePath] = meta;
+					} else {
+						// Parse
+						meta = await storage.getTrackMetadata(file.filePath, file.relativePath);
+						newPhoneCache[file.relativePath] = meta;
+					}
 				}
+				meta.id = `phone_${file.relativePath}`;
+				phoneTracks.push(meta);
+			} catch (e) {
+				console.error("Error stats phone file", file.filePath, e);
 			}
-			meta.id = `phone_${file.relativePath}`;
-			phoneTracks.push(meta);
-		} catch (e) {
-			console.error("Error stats phone file", file.filePath, e);
 		}
 	}
 	saveCache(profileId, "phone", newPhoneCache);
