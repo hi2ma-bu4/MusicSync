@@ -1,6 +1,6 @@
 import { api } from "../api";
 import { CONFIG, pushHistoryState, state } from "../state";
-import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, highlightElement, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxState, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
+import { compareGroups, compareTracks, getAlbumArtistInfo, getParentWarningHtml, getSafeId, getStatusDot, highlightElement, isTrackChecked, normalizeArtistForIntegration, normalizeForSearch, setCheckboxStateElement, setTrackCheckedState, splitAndNormalizeArtist } from "./utils";
 
 class ThumbnailLoader {
 	private activeCount = 0;
@@ -870,7 +870,10 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			divAlbum.innerHTML = renderAlbumCardInnerHtml(albumKey, albumName, artistName, "artistalbum", albumTracks, gridSize);
 
 			gridContainer.appendChild(divAlbum);
-			setCheckboxState(`chk-${albumKey}`, albumTracks);
+			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
+			if (chkAlbum) {
+				setCheckboxStateElement(chkAlbum, albumTracks);
+			}
 
 			// Load Album Art thumbnail with lazy loader
 			thumbnailLoader.register(divAlbum, albumName, (dataUri) => {
@@ -896,26 +899,9 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 				renderAlbumTracks(divTracksContent, albumTracks, albumKey, cb);
 			}
 
-			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
-			chkAlbum.addEventListener("click", (e) => {
-				e.stopPropagation();
-				pushHistoryState();
-				const isChecked = chkAlbum.checked;
-				albumTracks.forEach((t) => {
-					setTrackCheckedState(t, isChecked);
-				});
-				updateAllTreeCheckboxes();
-				cb.updateSummaryBar();
-				cb.updateMasterCheckboxState();
-			});
-
-			const chkWrapper = chkAlbum.parentElement as HTMLElement;
-			if (chkWrapper) {
-				chkWrapper.addEventListener("click", (e) => {
-					if (e.target === chkAlbum) return;
+			if (chkAlbum) {
+				chkAlbum.addEventListener("click", (e) => {
 					e.stopPropagation();
-					e.preventDefault();
-					chkAlbum.checked = !chkAlbum.checked;
 					pushHistoryState();
 					const isChecked = chkAlbum.checked;
 					albumTracks.forEach((t) => {
@@ -925,6 +911,24 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 					cb.updateSummaryBar();
 					cb.updateMasterCheckboxState();
 				});
+
+				const chkWrapper = chkAlbum.parentElement as HTMLElement;
+				if (chkWrapper) {
+					chkWrapper.addEventListener("click", (e) => {
+						if (e.target === chkAlbum) return;
+						e.stopPropagation();
+						e.preventDefault();
+						chkAlbum.checked = !chkAlbum.checked;
+						pushHistoryState();
+						const isChecked = chkAlbum.checked;
+						albumTracks.forEach((t) => {
+							setTrackCheckedState(t, isChecked);
+						});
+						updateAllTreeCheckboxes();
+						cb.updateSummaryBar();
+						cb.updateMasterCheckboxState();
+					});
+				}
 			}
 
 			divAlbum.addEventListener("click", (e) => {
@@ -1000,10 +1004,12 @@ function renderArtistAlbums(elChildren: HTMLElement, artistName: string, albumMa
 			`;
 
 			elChildren.appendChild(divAlbum);
-			setCheckboxState(`chk-${albumKey}`, albumTracks);
+			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
+			if (chkAlbum) {
+				setCheckboxStateElement(chkAlbum, albumTracks);
+			}
 			applyAlbumArtBackground(divAlbum, albumName);
 
-			const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
 			chkAlbum.addEventListener("click", (e) => {
 				e.stopPropagation();
 				pushHistoryState();
@@ -1334,6 +1340,9 @@ export function renderAlbumView(container: HTMLElement, cb: RenderCallbacks) {
 				}
 
 				const chkAlbum = divAlbum.querySelector(`input[id="chk-${albumKey}"]`) as HTMLInputElement;
+				if (chkAlbum) {
+					setCheckboxStateElement(chkAlbum, albumTracks);
+				}
 				chkAlbum.addEventListener("click", (e) => {
 					e.stopPropagation();
 					pushHistoryState();
